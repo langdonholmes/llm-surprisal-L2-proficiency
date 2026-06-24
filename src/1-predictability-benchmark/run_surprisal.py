@@ -31,6 +31,7 @@ Examples
 
 import argparse
 import json
+import logging
 import math
 import os
 import sys
@@ -43,7 +44,6 @@ import numpy as np
 import pandas as pd
 import torch
 import transformers
-from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoModelForMaskedLM, AutoTokenizer
 
 from features.predictability import Predictor
@@ -59,6 +59,23 @@ WINDOW_LABELS = ["8", "64", "full"]
 CORPUS_DOCBINS = {"ellipse": ELLIPSE_DOCBINS_DIR, "toefl11": TOEFL_DOCBINS_DIR}
 FLUSH_EVERY = 200  # essays between atomic parquet flushes
 SEED = 42
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("surprisal")
+
+
+def fmt_dur(seconds: float) -> str:
+    """Human-readable duration: 45s, 7m02s, 1h05m."""
+    s = int(seconds)
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m{s % 60:02d}s"
+    return f"{s // 3600}h{(s % 3600) // 60:02d}m"
 
 
 # --------------------------------------------------------------------------- #
@@ -166,7 +183,7 @@ def update_manifest(out_dir: Path, spec, commit, dtype, device, entry: dict):
 # Core
 # --------------------------------------------------------------------------- #
 def run_model_corpus(spec, predictor, commit, corpus, essays, windows,
-                     dtype, device, force, dump_tokens):
+                     dtype, device, force, dump_tokens, log_every):
     out_dir = PREDICTABILITY_DIR / corpus / spec.key
     out_dir.mkdir(parents=True, exist_ok=True)
     surprisal_path = out_dir / "surprisal.parquet"
@@ -187,37 +204,47 @@ def run_model_corpus(spec, predictor, commit, corpus, essays, windows,
 
         t0 = time.time()
         n_new = n_trunc = 0
+        total = len(todo)
         desc = f"{spec.key}/{corpus}/w{window}"
-        for tid, doc, labels in tqdm(todo, desc=desc, unit="essay"):
+        logger.info("START %s — %d essays", desc, total)
+        for k, (tid, doc, labels) in enumerate(todo, start=1):
             n_sub = len(predictor.tokenizer(doc.text, add_special_tokens=False).input_ids)
             truncated = n_sub > spec.max_ctx
             dp = predictor(doc, window_size=w_int)
-            if len(dp) == 0:
-                continue
-            rows.append({
-                **labels,
-                "text_id": tid,
-                "window": window,
-                "mean_surprisal_bits": dp.mean_loss * LOG2E,
-                "mean_entropy_bits": dp.mean_entropy * LOG2E,
-                "var_surprisal_bits2": dp.var_loss * (LOG2E ** 2),
-                "n_tokens_scored": len(dp),
-                "n_subwords": n_sub,
-                "truncated": truncated,
-            })
-            n_new += 1
-            n_trunc += int(truncated)
-            if dump_tokens:
-                for t in dp:
-                    token_rows.append({
-                        "text_id": tid, "window": window,
-                        "spacy_idx": t.spacy_idx, "text": t.text,
-                        "surprisal_bits": t.mean_loss * LOG2E,
-                        "entropy_bits": t.mean_entropy * LOG2E,
-                        "num_subwords": len(t),
-                    })
-            if n_new % FLUSH_EVERY == 0:
-                save_parquet_atomic(surprisal_path, pd.DataFrame(rows))
+            if len(dp) > 0:
+                rows.append({
+                    **labels,
+                    "text_id": tid,
+                    "window": window,
+                    "mean_surprisal_bits": dp.mean_loss * LOG2E,
+                    "mean_entropy_bits": dp.mean_entropy * LOG2E,
+                    "var_surprisal_bits2": dp.var_loss * (LOG2E ** 2),
+                    "n_tokens_scored": len(dp),
+                    "n_subwords": n_sub,
+                    "truncated": truncated,
+                })
+                n_new += 1
+                n_trunc += int(truncated)
+                if dump_tokens:
+                    for t in dp:
+                        token_rows.append({
+                            "text_id": tid, "window": window,
+                            "spacy_idx": t.spacy_idx, "text": t.text,
+                            "surprisal_bits": t.mean_loss * LOG2E,
+                            "entropy_bits": t.mean_entropy * LOG2E,
+                            "num_subwords": len(t),
+                        })
+                if n_new % FLUSH_EVERY == 0:
+                    save_parquet_atomic(surprisal_path, pd.DataFrame(rows))
+
+            if k % log_every == 0 or k == total:
+                elapsed = time.time() - t0
+                rate = k / elapsed if elapsed else 0.0
+                eta = (total - k) / rate if rate else 0.0
+                logger.info(
+                    "  %s %d/%d (%2.0f%%)  %.1f essay/s  eta %s  trunc=%d",
+                    desc, k, total, 100 * k / total, rate, fmt_dur(eta), n_trunc,
+                )
 
         save_parquet_atomic(surprisal_path, pd.DataFrame(rows))
         update_manifest(out_dir, spec, commit, dtype, device, {
@@ -229,12 +256,12 @@ def run_model_corpus(spec, predictor, commit, corpus, essays, windows,
             "truncation_rate": round(n_trunc / n_new, 4) if n_new else 0.0,
             "runtime_seconds": round(time.time() - t0, 1),
         })
-        print(f"  {desc}: {n_new} new, {n_trunc} truncated, "
-              f"{time.time() - t0:.0f}s")
+        logger.info("DONE %s — %d new, %d truncated, %s",
+                    desc, n_new, n_trunc, fmt_dur(time.time() - t0))
 
     if dump_tokens and token_rows:
         save_parquet_atomic(out_dir / "tokens.parquet", pd.DataFrame(token_rows))
-        print(f"  wrote {len(token_rows)} per-token rows")
+        logger.info("wrote %d per-token rows", len(token_rows))
 
 
 def main():
@@ -255,6 +282,8 @@ def main():
                    help="also write per-token records (recomputes targeted configs)")
     p.add_argument("--overwrite", action="store_true",
                    help="recompute even if results already exist")
+    p.add_argument("--log-every", type=int, default=100,
+                   help="log a progress line every N essays (default: 100)")
     args = p.parse_args()
 
     models = list(MODEL_REGISTRY) if "all" in args.models else args.models
@@ -271,29 +300,33 @@ def main():
     np.random.seed(SEED)
     if device == "cuda":
         torch.set_float32_matmul_precision("high")
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"device={device} dtype={str(dtype).replace('torch.', '')} "
-          f"models={models} corpora={corpora} windows={windows}"
-          + (f" limit={args.limit}" if args.limit else ""))
+        logger.info("GPU: %s", torch.cuda.get_device_name(0))
+    logger.info(
+        "device=%s dtype=%s models=%s corpora=%s windows=%s%s",
+        device, str(dtype).replace("torch.", ""), models, corpora, windows,
+        f" limit={args.limit}" if args.limit else "",
+    )
 
     essay_cache: dict[str, list] = {}
     force = args.overwrite or args.dump_tokens
 
     for model_key in models:
         spec = MODEL_REGISTRY[model_key]
-        print(f"\n=== {spec.key} ({spec.hf_id}, {spec.arch}, {spec.params}) ===")
+        logger.info("=== %s (%s, %s, %s) ===",
+                    spec.key, spec.hf_id, spec.arch, spec.params)
         predictor, commit = load_predictor(spec, dtype, device, args.batch_size)
         for corpus in corpora:
             if corpus not in essay_cache:
                 essay_cache[corpus] = load_essays(corpus, args.limit)
-                print(f"  loaded {len(essay_cache[corpus])} {corpus} essays")
+                logger.info("loaded %d %s essays", len(essay_cache[corpus]), corpus)
             run_model_corpus(spec, predictor, commit, corpus, essay_cache[corpus],
-                             windows, dtype, device, force, args.dump_tokens)
+                             windows, dtype, device, force, args.dump_tokens,
+                             args.log_every)
         del predictor
         if device == "cuda":
             torch.cuda.empty_cache()
 
-    print("\nDone.")
+    logger.info("All done.")
 
 
 if __name__ == "__main__":

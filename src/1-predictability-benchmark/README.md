@@ -93,6 +93,7 @@ by `run_all.sh` automatically); adding a window is `--windows full`.
 | `--device auto\|cuda\|cpu` | default auto |
 | `--dump-tokens` | also write per-token `tokens.parquet` (recomputes the targeted configs) |
 | `--overwrite` | recompute even if results exist |
+| `--log-every N` | progress line every N essays (default 100) |
 
 Per-token records are **opt-in** (`--dump-tokens`) — typically only for the
 Study 2/3 winning configuration, since storing tokens for all 66 configs is large.
