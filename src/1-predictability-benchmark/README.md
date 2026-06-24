@@ -41,28 +41,44 @@ python src/1-predictability-benchmark/run_surprisal.py \
 a couple of minutes. Inspect `data/predictability/ellipse/{gpt2,bert-base}/surprisal.parquet`,
 then delete `data/predictability/` before the real run so test rows don't mix in.
 
-### 2. Full matrix
+### 2. Full matrix — all GPUs (recommended)
+
+`run_all.sh` cost-balances the model list across every detected GPU and launches
+one process per GPU (pinned via `CUDA_VISIBLE_DEVICES`), each writing its own
+log. The work is embarrassingly parallel across models and every model fits on
+one card, so this is the fastest path — no model is split across GPUs.
 
 ```bash
-# All 11 models × 3 windows × 2 corpora. Long-running — see notes below.
+# All 11 models × 3 windows × 2 corpora, fanned out over all GPUs.
+bash src/1-predictability-benchmark/run_all.sh
+
+# Extra args pass through to run_surprisal.py:
+bash src/1-predictability-benchmark/run_all.sh --windows 64 --corpora ellipse
+
+# Restrict the model set / pin GPUs via env:
+MODELS="qwen2.5-7b olmo2-7b llama3.1-8b" bash src/1-predictability-benchmark/run_all.sh
+GPUS="0,1" bash src/1-predictability-benchmark/run_all.sh
+
+# Long detached run:
+nohup bash src/1-predictability-benchmark/run_all.sh > logs/run_all.log 2>&1 & disown
+tail -f logs/surprisal_gpu*.log
+```
+
+### 3. Single process / single model
+
+```bash
+# All 11 models on one GPU, sequentially.
 python src/1-predictability-benchmark/run_surprisal.py
+
+# One model (e.g. a newly-added one), both corpora, all windows.
+python src/1-predictability-benchmark/run_surprisal.py --models olmo2-1b
 ```
 
 Because the run is **idempotent and resumable** (keyed on `text_id × window`,
-flushed atomically every 200 essays), prefer running it model-by-model in the
-background so a failure or an OOM only loses one model's tail:
-
-```bash
-for m in bert-base modernbert-base modernbert-large gpt2 gpt2-xl \
-         olmo2-1b olmo2-7b qwen2.5-7b qwen2.5-7b-instruct; do
-    python src/1-predictability-benchmark/run_surprisal.py --models "$m"
-done
-# gated — after huggingface-cli login:
-python src/1-predictability-benchmark/run_surprisal.py --models llama3.1-8b llama3.1-8b-instruct
-```
-
-Re-running any command skips configurations already on disk. Adding a new model
-later is just `--models <new-key>`; adding a window is `--windows full`.
+flushed atomically every 200 essays), re-running any command skips
+configurations already on disk — a crash or OOM only loses the current config's
+tail. Adding a new model later is just `--models <new-key>` (and it's picked up
+by `run_all.sh` automatically); adding a window is `--windows full`.
 
 ### Useful flags
 
