@@ -147,6 +147,7 @@ def window_int(spec, label: str) -> int:
 # Storage (idempotent, atomic)
 # --------------------------------------------------------------------------- #
 def save_parquet_atomic(path: Path, df: pd.DataFrame):
+    path.parent.mkdir(parents=True, exist_ok=True)  # self-heal if dir vanished
     tmp = path.with_suffix(path.suffix + ".tmp")
     df.to_parquet(tmp, index=False)
     os.replace(tmp, path)
