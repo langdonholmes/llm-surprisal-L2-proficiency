@@ -415,7 +415,7 @@ class Predictor:
                     if pos >= logits.shape[1]:
                         continue
 
-                    pred_logits = logits[j, pos]
+                    pred_logits = logits[j, pos].float()
                     probs_dist = torch.softmax(pred_logits, dim=-1)
 
                     # Calculate cross-entropy loss
@@ -450,151 +450,86 @@ class Predictor:
         window_size: int,
     ) -> DocPredictability:
         """
-        Process with causal language model.
+        Process with a causal LM, scoring each spaCy token's *first* subword
+        from its left context capped at ``window_size`` transformer tokens.
 
-        For tokens within the first window_size positions: single forward pass.
-        For tokens beyond: batch process with sliding windows.
+        Works directly on ``trf_tok_ids`` (no decode/retokenize round-trip):
+
+        - Phase 1 — one forward over the first ``window_size`` ids. Logit at
+          position ``i`` predicts id ``i+1``, so token at subword index ``k``
+          (1 ≤ k < window) is scored by ``logits[k-1]``. The very first token
+          (k == 0) has no left context and is skipped (per the generative
+          convention that the first token is unconditioned).
+        - Phase 2 — tokens at k ≥ window (only when the essay is longer than the
+          window). Each gets an equal-length window ``ids[k-window+1 : k+1]`` that
+          *ends at* the target, so the batch stacks with no padding and the
+          target is predicted by ``logits[-2]``.
         """
         doc_predictability = DocPredictability(
             model_type=self.model_type, window_size=window_size
         )
 
-        # Handle empty token map
         if not token_map:
             return doc_predictability
 
         seq_len = len(trf_tok_ids)
-
-        # PHASE 1: Process first window_size tokens in one pass
         first_window_end = min(window_size, seq_len)
-        first_window_ids = trf_tok_ids[:first_window_end]
 
-        # Prepare input
-        # Easiest to just convert to text and re-tokenize
-        # HF is inconsistent about adding BOS tokens. Let's manually do that.
-        input_str = self.tokenizer.bos_token + self.tokenizer.decode(first_window_ids)
-        inputs = self.tokenizer(
-            input_str,
-            truncation=True,
-            add_special_tokens=False,  # manually handle this
-            return_tensors="pt",
-        ).to(self.device)
-        input_ids = inputs["input_ids"]  # Shape: [1, seq_len]
-
-        # Get model outputs
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            logits = outputs.logits[0]  # [seq_len, vocab_size]
-
-        # Extract predictions for all tokens in this window
-        for spacy_idx, (subword_start, subword_end) in token_map.items():
-            # Only process tokens in the first window
-            if subword_start >= first_window_end:
-                break
-
-            losses = []
-            entropies = []
-
-            # Position in input_ids (+1 for BOS token)
-            pos = subword_start + 1
-
-            # Predict from previous position
-            # e.g., logit at BOS token predicts first real token in sequence
-            pred_logits = logits[pos - 1]
-            actual_id = input_ids[0, pos].item()
-
-            # Calculate loss
-            target = torch.tensor([actual_id], device=self.device)
+        def _score(pred_logits, target_id, spacy_idx):
+            """Cross-entropy (nats) + entropy of the predicted distribution."""
+            pred_logits = pred_logits.float()
+            target = torch.tensor([int(target_id)], device=self.device)
             loss = crossloss(pred_logits.unsqueeze(0), target).item()
-            losses.append(loss)
-
-            # Calculate entropy
-            probs_dist = torch.softmax(pred_logits, dim=-1)
-            entropy = -torch.sum(probs_dist * torch.log(probs_dist + 1e-10)).item()
-            entropies.append(entropy)
-
-            # Store results
-            token_pred = TokenPredictability(
-                spacy_idx=spacy_idx,
-                text=doc[spacy_idx].text,
-                subword_losses=losses,
-                subword_entropy=entropies,
-            )
-            doc_predictability.add_token(token_pred)
-
-        # PHASE 2: Process remaining tokens with sliding windows (batched)
-        remaining_tokens = [
-            (spacy_idx, sub_start, sub_end)
-            for spacy_idx, (sub_start, sub_end) in token_map.items()
-            if sub_start >= first_window_end
-        ]
-
-        if not remaining_tokens:
-            return doc_predictability
-
-        # Create windowed sequences for remaining tokens
-        sequences_to_process = []
-        spacy_indices = []
-
-        for spacy_idx, subword_start, subword_end in remaining_tokens:
-            # For causal model, window is all left context up to window_size
-            win_start = max(0, subword_start - window_size + 1)
-            win_end = subword_end
-
-            window_ids = trf_tok_ids[win_start:win_end]
-            sequences_to_process.append(window_ids)
-            spacy_indices.append(spacy_idx)
-
-        # Process in batches
-        for i in range(0, len(sequences_to_process), self.batch_size):
-            batch_seqs = sequences_to_process[i : i + self.batch_size]
-            batch_spacy = spacy_indices[i : i + self.batch_size]
-
-            # Prepare inputs
-            input_strs = [
-                self.tokenizer.bos_token + self.tokenizer.decode(seq)
-                for seq in batch_seqs
-            ]
-            inputs = self.tokenizer(
-                input_strs,
-                add_special_tokens=False,  # manually handle this
-                return_tensors="pt",
-            ).to(self.device)
-            input_ids = inputs["input_ids"]
-
-            # Get predictions
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                logits = outputs.logits
-
-            # Extract results for each token in batch
-            for j, spacy_idx in enumerate(batch_spacy):
-                actual_id = trf_tok_ids[token_map[spacy_idx][0]]
-
-                losses = []
-                entropies = []
-
-                # Predict from previous position
-                pred_logits = logits[j, -1]
-                probs_dist = torch.softmax(pred_logits, dim=-1)
-
-                # Calculate loss
-                target = torch.tensor([int(actual_id)], device=self.device)
-                loss = crossloss(pred_logits.unsqueeze(0), target).item()
-                losses.append(loss)
-
-                # Calculate entropy
-                entropy = -torch.sum(probs_dist * torch.log(probs_dist + 1e-10)).item()
-                entropies.append(entropy)
-
-                # Store results
-                token_pred = TokenPredictability(
+            probs = torch.softmax(pred_logits, dim=-1)
+            entropy = -torch.sum(probs * torch.log(probs + 1e-10)).item()
+            doc_predictability.add_token(
+                TokenPredictability(
                     spacy_idx=spacy_idx,
                     text=doc[spacy_idx].text,
-                    subword_losses=losses,
-                    subword_entropy=entropies,
+                    subword_losses=[loss],
+                    subword_entropy=[entropy],
                 )
-                doc_predictability.add_token(token_pred)
+            )
+
+        # --- Phase 1: single pass over the first window -----------------------
+        first_ids = torch.tensor(
+            trf_tok_ids[:first_window_end].astype("int64"), device=self.device
+        ).unsqueeze(0)
+        with torch.no_grad():
+            logits = self.model(input_ids=first_ids).logits[0]  # [win, vocab]
+
+        for spacy_idx, (subword_start, _subword_end) in token_map.items():
+            if subword_start >= first_window_end:
+                continue
+            if subword_start == 0:
+                continue  # first token: no left context, leave unscored
+            _score(logits[subword_start - 1], trf_tok_ids[subword_start], spacy_idx)
+
+        # --- Phase 2: equal-length windows for tokens past the first window ----
+        remaining = [
+            (spacy_idx, sub_start)
+            for spacy_idx, (sub_start, _e) in token_map.items()
+            if sub_start >= first_window_end
+        ]
+        if not remaining:
+            return doc_predictability
+
+        for i in range(0, len(remaining), self.batch_size):
+            batch = remaining[i : i + self.batch_size]
+            # Window ends at the target's first subword; all length == window_size.
+            windows = [
+                trf_tok_ids[sub_start - window_size + 1 : sub_start + 1]
+                for _spacy_idx, sub_start in batch
+            ]
+            input_ids = torch.tensor(
+                np.stack(windows).astype("int64"), device=self.device
+            )
+            with torch.no_grad():
+                logits = self.model(input_ids=input_ids).logits  # [B, win, vocab]
+
+            for j, (spacy_idx, sub_start) in enumerate(batch):
+                # logits[-2] predicts the last (target) position of the window.
+                _score(logits[j, -2], trf_tok_ids[sub_start], spacy_idx)
 
         return doc_predictability
 
