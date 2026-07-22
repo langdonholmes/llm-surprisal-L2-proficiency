@@ -28,16 +28,23 @@ phraseological, lexical, or other features — or does it form its own community
 library(tidyverse)
 library(psych)
 library(corrplot)
-library(qgraph)
-library(bootnet)
-library(networktools)
+library(qgraph)      # visualization only
+library(bootnet)     # edge-weight accuracy CIs + group viz networks only
 library(igraph)
-library(EGAnet)
+library(EGAnet)      # estimation, communities, network loadings, network.compare
 library(lavaan)
+
+# NOTE: EGAnet 2.x function signatures have changed across releases. The
+# net.loads(), network.compare(), EGA(corr=), and invariance() calls below
+# follow the currently documented signatures — verify argument names against
+# the INSTALLED version (?net.loads, ?network.compare, ?EGA) before rendering.
 ```
 
 ```{r}
 #| label: load-data
+# ellipse_metrics.csv carries the 13 linguistic features + ELLIPSE scores +
+# predictability (mean_loss, var_loss) from the Study 1 benchmark model
+# (Llama-3.1-8B base). All networks below use Spearman correlations.
 df_raw <- read.csv("../../data/ellipse/ellipse_metrics.csv")
 
 cat("Raw data:", nrow(df_raw), "rows x", ncol(df_raw), "columns\n")
@@ -100,7 +107,8 @@ cat("Total rows after listwise deletion:", nrow(df_complete),
 ```{r}
 #| label: winsorize
 
-# Winsorize at 1st/99th percentiles
+# Winsorize at 1st/99th percentiles. Retained for continuity; under Spearman
+# (rank-based) estimation this has negligible effect and could be dropped.
 winsorize <- function(x, probs = c(0.01, 0.99)) {
   q <- quantile(x, probs = probs, na.rm = TRUE)
   x[x < q[1]] <- q[1]
@@ -204,11 +212,12 @@ print(desc_stats[, c("n", "mean", "sd", "min", "max", "skew", "kurtosis")], digi
 
 ```{r}
 #| label: correlation-heatmap
-#| fig-cap: "Pearson correlation matrix of all network variables"
+#| fig-cap: "Spearman correlation matrix of all network variables"
 #| fig-width: 10
 #| fig-height: 9
 
-cor_mat <- cor(df_win, use = "pairwise.complete.obs")
+# Spearman to match the network estimation input (Isvoranu & Epskamp, 2023)
+cor_mat <- cor(df_win, use = "pairwise.complete.obs", method = "spearman")
 
 # Use short labels for readability
 colnames(cor_mat) <- short_labels[colnames(cor_mat)]
@@ -243,8 +252,11 @@ df_win %>%
 ```{r}
 #| label: estimate-network
 
-# Estimate Gaussian Graphical Model using EBICglasso
-network <- estimateNetwork(df_win, default = "EBICglasso", tuning = 0.5)
+# Estimate Gaussian Graphical Model (EBICglasso) on Spearman correlations
+# (Isvoranu & Epskamp, 2023). This bootnet object is used only for
+# visualization (Section 4) and edge-weight bootstrapping (Section 7).
+network <- estimateNetwork(df_win, default = "EBICglasso", tuning = 0.5,
+                           corMethod = "spearman")
 
 cat("Network estimated with", ncol(network$graph), "nodes\n")
 cat("Non-zero edges:", sum(network$graph[upper.tri(network$graph)] != 0),
@@ -346,8 +358,12 @@ qgraph(network$graph,
 #| fig-width: 10
 #| fig-height: 8
 
+# Strength (primary) + signed ExpectedInfluence. Betweenness/Closeness dropped:
+# non-informative in cross-sectional psychometric networks. Network loadings
+# (Section 6) are the confound-adjusted node-importance metric and supersede
+# raw strength for interpretation.
 centralityPlot(network$graph, labels = net_labels,
-               include = c("Strength", "Betweenness", "Closeness", "ExpectedInfluence"),
+               include = c("Strength", "ExpectedInfluence"),
                orderBy = "Strength")
 ```
 
@@ -357,7 +373,8 @@ centralityPlot(network$graph, labels = net_labels,
 
 cent <- centrality_auto(network$graph)$node.centrality
 cent$Variable <- short_labels[rownames(cent)]
-cent <- cent %>% select(Variable, everything())
+# Keep Strength + ExpectedInfluence only (drop Betweenness/Closeness)
+cent <- cent %>% select(Variable, Strength, any_of("ExpectedInfluence"))
 print(cent %>% arrange(desc(Strength)), digits = 3)
 ```
 
@@ -391,7 +408,7 @@ print(pred_edges)
 #| fig-width: 10
 #| fig-height: 10
 
-ega_result <- EGA(df_win, model = "glasso",
+ega_result <- EGA(df_win, corr = "spearman", model = "glasso",
                   algorithm = "walktrap",
                   plot.EGA = TRUE)
 
@@ -429,11 +446,33 @@ cat("  Members:", paste(short_labels[members_var], collapse = ", "), "\n")
 ```
 
 ```{r}
+#| label: net-loadings
+#| tbl-cap: "Revised network loadings (standardized) — primary node importance"
+
+# Network loadings (Christensen, Golino, Abad & Garrido, 2025): confound-adjusted
+# node importance that splits strength by community and, in the revised
+# formulation, adjusts for community size and sign. These supersede raw strength.
+# Effect-size guides: ~0.20 small, ~0.35 moderate, ~0.50 large.
+# VERIFY loading.method value + return element ($std) against installed EGAnet.
+nl <- net.loads(ega_result, loading.method = "revised")$std
+
+nl_df <- as.data.frame(round(nl, 3))
+nl_df$Variable <- short_labels[rownames(nl)]
+nl_df <- nl_df %>% select(Variable, everything())
+cat("Standardized network loadings (nodes x communities):\n")
+print(nl_df, row.names = FALSE)
+
+cat("\nPredictability network loadings:\n")
+print(nl_df %>% filter(Variable %in% c("Loss", "VarLoss")))
+```
+
+```{r}
 #| label: boot-ega
 #| fig-cap: "Bootstrap EGA — stability of community assignments"
 
 set.seed(42)
 boot_ega <- bootEGA(df_win, iter = 500,
+                    corr = "spearman",
                     model = "glasso",
                     algorithm = "walktrap",
                     type = "parametric",
@@ -485,13 +524,11 @@ cat("Saved to fig/network_edge_bootstrap.pdf\n")
 
 set.seed(42)
 boot_case <- bootnet(network, nBoots = 1000, type = "case",
-                     statistics = c("strength", "expectedInfluence",
-                                    "betweenness", "closeness"),
+                     statistics = c("strength", "expectedInfluence"),
                      nCores = parallel::detectCores() - 1,
                      verbose = FALSE)
 
-plot(boot_case, statistics = c("strength", "expectedInfluence",
-                                "betweenness", "closeness"))
+plot(boot_case, statistics = c("strength", "expectedInfluence"))
 ```
 
 ```{r}
@@ -508,54 +545,44 @@ cat("  CS < 0.25: Centrality should NOT be interpreted\n")
 ```
 
 
-# Section 8 — Bridge Centrality
+# Section 8 — Between-Community Loadings (Bridge Behavior)
+
+Bridge behavior is operationalized via **between-community (cross-)loadings**
+from the revised network loadings (Christensen et al., 2025), not Jones et al.
+(2021) bridge strength. Cross-loadings distinguish a genuine bridge (a node that
+loads on multiple communities) from mere between-community correlation.
 
 ```{r}
-#| label: bridge-centrality
-#| fig-cap: "Bridge centrality using EGA-derived communities"
-#| fig-width: 10
-#| fig-height: 8
+#| label: cross-loadings
+#| tbl-cap: "Between-community (cross-)loadings — bridge behavior"
 
-# Use EGA communities for bridge analysis
-ega_communities <- ega_result$wc
+# `nl` (standardized network loadings, nodes x communities) is computed in
+# Section 6. A node's loading on its OWN community vs. its loadings on the
+# others: high & roughly-equal cross-loadings = integrative/bridge behavior;
+# a single dominant loading = the node belongs to one community.
+# VERIFY that nl's columns are named by community id (matches ega_result$wc).
+assigned <- ega_result$wc  # community per node
 
-bridge_result <- bridge(network$graph, communities = ega_communities)
+cross_load_summary <- function(node) {
+  row <- nl[node, ]
+  own <- as.character(assigned[node])
+  others <- setdiff(names(row), own)
+  data.frame(
+    Variable = short_labels[node],
+    Own_community = own,
+    Own_loading = round(row[[own]], 3),
+    Max_cross = round(max(row[others]), 3),
+    Mean_abs_cross = round(mean(abs(row[others])), 3)
+  )
+}
 
-# Manual plot — plot.bridge() is broken with newer ggplot2 (aes_string deprecated)
-bridge_plot_df <- data.frame(
-  Variable = rep(short_labels[names(bridge_result$`Bridge Strength`)], 2),
-  Measure = rep(c("Bridge Strength", "Bridge Expected Influence (1-step)"), each = length(bridge_result$`Bridge Strength`)),
-  Value = c(bridge_result$`Bridge Strength`, bridge_result$`Bridge Expected Influence (1-step)`)
-)
+cat("Standardized loadings (nodes x communities):\n")
+print(round(nl, 3))
 
-bridge_plot_df %>%
-  mutate(Variable = reorder(Variable, Value)) %>%
-  ggplot(aes(x = Value, y = Variable)) +
-  geom_point(size = 3) +
-  geom_segment(aes(xend = 0, yend = Variable)) +
-  facet_wrap(~ Measure, scales = "free_x") +
-  theme_minimal(base_size = 12) +
-  labs(x = NULL, y = NULL)
+cat("\nPredictability nodes — in-community vs cross-community loading:\n")
+print(do.call(rbind, lapply(c("mean_loss", "var_loss"), cross_load_summary)),
+      row.names = FALSE)
 ```
-
-```{r}
-#| label: bridge-table
-#| tbl-cap: "Bridge centrality values"
-
-bridge_df <- data.frame(
-  Variable = short_labels[names(bridge_result$`Bridge Strength`)],
-  Bridge_Strength = round(bridge_result$`Bridge Strength`, 3),
-  Bridge_EI = round(bridge_result$`Bridge Expected Influence (1-step)`, 3),
-  Community = ega_communities[names(bridge_result$`Bridge Strength`)]
-) %>%
-  arrange(desc(Bridge_Strength))
-
-print(bridge_df)
-
-cat("\nPredictability bridge centrality:\n")
-print(bridge_df %>% filter(Variable %in% c("Loss", "VarLoss")))
-```
-
 
 # Section 9 — Network Comparison by Proficiency Level
 
@@ -608,8 +635,10 @@ cat("High proficiency n:", nrow(df_high), "\n")
 ```{r}
 #| label: estimate-group-networks
 
-net_low <- estimateNetwork(df_low, default = "EBICglasso", tuning = 0.5)
-net_high <- estimateNetwork(df_high, default = "EBICglasso", tuning = 0.5)
+net_low <- estimateNetwork(df_low, default = "EBICglasso", tuning = 0.5,
+                           corMethod = "spearman")
+net_high <- estimateNetwork(df_high, default = "EBICglasso", tuning = 0.5,
+                            corMethod = "spearman")
 ```
 
 ```{r}
@@ -684,45 +713,63 @@ cat("Saved to fig/network_group_comparison.pdf\n")
 ```
 
 ```{r}
-#| label: nct
-#| fig-cap: "Network Comparison Test results"
+#| label: network-compare
 #| output: false
 
+# EGAnet permutation network comparison replaces NetworkComparisonTest::NCT.
+# Feed the residualized group DATA FRAMES (not the network objects).
+# Returns per-measure permutation tests: Jensen-Shannon distance, Frobenius-norm
+# ("SF") similarity, and total network strength (van Borkulo aspect), plus
+# per-edge statistics. VERIFY arg + return names against installed EGAnet.
 set.seed(42)
-nct_result <- NetworkComparisonTest::NCT(
-  net_low, net_high,
-  it = 1000,
-  test.edges = TRUE,
-  test.centrality = TRUE,
-  centrality = c("strength", "expectedInfluence"),
-  verbose = FALSE
+nc <- network.compare(
+  base = df_low, comparison = df_high,
+  corr = "spearman", model = "glasso",
+  iter = 1000, seed = 42
 )
 
-cat("=== Network Comparison Test Results ===\n\n")
+cat("=== Permutation Network Comparison (network.compare) ===\n\n")
+cat("Omnibus structural comparison (statistic + permutation p per measure):\n")
+print(nc$network)   # Jensen-Shannon, Frobenius/SF, total strength
+```
 
-cat("1. Omnibus test (network structure invariance):\n")
-cat("   M statistic:", round(nct_result$nwinv.real, 4), "\n")
-cat("   p-value:", round(nct_result$nwinv.pval, 4), "\n\n")
+```{r}
+#| label: network-compare-edges
+#| output: false
 
-cat("2. Global strength invariance:\n")
-cat("   Strength difference:", round(nct_result$glstrinv.real, 4), "\n")
-cat("   p-value:", round(nct_result$glstrinv.pval, 4), "\n\n")
-
-cat("3. Significant individual edge differences (p < 0.05):\n")
-sig_edges <- nct_result$einv.pvals %>%
-  filter(`p-value` < 0.05)
-
+# Per-edge permutation differences (BH-adjusted). Column names may vary by
+# EGAnet version — inspect nc$edges and adjust the filter if needed.
+cat("Per-edge differences (p < 0.05):\n")
+sig_edges <- nc$edges %>% filter(p.value < 0.05)
 if (nrow(sig_edges) > 0) {
   print(sig_edges)
 } else {
-  cat("   No individual edges significantly differ between groups.\n")
+  cat("No individual edges significantly differ between groups.\n")
 }
+```
+
+```{r}
+#| label: invariance-optional
+#| eval: false
+
+# OPTIONAL (author decision — Open Item 3): if RQ4 is "are the network LOADINGS
+# invariant across proficiency" rather than "does the structure differ", use the
+# loadings-based permutation invariance test (Jamison, Christensen & Golino,
+# 2024) instead of / in addition to network.compare above. Left un-run by
+# default; flip `eval` to true if the RQ is framed as invariance.
+inv <- invariance(
+  data = rbind(df_low, df_high),
+  groups = c(rep("Low", nrow(df_low)), rep("High", nrow(df_high))),
+  corr = "spearman", iter = 1000, seed = 42
+)
+print(inv$results)   # per-node loading differences + permutation p-values
 ```
 
 ```{r}
 #| label: nct-predictability
 
-# Focus on predictability-related edge differences
+# Predictability-focused edge-weight differences (effect sizes from the two
+# Spearman group networks). Per-edge significance comes from nc$edges above.
 cat("Edge weight differences involving predictability nodes:\n\n")
 
 adj_low <- net_low$graph
@@ -770,16 +817,20 @@ same_comm_var <- names(ega_result$wc)[ega_result$wc == varloss_comm]
 cat("   Variables in same community as var_loss:\n")
 cat("  ", paste(short_labels[same_comm_var], collapse = ", "), "\n\n")
 
-# 2. Centrality
-cat("2. CENTRALITY\n")
+# 2. Node importance — network loadings (primary), strength (secondary)
+cat("2. NODE IMPORTANCE (network loadings primary)\n")
+loss_own <- as.character(ega_result$wc["mean_loss"])
+cat("   mean_loss loading on own community:", round(nl["mean_loss", loss_own], 3), "\n")
+cat("   mean_loss max cross-community loading:",
+    round(max(nl["mean_loss", setdiff(colnames(nl), loss_own)]), 3), "\n")
 cent_sorted <- cent %>% arrange(desc(Strength))
-cat("   Top 3 by strength:", paste(cent_sorted$Variable[1:3], collapse = ", "), "\n")
 loss_rank <- which(cent_sorted$Variable == "Loss")
-cat("   mean_loss strength rank:", loss_rank, "of", nrow(cent_sorted), "\n\n")
+cat("   (secondary) mean_loss raw-strength rank:", loss_rank, "of", nrow(cent_sorted), "\n\n")
 
-# 3. Bridge centrality
-cat("3. BRIDGE CENTRALITY\n")
-cat("   (See bridge table above for predictability bridge scores)\n\n")
+# 3. Bridge behavior — between-community cross-loadings
+cat("3. BRIDGE BEHAVIOR (cross-loadings; see Section 8)\n")
+cat("   High & roughly-equal cross-loadings = integrative/bridge;\n")
+cat("   a single dominant loading = belongs to one community.\n\n")
 
 # 4. Interpretation framework
 cat("4. INTERPRETATION RELATIVE TO CFA HYPOTHESES\n")
@@ -795,8 +846,9 @@ cat("5. STABILITY\n")
 cat("   CS-coefficients reported in Section 7\n")
 cat("   Edge accuracy CIs reported in Section 7\n\n")
 
-# 6. Proficiency differences
-cat("6. PROFICIENCY GROUP DIFFERENCES\n")
-cat("   Network structure invariance p =", round(nct_result$nwinv.pval, 4), "\n")
-cat("   Global strength invariance p =", round(nct_result$glstrinv.pval, 4), "\n")
+# 6. Proficiency differences — permutation network.compare (nc$network)
+cat("6. PROFICIENCY GROUP DIFFERENCES (network.compare)\n")
+cat("   Omnibus structural comparison (Jensen-Shannon, Frobenius/SF,\n")
+cat("   total strength) with permutation p-values:\n")
+print(nc$network)
 ```

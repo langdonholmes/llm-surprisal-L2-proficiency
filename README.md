@@ -55,14 +55,14 @@ python src/reference_corpus/4_collate.py --corpus a   # then --corpus b
 python src/essays/ingest.py --ellipse        # or --toefl / --all
 
 # Essays — word predictability comes from the Study 1 benchmark; the selected
-# model is Llama-3.1-8B (base). See src/1-predictability-benchmark/.
-#   Output: data/predictability/ellipse/llama3.1-8b/surprisal.parquet
+# config is Llama-3.1-8B (base) at the 8-token window. See
+# src/1-predictability-benchmark/.
+#   Source: data/predictability/ellipse/llama3.1-8b/surprisal.parquet
 
-# Essays — linguistic features merged with scores
+# Essays — linguistic features merged with scores + predictability.
 #   Reference norms come from the Dolma frequency tables (--corpus a|b|both,
-#   default both). Output: data/ellipse/ellipse_metrics.csv
-#   NOTE: metrics.py still reads the legacy predictability CSV; rewiring it to
-#   the benchmark parquet above is a pending Study 2 task.
+#   default both). metrics.py joins the Llama-8B (base, window 8) surprisal
+#   above as mean_loss / var_loss. Output: data/ellipse/ellipse_metrics.csv
 python src/essays/metrics.py --corpus both
 
 # Network analysis (R/Quarto)

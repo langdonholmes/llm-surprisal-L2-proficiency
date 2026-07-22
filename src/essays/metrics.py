@@ -9,11 +9,51 @@ from spacy.tokens import DocBin
 from tqdm.auto import tqdm
 
 from features import calculate_all_features, MiCalculator
-from util.paths import ELLIPSE_DIR, ELLIPSE_DOCBINS_DIR, DOLMA_FREQ_DIR
+from util.paths import (
+    ELLIPSE_DIR,
+    ELLIPSE_DOCBINS_DIR,
+    DOLMA_FREQ_DIR,
+    PREDICTABILITY_DIR,
+)
 
 
 # Which Dolma reference corpus to draw frequency / dependency norms from.
 CORPUS_CHOICES = {"a": ["a"], "b": ["b"], "both": ["a", "b"]}
+
+# Word predictability source: the Study 1 benchmark's selected configuration.
+# Llama-3.1-8B (base) at the 8-token window was the validity/fairness Pareto
+# selection for the base model (results/predictability/pareto_points.csv — the
+# only base-Llama config on the front); the instruct variant is not used.
+PRED_MODEL = "llama3.1-8b"
+PRED_WINDOW = "8"
+
+
+def load_predictability(model: str = PRED_MODEL, window: str = PRED_WINDOW):
+    """Load per-essay word predictability from the Study 1 surprisal benchmark.
+
+    Reads data/predictability/ellipse/{model}/surprisal.parquet, selects the
+    chosen context ``window``, and renames the benchmark's bit-scale columns to
+    the names the network analysis expects (mean_loss, var_loss, mean_entropy).
+    """
+    path = PREDICTABILITY_DIR / "ellipse" / model / "surprisal.parquet"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Missing surprisal parquet at {path}. Run the Study 1 benchmark "
+            f"(src/1-predictability-benchmark/run_surprisal.py --models {model}) first."
+        )
+    cols = ["text_id", "window", "mean_surprisal_bits",
+            "var_surprisal_bits2", "mean_entropy_bits"]
+    p = pd.read_parquet(path, columns=cols)
+    p = p[p["window"].astype(str) == str(window)].copy()
+    if len(p) == 0:
+        raise ValueError(f"No rows for window '{window}' in {path}.")
+    p = p.rename(columns={
+        "text_id": "text_id_kaggle",
+        "mean_surprisal_bits": "mean_loss",
+        "var_surprisal_bits2": "var_loss",
+        "mean_entropy_bits": "mean_entropy",
+    })
+    return p[["text_id_kaggle", "mean_loss", "mean_entropy", "var_loss"]]
 
 
 def load_reference_grams(corpus: str):
@@ -52,11 +92,14 @@ def load_reference_grams(corpus: str):
 
 
 def main(corpus: str = "both"):
-    # Load ELLIPSE data
-    df = pd.read_csv(
-        ELLIPSE_DIR / "ELLIPSE_Final_github_w_predictability.csv"
-    )
+    # Load ELLIPSE public data (scores + prompt); predictability is joined below.
+    df = pd.read_csv(ELLIPSE_DIR / "ELLIPSE_Final_github.csv")
     print(f"Loaded {len(df)} essays")
+
+    # Word predictability from the Study 1 benchmark (Llama-3.1-8B base, window 8)
+    pred_df = load_predictability()
+    print(f"Loaded predictability for {len(pred_df)} essays "
+          f"({PRED_MODEL}, window {PRED_WINDOW})")
 
     # Load pre-built DocBins (created by essays/ingest.py)
     nlp = spacy.load("en_core_web_lg", disable=["ner"])
@@ -102,13 +145,13 @@ def main(corpus: str = "both"):
     df_features = pd.DataFrame(results)
     print(f"Computed features for {len(df_features)} documents")
 
-    # Merge with scores and predictability
+    # Merge scores (public ELLIPSE) + predictability (benchmark) + features
     score_cols = [
         "Overall", "Cohesion", "Syntax", "Vocabulary",
         "Phraseology", "Grammar", "Conventions",
     ]
-    predictability_cols = ["mean_loss", "mean_entropy", "var_loss"]
-    df_meta = df[["text_id_kaggle", "prompt"] + score_cols + predictability_cols]
+    df_meta = df[["text_id_kaggle", "prompt"] + score_cols]
+    df_meta = pd.merge(df_meta, pred_df, on="text_id_kaggle", how="left")
 
     df_merged = pd.merge(df_meta, df_features, on="text_id_kaggle", how="inner")
     print(f"Merged dataframe: {df_merged.shape[0]} rows, {df_merged.shape[1]} columns")
