@@ -18,6 +18,11 @@ results/
 # Development artifacts
 src/__*
 
+# Editable-install / build artifacts
+*.egg-info/
+build/
+dist/
+
 # Quarto render output
 **/*.html
 

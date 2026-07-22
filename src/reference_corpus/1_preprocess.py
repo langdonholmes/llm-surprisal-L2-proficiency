@@ -9,15 +9,11 @@ import gzip
 import json
 import logging
 import re
-import sys
 import unicodedata
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tqdm.auto import tqdm
 
-from pipeline.dolma_config import PII_REPLACEMENTS, specs_for_corpus
+from reference_corpus.dolma_config import PII_REPLACEMENTS, specs_for_corpus
 from util.paths import DOLMA_DIR
 
 logging.basicConfig(

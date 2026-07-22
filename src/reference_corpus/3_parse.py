@@ -25,8 +25,6 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 import spacy
 from spacy.tokens import DocBin
 from tqdm.auto import tqdm

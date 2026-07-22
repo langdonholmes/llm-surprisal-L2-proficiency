@@ -10,18 +10,13 @@ gzipped long CSVs to results/predictability/ that the R/Quarto analysis consumes
 Run from the repo root:  python src/1-predictability-benchmark/assemble_analysis_data.py
 """
 
-from pathlib import Path
-
 import pandas as pd
 
-import sys
+from models import MODEL_REGISTRY
+from util.paths import PREDICTABILITY_DIR, RESULTS_DIR
 
-sys.path.insert(0, str(Path(__file__).parent))
-from models import MODEL_REGISTRY  # noqa: E402
-
-ROOT = Path(__file__).resolve().parents[2]
-PRED = ROOT / "data" / "predictability"
-OUT = ROOT / "results" / "predictability"
+PRED = PREDICTABILITY_DIR
+OUT = RESULTS_DIR / "predictability"
 
 
 def main() -> None:

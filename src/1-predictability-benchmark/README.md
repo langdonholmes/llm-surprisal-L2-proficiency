@@ -1,12 +1,15 @@
 # Study 1 — Predictability Benchmark
 
 Compute mean token surprisal for every **model × context window × corpus**, then
-(in a later pass) select the configuration that best balances validity and
-fairness. See [`plan.md`](plan.md) for the full design and statistical analysis.
+select the configuration that best balances validity and fairness. See
+[`plan.md`](plan.md) for the full design and statistical analysis.
 
-This directory currently implements **§2 (surprisal computation)**. The §3
-statistical analysis (validity / fairness / Pareto) is the next phase and runs
-on the outputs produced here.
+**Result:** Llama-3.1-8B (base) was selected as the predictability model that
+feeds Studies 2–3.
+
+This directory implements both **§2 (surprisal computation)** — `run_surprisal.py`
+— and **§3 (validity / fairness / Pareto analysis)** — `assemble_analysis_data.py`
+plus the `pareto-*.qmd` reports, which run on the §2 outputs.
 
 ## Files
 
@@ -14,6 +17,10 @@ on the outputs produced here.
   one `ModelSpec`; its `key` becomes the CLI name and output directory.
 - `run_surprisal.py` — the runner. Drives `features.predictability.Predictor`
   over the matrix and writes idempotent, resumable per-model tables.
+- `assemble_analysis_data.py` — exports the per-model surprisal parquets to tidy
+  long CSVs under `results/predictability/` for the R/Quarto analysis.
+- `pareto-analysis.qmd`, `pareto-by-proficiency.qmd` — validity/fairness Pareto
+  reports (§3); `_viz_helpers.R` holds shared plotting helpers.
 
 ## Prerequisites
 

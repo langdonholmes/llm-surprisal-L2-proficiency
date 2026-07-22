@@ -10,9 +10,7 @@ Usage:
     uv run python src/3-vector-transformations/run_pilot.py
 """
 
-import sys
 import time
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -21,7 +19,6 @@ import spacy
 from transformers import AutoTokenizer, AutoModelForMaskedLM
 from tqdm.auto import tqdm
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from features.predictability import Predictor, get_centered_window
 from util.paths import ELLIPSE_DIR, PILOT_DIR
 

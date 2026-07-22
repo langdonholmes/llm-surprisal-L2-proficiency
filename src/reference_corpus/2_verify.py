@@ -11,13 +11,10 @@ import logging
 import random
 import statistics
 import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tqdm.auto import tqdm
 
-from pipeline.dolma_config import DEFAULT_SEED, specs_for_corpus
+from reference_corpus.dolma_config import DEFAULT_SEED, specs_for_corpus
 from util.paths import DOLMA_DIR
 
 logging.basicConfig(

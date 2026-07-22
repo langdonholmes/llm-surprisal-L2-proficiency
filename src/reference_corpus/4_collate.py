@@ -19,10 +19,7 @@ import argparse
 import json
 import logging
 import shutil
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import polars as pl
 

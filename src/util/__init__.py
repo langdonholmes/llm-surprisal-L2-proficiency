@@ -1,1 +1,4 @@
-from .paths import SRC_DIR, PROJECT_ROOT, DATA_DIR, FIG_DIR, RESULTS_DIR
+"""Shared utilities: canonical paths, DocBin processing, and n-gram collation.
+
+Import submodules directly, e.g. ``from util.paths import DATA_DIR``.
+"""

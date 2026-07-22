@@ -28,10 +28,13 @@ Linguistic features are computed from spaCy parses and a Dolma reference corpus:
 | advmod MI | Phraseological | Dolma reference |
 | Content word overlap | Cohesion | spaCy |
 | Connective density | Cohesion | spaCy + word list |
-| Mean surprisal (`mean_loss`) | Predictability | ModernBERT |
-| Loss variance (`var_loss`) | Predictability | ModernBERT |
+| Mean surprisal (`mean_loss`) | Predictability | Study 1 benchmark (Llama-3.1-8B) |
+| Loss variance (`var_loss`) | Predictability | Study 1 benchmark (Llama-3.1-8B) |
 
-`mean_entropy` is computed but excluded from network analysis due to near-perfect correlation with `mean_loss` (r = 0.97).
+Word predictability is produced by the Study 1 benchmark
+(`src/1-predictability-benchmark/`); Llama-3.1-8B (base) was selected as the
+model that feeds Studies 2–3. `mean_entropy` is computed but excluded from
+network analysis due to near-perfect correlation with `mean_loss` (r = 0.97).
 
 ## Pipeline
 
@@ -51,15 +54,15 @@ python src/reference_corpus/4_collate.py --corpus a   # then --corpus b
 # Essays: ingest TOEFL 11 and/or ELLIPSE into spaCy DocBins
 python src/essays/ingest.py --ellipse        # or --toefl / --all
 
-# Essays — word predictability (ModernBERT surprisal)
-#   Input:  data/ellipse/ELLIPSE_Final_github.csv
-#   Output: data/ellipse/ELLIPSE_Final_github_w_predictability.csv
-python src/essays/predictability.py
+# Essays — word predictability comes from the Study 1 benchmark; the selected
+# model is Llama-3.1-8B (base). See src/1-predictability-benchmark/.
+#   Output: data/predictability/ellipse/llama3.1-8b/surprisal.parquet
 
 # Essays — linguistic features merged with scores
 #   Reference norms come from the Dolma frequency tables (--corpus a|b|both,
-#   default both). Input:  .../ELLIPSE_Final_github_w_predictability.csv
-#   Output: data/ellipse/ellipse_metrics.csv
+#   default both). Output: data/ellipse/ellipse_metrics.csv
+#   NOTE: metrics.py still reads the legacy predictability CSV; rewiring it to
+#   the benchmark parquet above is a pending Study 2 task.
 python src/essays/metrics.py --corpus both
 
 # Network analysis (R/Quarto)
@@ -94,9 +97,8 @@ src/
     2_verify.py             # Token / PII / duplicate verification report
     3_parse.py              # Dependency-parse to DocBins (stride parallelism)
     4_collate.py            # Frequency tables (n-grams + dependency bigrams)
-  essays/                   # Shared TOEFL/ELLIPSE essay processing (studies 1 & 3)
+  essays/                   # Shared TOEFL/ELLIPSE essay processing
     ingest.py               # TOEFL 11 + ELLIPSE ingestion -> DocBins
-    predictability.py       # ELLIPSE ModernBERT surprisal
     metrics.py              # ELLIPSE features merged with scores
   1-predictability-benchmark/   # Study 1: predictability benchmark (ELLIPSE, TOEFL)
   2-nomological-network/        # Study 2: network psychometric analysis (R/Quarto, ELLIPSE)
@@ -119,6 +121,18 @@ data/
   pilot/                    # Archived pilot artifacts (SlimPajama lists, delta vectors)
 ```
 
+## Setup
+
+Install the project as an editable package so the shared libraries (`util`,
+`features`, `reference_corpus`, `essays`) import cleanly from any script — no
+`sys.path` manipulation:
+
+```bash
+uv pip install -e .
+```
+
 ## Requirements
 
-Python 3.10+ with PyTorch, Transformers, spaCy, and pandas. See `requirements.txt` for full dependencies. R with lavaan, bootnet, qgraph, and EGAnet for network analysis.
+Python 3.11+ with PyTorch, Transformers, spaCy, and pandas. See `pyproject.toml`
+for full dependencies. R with lavaan, bootnet, qgraph, and EGAnet for network
+analysis.

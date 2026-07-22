@@ -15,7 +15,7 @@ from pathlib import Path
 import requests
 from tqdm.auto import tqdm
 
-from pipeline.dolma_config import (
+from reference_corpus.dolma_config import (
     DOLMA_BASE_URL,
     OVERSHOOT_FACTOR,
     SOURCE_DIRS,

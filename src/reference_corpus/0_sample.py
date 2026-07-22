@@ -7,14 +7,10 @@ Usage:
 import argparse
 import json
 import logging
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from pipeline.dolma_config import DEFAULT_SEED, specs_for_corpus
-from pipeline.dolma_stream import sample_source
+from reference_corpus.dolma_config import DEFAULT_SEED, specs_for_corpus
+from reference_corpus.dolma_stream import sample_source
 from util.paths import DOLMA_DIR
 
 logging.basicConfig(

@@ -34,11 +34,8 @@ import json
 import logging
 import math
 import os
-import sys
 import time
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pandas as pd
@@ -50,9 +47,10 @@ from features.predictability import Predictor
 from util.paths import ELLIPSE_DOCBINS_DIR, PREDICTABILITY_DIR, TOEFL_DOCBINS_DIR
 from util.process_docs import load_all_docbins
 
-# Local import (package dir name starts with a digit, so load by path).
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from models import MODEL_REGISTRY  # noqa: E402
+# models.py is a sibling module; its directory name starts with a digit, so it
+# can't be a package import — it resolves via the script's own directory, which
+# Python puts on sys.path when this file is run directly.
+from models import MODEL_REGISTRY
 
 LOG2E = 1.0 / math.log(2.0)  # nats -> bits
 WINDOW_LABELS = ["8", "64", "full"]
