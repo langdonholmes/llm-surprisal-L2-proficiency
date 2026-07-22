@@ -34,10 +34,10 @@ library(igraph)
 library(EGAnet)      # estimation, communities, network loadings, network.compare
 library(lavaan)
 
-# NOTE: EGAnet 2.x function signatures have changed across releases. The
-# net.loads(), network.compare(), EGA(corr=), and invariance() calls below
-# follow the currently documented signatures — verify argument names against
-# the INSTALLED version (?net.loads, ?network.compare, ?EGA) before rendering.
+# NOTE: EGAnet's signatures have shifted across 2.x releases. The net.loads(),
+# network.compare(), EGA(corr=), and invariance() calls below were verified
+# against the installed EGAnet 2.4.1. Re-check ?net.loads / ?network.compare
+# if you upgrade EGAnet.
 ```
 
 ```{r}
@@ -453,7 +453,8 @@ cat("  Members:", paste(short_labels[members_var], collapse = ", "), "\n")
 # node importance that splits strength by community and, in the revised
 # formulation, adjusts for community size and sign. These supersede raw strength.
 # Effect-size guides: ~0.20 small, ~0.35 moderate, ~0.50 large.
-# VERIFY loading.method value + return element ($std) against installed EGAnet.
+# Verified against EGAnet 2.4.1: net.loads() accepts the EGA object and returns
+# $std (nodes x communities); "revised" is already the >= 2.0.7 default.
 nl <- net.loads(ega_result, loading.method = "revised")$std
 
 nl_df <- as.data.frame(round(nl, 3))
@@ -560,7 +561,7 @@ loads on multiple communities) from mere between-community correlation.
 # Section 6. A node's loading on its OWN community vs. its loadings on the
 # others: high & roughly-equal cross-loadings = integrative/bridge behavior;
 # a single dominant loading = the node belongs to one community.
-# VERIFY that nl's columns are named by community id (matches ega_result$wc).
+# nl's columns are named by community id ("1","2",...), matching ega_result$wc.
 assigned <- ega_result$wc  # community per node
 
 cross_load_summary <- function(node) {
@@ -717,10 +718,10 @@ cat("Saved to fig/network_group_comparison.pdf\n")
 #| output: false
 
 # EGAnet permutation network comparison replaces NetworkComparisonTest::NCT.
-# Feed the residualized group DATA FRAMES (not the network objects).
-# Returns per-measure permutation tests: Jensen-Shannon distance, Frobenius-norm
-# ("SF") similarity, and total network strength (van Borkulo aspect), plus
-# per-edge statistics. VERIFY arg + return names against installed EGAnet.
+# Feed the residualized group DATA FRAMES (not the network objects). Verified
+# against EGAnet 2.4.1: nc$network is a matrix with columns sF (signed
+# Frobenius), JSS (Jensen-Shannon similarity), and Total Strength, and rows
+# statistic / p.value / M_permutated / SD_permutated.
 set.seed(42)
 nc <- network.compare(
   base = df_low, comparison = df_high,
@@ -730,21 +731,30 @@ nc <- network.compare(
 
 cat("=== Permutation Network Comparison (network.compare) ===\n\n")
 cat("Omnibus structural comparison (statistic + permutation p per measure):\n")
-print(nc$network)   # Jensen-Shannon, Frobenius/SF, total strength
+print(nc$network)   # cols: sF (signed Frobenius), JSS, Total Strength
 ```
 
 ```{r}
 #| label: network-compare-edges
 #| output: false
 
-# Per-edge permutation differences (BH-adjusted). Column names may vary by
-# EGAnet version — inspect nc$edges and adjust the filter if needed.
-cat("Per-edge differences (p < 0.05):\n")
-sig_edges <- nc$edges %>% filter(p.value < 0.05)
-if (nrow(sig_edges) > 0) {
-  print(sig_edges)
+# nc$edges is a list of 15x15 matrices: statistic (High - Low), p.value,
+# p.adjusted (BH), M_permutated, SD_permutated. Report edges whose BH-adjusted
+# permutation p < 0.05 (upper triangle only). Verified against EGAnet 2.4.1.
+padj <- nc$edges$p.adjusted
+stat <- nc$edges$statistic
+ut <- which(upper.tri(padj) & padj < 0.05, arr.ind = TRUE)
+cat("Per-edge differences (BH-adjusted p < 0.05):\n")
+if (nrow(ut) > 0) {
+  sig_edges <- data.frame(
+    Node1 = short_labels[rownames(padj)[ut[, "row"]]],
+    Node2 = short_labels[colnames(padj)[ut[, "col"]]],
+    Statistic = round(stat[ut], 3),
+    p_adjusted = round(padj[ut], 3)
+  ) %>% arrange(p_adjusted)
+  print(sig_edges, row.names = FALSE)
 } else {
-  cat("No individual edges significantly differ between groups.\n")
+  cat("No individual edges differ after BH correction.\n")
 }
 ```
 
@@ -766,28 +776,30 @@ print(inv$results)   # per-node loading differences + permutation p-values
 ```
 
 ```{r}
-#| label: nct-predictability
+#| label: compare-predictability
 
-# Predictability-focused edge-weight differences (effect sizes from the two
-# Spearman group networks). Per-edge significance comes from nc$edges above.
-cat("Edge weight differences involving predictability nodes:\n\n")
+# Predictability-focused edge comparison: partial correlation in each group
+# (Spearman group networks) plus the permutation difference test from
+# network.compare (nc$edges: statistic = High - Low, p.value, BH p.adjusted).
+# All matrices indexed by node name to keep columns aligned.
+pred_edge_table <- function(node) {
+  partners <- colnames(net_low$graph)
+  data.frame(
+    Partner = short_labels[partners],
+    Low = round(net_low$graph[node, partners], 3),
+    High = round(net_high$graph[node, partners], 3),
+    Diff = round(nc$edges$statistic[node, partners], 3),
+    p_value = round(nc$edges$p.value[node, partners], 3),
+    p_adjusted = round(nc$edges$p.adjusted[node, partners], 3)
+  ) %>%
+    filter(!Partner %in% c("Loss", "VarLoss")) %>%
+    arrange(desc(abs(Diff)))
+}
 
-adj_low <- net_low$graph
-adj_high <- net_high$graph
-
-pred_comparison <- data.frame(
-  Partner = short_labels[colnames(adj_low)],
-  Low_Loss = round(adj_low["mean_loss", ], 3),
-  High_Loss = round(adj_high["mean_loss", ], 3),
-  Diff_Loss = round(adj_high["mean_loss", ] - adj_low["mean_loss", ], 3),
-  Low_VarLoss = round(adj_low["var_loss", ], 3),
-  High_VarLoss = round(adj_high["var_loss", ], 3),
-  Diff_VarLoss = round(adj_high["var_loss", ] - adj_low["var_loss", ], 3)
-) %>%
-  filter(!Partner %in% c("Loss", "VarLoss")) %>%
-  arrange(desc(abs(Diff_Loss)))
-
-print(pred_comparison)
+cat("mean_loss (Loss) — edge weight Low vs High + permutation test:\n")
+print(pred_edge_table("mean_loss"), row.names = FALSE)
+cat("\nvar_loss (VarLoss):\n")
+print(pred_edge_table("var_loss"), row.names = FALSE)
 ```
 
 
