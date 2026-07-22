@@ -1,0 +1,287 @@
+---
+title: "Study 1 — Fairness–Validity Pareto Front, by Proficiency Level"
+subtitle: "Does cross-L1 displacement (and the optimal configuration) depend on writer proficiency?"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Overview
+
+The aggregate analysis (`pareto-analysis.qmd`) collapses fairness across
+proficiency by computing Cohen's *d* within each proficiency stratum and taking a
+focal-group-size-weighted average. But **TOEFL 11 proficiency is heavily
+imbalanced and correlated with L1** (e.g. GER/HIN/FRE skew high, ARA/JPN skew
+low; the `low` band holds only 1,201 of 11,000 essays). This document reruns the
+**fairness axis separately within each proficiency level** so we can see *where*
+displacement concentrates and whether the selected configuration is stable across
+the proficiency range.
+
+Two estimators of per-level fairness, reported side by side:
+
+- **all** — every essay in the level; Cohen's *d* handles unequal L1 *n*, but the
+  "rest" comparison group is weighted by each L1's natural prevalence in that band.
+- **balanced** — within the level, subsample every L1 down to that band's smallest
+  cell (`low` = 14/L1, `medium` = 371/L1, `high` = 176/L1), averaged over
+  `K_DRAWS` draws. Equal L1 representation removes the composition confound at the
+  cost of power. **`low` is severely underpowered (14/L1) — interpret with caution.**
+
+**Validity (y-axis) is unchanged** — it is measured on ELLIPSE (`|Pearson r|`
+between mean surprisal and the continuous holistic score) and has no L1 or
+proficiency strata. Only the fairness (x-axis) is recomputed per level.
+
+Inputs are the tidy tables from `assemble_analysis_data.py`.
+
+# Section 1 — Setup & Data
+
+```{r}
+#| label: setup
+library(readr)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(ggplot2)
+
+set.seed(42)
+K_DRAWS <- 200        # balanced subsample repeats
+N_BOOT  <- 2000       # all-essays bootstrap iterations
+D_FLAG  <- 0.10       # Williamson et al. (2012) flag
+LEVELS  <- c("low", "medium", "high")
+
+find_results <- function() {
+  d <- normalizePath(getwd())
+  for (i in 1:6) {
+    cand <- file.path(d, "results", "predictability")
+    if (dir.exists(cand)) return(cand)
+    d <- dirname(d)
+  }
+  stop("results/predictability not found — run assemble_analysis_data.py first")
+}
+RESULTS <- find_results()
+
+model_meta <- tribble(
+  ~model,                  ~arch,     ~instruct,
+  "bert-base",             "masked",  FALSE,
+  "modernbert-base",       "masked",  FALSE,
+  "modernbert-large",      "masked",  FALSE,
+  "gpt2",                  "causal",  FALSE,
+  "gpt2-xl",               "causal",  FALSE,
+  "olmo2-1b",              "causal",  FALSE,
+  "olmo2-7b",              "causal",  FALSE,
+  "qwen2.5-7b",            "causal",  FALSE,
+  "qwen2.5-7b-instruct",   "causal",  TRUE,
+  "llama3.1-8b",           "causal",  FALSE,
+  "llama3.1-8b-instruct",  "causal",  TRUE,
+)
+```
+
+```{r}
+#| label: load-data
+ell <- read_csv(file.path(RESULTS, "ellipse_long.csv.gz"),
+                col_types = cols(window = col_character())) |>
+  mutate(config = paste(model, window, sep = "/"))
+toe <- read_csv(file.path(RESULTS, "toefl_long.csv.gz"),
+                col_types = cols(window = col_character())) |>
+  mutate(config = paste(model, window, sep = "/"))
+
+ell_wide <- ell |>
+  select(text_id, config, mean_surprisal_bits) |>
+  pivot_wider(names_from = config, values_from = mean_surprisal_bits) |>
+  left_join(distinct(ell, text_id, overall), by = "text_id")
+cc <- setdiff(names(ell_wide), c("text_id", "overall"))
+S <- as.matrix(ell_wide[, cc]); y <- ell_wide$overall
+
+toe_wide <- toe |>
+  select(text_id, config, mean_surprisal_bits) |>
+  pivot_wider(names_from = config, values_from = mean_surprisal_bits) |>
+  left_join(distinct(toe, text_id, l1, level), by = "text_id")
+stopifnot(identical(cc, setdiff(names(toe_wide), c("text_id", "l1", "level"))))
+M <- as.matrix(toe_wide[, cc]); l1 <- toe_wide$l1; level <- toe_wide$level
+```
+
+# Section 2 — Validity (ELLIPSE, fixed)
+
+```{r}
+#| label: validity
+abs_r <- abs(cor(S, y)[, 1])
+validity <- tibble(config = cc, abs_r = abs_r)
+```
+
+# Section 3 — Per-level Fairness
+
+```{r}
+#| label: fairness-fns
+col_var <- function(X) { n <- nrow(X); m <- colMeans(X); (colSums(X * X) - n * m * m) / (n - 1) }
+
+# max|d| across L1 within a single-level subset (focal L1 vs the rest, pooled SD).
+level_maxd <- function(M, l1) {
+  groups <- sort(unique(l1)); C <- ncol(M)
+  ad <- matrix(NA_real_, length(groups), C)
+  for (gi in seq_along(groups)) {
+    foc <- l1 == groups[gi]; rst <- !foc
+    n1 <- sum(foc); n2 <- sum(rst)
+    if (n1 < 2 || n2 < 2) next
+    Mf <- M[foc, , drop = FALSE]; Mr <- M[rst, , drop = FALSE]
+    sp <- sqrt(((n1 - 1) * col_var(Mf) + (n2 - 1) * col_var(Mr)) / (n1 + n2 - 2))
+    ad[gi, ] <- abs((colMeans(Mf) - colMeans(Mr)) / sp)
+  }
+  list(maxd  = apply(ad, 2, max, na.rm = TRUE),
+       worst = groups[apply(ad, 2, which.max)],
+       nflag = colSums(ad >= D_FLAG, na.rm = TRUE))
+}
+```
+
+```{r}
+#| label: fairness-compute
+res <- list()
+for (lv in LEVELS) {
+  rows <- which(level == lv); Ml <- M[rows, , drop = FALSE]; l1l <- l1[rows]
+  nmin <- min(table(l1l)); rows_by_g <- split(seq_len(nrow(Ml)), l1l)
+
+  # all essays + essay-level bootstrap CI within the level
+  pe <- level_maxd(Ml, l1l)
+  bd <- replicate(N_BOOT, {
+    bi <- sample.int(nrow(Ml), nrow(Ml), replace = TRUE)
+    level_maxd(Ml[bi, ], l1l[bi])$maxd
+  })
+  all_tbl <- tibble(config = cc, level = lv, method = "all",
+                    maxd = pe$maxd, worst_l1 = pe$worst, n_flag = pe$nflag,
+                    lo = apply(bd, 1, quantile, .025), hi = apply(bd, 1, quantile, .975),
+                    n_per_l1 = NA_integer_)
+
+  # balanced subsample to nmin/L1, averaged over draws (spread across draws = band)
+  dd <- replicate(K_DRAWS, {
+    idx <- unlist(lapply(rows_by_g, \(ix) sample(ix, nmin)), use.names = FALSE)
+    level_maxd(Ml[idx, ], l1l[idx])$maxd
+  })
+  bal_tbl <- tibble(config = cc, level = lv, method = "balanced",
+                    maxd = rowMeans(dd), worst_l1 = NA_character_, n_flag = NA_integer_,
+                    lo = apply(dd, 1, quantile, .025), hi = apply(dd, 1, quantile, .975),
+                    n_per_l1 = nmin)
+  res[[lv]] <- bind_rows(all_tbl, bal_tbl)
+}
+fairness <- bind_rows(res)
+```
+
+# Section 4 — Fronts & Selection
+
+```{r}
+#| label: fronts
+front_of <- function(d) {
+  ar <- d$abs_r; md <- d$maxd; n <- length(ar); keep <- rep(TRUE, n)
+  for (i in seq_len(n)) {
+    dom <- (ar >= ar[i]) & (md <= md[i]) & ((ar > ar[i]) | (md < md[i]))
+    if (any(dom)) keep[i] <- FALSE
+  }
+  d$front <- keep; d
+}
+
+points <- fairness |>
+  left_join(validity, by = "config") |>
+  separate(config, into = c("model", "window"), sep = "/", remove = FALSE) |>
+  mutate(window = factor(window, levels = c("8", "64", "full")),
+         level  = factor(level, levels = LEVELS)) |>
+  left_join(model_meta, by = "model") |>
+  group_by(level, method) |> group_modify(~front_of(.x)) |> ungroup()
+
+# Selected pure-pretrained default per (level, method): highest |r| on the front.
+picks <- points |> filter(front, !instruct) |>
+  group_by(level, method) |> slice_max(abs_r, n = 1, with_ties = FALSE) |> ungroup()
+
+picks |>
+  arrange(level, method) |>
+  transmute(level, method, pick = paste0(model, "/", window),
+            abs_r = round(abs_r, 3), maxd = round(maxd, 3), worst_l1) |>
+  knitr::kable(caption = "Selected pure-pretrained default per proficiency level (highest |r| on that level's front).")
+
+write_csv(points, file.path(RESULTS, "pareto_by_level.csv"))
+```
+
+# Section 5 — Faceted Pareto Plot
+
+```{r}
+#| label: plot
+#| fig-width: 11
+#| fig-height: 9.5
+# Shared visual language (level palette, theme, save helper).
+for (hp in c("_viz_helpers.R", "src/1-predictability-benchmark/_viz_helpers.R")) {
+  if (file.exists(hp)) { source(hp); break }
+}
+
+# Rows = configs, ordered by medium-band unfairness (best at top). One common x
+# axis across all levels and both estimators, so the low->high gradient reads as
+# horizontal displacement (the free-x facets in the old figure hid this).
+ord <- points |> filter(method == "all", level == "medium") |>
+  arrange(desc(maxd)) |> pull(config)
+pc <- points |> mutate(config = factor(config, levels = ord),
+                       level  = factor(level, levels = LEVEL_LEVELS))
+seg <- pc |> filter(level %in% c("low", "high")) |>
+  select(config, method, level, maxd) |>
+  pivot_wider(names_from = level, values_from = maxd)
+meth_labs <- c(all = "all essays", balanced = "balanced (equal L1 per level)")
+
+p <- ggplot(pc, aes(maxd, config, colour = level)) +
+  geom_vline(xintercept = D_FLAG, linetype = "dotted", colour = "grey55") +
+  geom_segment(data = seg, aes(x = high, xend = low, y = config, yend = config),
+               inherit.aes = FALSE, colour = "grey78", linewidth = 0.4) +
+  geom_errorbar(aes(xmin = lo, xmax = hi), orientation = "y",
+                width = 0, alpha = 0.30) +
+  geom_point(size = 1.9) +
+  facet_wrap(~method, labeller = labeller(method = meth_labs)) +
+  scale_colour_manual(values = LEVEL_COLORS, name = "Proficiency",
+                      breaks = LEVEL_LEVELS) +
+  labs(
+    x = "Unfairness — max |Cohen's d| across L1 groups (within level)   → worse",
+    y = NULL,
+    title = "Cross-L1 Unfairness by Proficiency Level (shared scale)",
+    subtitle = paste("Each row = one configuration; dots = low / medium / high;",
+                     "grey line spans low↔high. Dotted = |d|=0.10 flag.\nlow is",
+                     "severely underpowered (14/L1 balanced) — hence the wide CIs",
+                     "and the long rightward reach.")) +
+  theme_study1(10) +
+  theme(axis.text.y = element_text(size = 6.5),
+        panel.grid.major.y = element_line(colour = "grey93"))
+
+p
+save_fig(p, "pareto_by_level", width = 11, height = 9.5)
+```
+
+# Section 6 — Notes
+
+```{r}
+#| label: gradient
+# Unfairness gradient across proficiency (all-essays estimator) for context.
+points |> filter(method == "all") |>
+  group_by(level) |>
+  summarise(median_maxd = round(median(maxd), 3),
+            min_maxd = round(min(maxd), 3), max_maxd = round(max(maxd), 3),
+            .groups = "drop") |>
+  knitr::kable(caption = "Distribution of max|d| across the 33 configs, by level (all-essays).")
+```
+
+**Takeaways for the write-up:**
+
+- **Displacement concentrates at low proficiency** and is smallest at high — the
+  worst-case L1 gap shrinks as writer proficiency rises.
+- **Balancing changes little at medium/high** (the aggregate was not a composition
+  artifact) but inflates and destabilizes `low`, confirming that band is too thin
+  to support a reliable per-L1 effect size.
+- **Configuration selection is proficiency-dependent.** Report the per-level picks
+  alongside the aggregate default rather than assuming one configuration is optimal
+  across the whole proficiency range.
+- Every configuration still flags multiple L1 groups at |d| ≥ 0.10 in every band;
+  the front remains a *least-bad* set, not an absolutely fair one.
+
+# Reproducibility
+
+```{r}
+#| label: sessioninfo
+cat(sprintf("K_DRAWS = %d | N_BOOT = %d | seed = 42\n", K_DRAWS, N_BOOT))
+sessionInfo()
+```

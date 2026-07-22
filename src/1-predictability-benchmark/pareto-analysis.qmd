@@ -1,0 +1,389 @@
+---
+title: "Study 1 — Fairness–Validity Pareto Front"
+subtitle: "Selecting an LLM-Surprisal Configuration that Balances Concurrent Validity and Cross-L1 Fairness"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Overview
+
+For every configuration in the Study 1 matrix — **11 language models × 3 context
+windows (8 / 64 / full)** — we place each on a two-axis plane and find the
+non-dominated (Pareto) set:
+
+- **Validity (y):** strength of the concurrent correlation between mean token
+  surprisal and human holistic proficiency, measured on **ELLIPSE** as
+  `|Pearson r|`. (All correlations are negative — more proficient writers produce
+  more predictable text — so validity is the *magnitude* `|r|`; higher is better.)
+- **Fairness (x):** worst-case cross-L1 score displacement on **TOEFL 11**,
+  measured as **max |Cohen's d|** across the 11 L1 groups, computed within
+  proficiency strata (DIF logic). Lower is better.
+
+A configuration is **Pareto-optimal** if no other configuration is simultaneously
+*more valid* (higher `|r|`) **and** *fairer* (lower max `|d|`). The default for
+Studies 2–3 is the **highest-`|r|` point on the front among the pure-pretrained
+models** (instruct models are a contrast condition, not eligible defaults).
+
+Inputs are the two long tables written by `assemble_analysis_data.py`
+(`results/predictability/{ellipse,toefl}_long.csv.gz`).
+
+# Section 1 — Setup & Data
+
+```{r}
+#| label: setup
+# Individual tidyverse components (the `tidyverse` meta-package pulls xml2/rvest,
+# which need system libxml2 and aren't used here).
+library(readr)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(ggplot2)
+library(ggrepel)
+
+set.seed(42)          # fixed bootstrap seed (reproducibility)
+N_BOOT   <- 2000      # bootstrap iterations (plan §3.3)
+D_FLAG   <- 0.10      # Williamson et al. (2012) fairness flag threshold
+
+# Locate results/predictability by walking up from the working dir (Quarto runs
+# from the .qmd's directory), so this works whether rendered or run standalone.
+find_results <- function() {
+  d <- normalizePath(getwd())
+  for (i in 1:6) {
+    cand <- file.path(d, "results", "predictability")
+    if (dir.exists(cand)) return(cand)
+    d <- dirname(d)
+  }
+  stop("results/predictability not found — run assemble_analysis_data.py first")
+}
+RESULTS <- find_results()
+```
+
+```{r}
+#| label: model-meta
+# Architecture / post-training status per model (from models.py registry).
+model_meta <- tribble(
+  ~model,                  ~arch,     ~instruct,
+  "bert-base",             "masked",  FALSE,
+  "modernbert-base",       "masked",  FALSE,
+  "modernbert-large",      "masked",  FALSE,
+  "gpt2",                  "causal",  FALSE,
+  "gpt2-xl",               "causal",  FALSE,
+  "olmo2-1b",              "causal",  FALSE,
+  "olmo2-7b",              "causal",  FALSE,
+  "qwen2.5-7b",            "causal",  FALSE,
+  "qwen2.5-7b-instruct",   "causal",  TRUE,
+  "llama3.1-8b",           "causal",  FALSE,
+  "llama3.1-8b-instruct",  "causal",  TRUE,
+)
+WINDOWS <- c("8", "64", "full")
+```
+
+```{r}
+#| label: load-data
+ell <- read_csv(file.path(RESULTS, "ellipse_long.csv.gz"),
+                col_types = cols(window = col_character())) |>
+  mutate(config = paste(model, window, sep = "/"))
+
+toe <- read_csv(file.path(RESULTS, "toefl_long.csv.gz"),
+                col_types = cols(window = col_character())) |>
+  mutate(config = paste(model, window, sep = "/"))
+
+# ELLIPSE as an [essay x config] surprisal matrix + aligned criterion vector,
+# so every configuration shares the same essays (dependent, essay-level resampling).
+ell_wide <- ell |>
+  select(text_id, config, mean_surprisal_bits) |>
+  pivot_wider(names_from = config, values_from = mean_surprisal_bits) |>
+  left_join(distinct(ell, text_id, overall), by = "text_id")
+
+config_cols <- setdiff(names(ell_wide), c("text_id", "overall"))
+S_ell <- as.matrix(ell_wide[, config_cols])   # essays x configs
+y_ell <- ell_wide$overall
+
+# TOEFL as an [essay x config] surprisal matrix + L1 / proficiency-level vectors.
+toe_wide <- toe |>
+  select(text_id, config, mean_surprisal_bits) |>
+  pivot_wider(names_from = config, values_from = mean_surprisal_bits) |>
+  left_join(distinct(toe, text_id, l1, level), by = "text_id")
+
+stopifnot(identical(config_cols, setdiff(names(toe_wide), c("text_id", "l1", "level"))))
+M_toe <- as.matrix(toe_wide[, config_cols])   # essays x configs
+l1_toe    <- toe_wide$l1
+level_toe <- toe_wide$level
+
+cat(sprintf("configs: %d | ELLIPSE essays: %d | TOEFL essays: %d\n",
+            length(config_cols), nrow(S_ell), nrow(M_toe)))
+```
+
+# Section 2 — Validity (ELLIPSE)
+
+Per configuration, the Pearson correlation between mean surprisal and the
+holistic `overall` score, reported as the magnitude `|r|`.
+
+```{r}
+#| label: validity
+# cor(S, y) returns one correlation per column of S -> vector over configs.
+r_hat   <- cor(S_ell, y_ell)[, 1]
+validity <- tibble(config = names(r_hat), r = r_hat, abs_r = abs(r_hat))
+```
+
+# Section 3 — Fairness (TOEFL 11)
+
+For each configuration and each focal L1 group *g*: within each proficiency
+stratum *s* (low / medium / high), Cohen's *d* in surprisal between *g* and all
+remaining learners, standardized by the **pooled within-stratum SD**; the three
+stratum *d*'s are combined into a focal-group **weighted average** (weighted by
+*g*'s stratum sizes). The configuration's fairness score is **max |d|** across
+the 11 groups (worst-case). We also count how many groups exceed the |d| ≥ 0.10
+flag.
+
+```{r}
+#| label: fairness-fns
+# Fast per-column variance (avoids apply): var of each column of X.
+col_var <- function(X) {
+  n <- nrow(X); m <- colMeans(X)
+  (colSums(X * X) - n * m * m) / (n - 1)
+}
+
+# Weighted-average Cohen's d per (group) for every config column of M.
+# Returns a [group x config] matrix of weighted-average d.
+group_d_matrix <- function(M, l1, level,
+                            groups = sort(unique(l1)),
+                            strata = c("low", "medium", "high")) {
+  d_wavg <- matrix(NA_real_, nrow = length(groups), ncol = ncol(M),
+                   dimnames = list(groups, colnames(M)))
+  for (g in groups) {
+    num  <- rep(0, ncol(M)); wsum <- 0
+    for (s in strata) {
+      in_s  <- level == s
+      foc   <- in_s & (l1 == g)
+      rst   <- in_s & (l1 != g)
+      n1 <- sum(foc); n2 <- sum(rst)
+      if (n1 < 2L || n2 < 2L) next
+      Mf <- M[foc, , drop = FALSE]; Mr <- M[rst, , drop = FALSE]
+      m1 <- colMeans(Mf); m2 <- colMeans(Mr)
+      v1 <- col_var(Mf);  v2 <- col_var(Mr)
+      sp <- sqrt(((n1 - 1) * v1 + (n2 - 1) * v2) / (n1 + n2 - 2))
+      d  <- (m1 - m2) / sp
+      num  <- num + n1 * d          # weight stratum by focal-group size
+      wsum <- wsum + n1
+    }
+    d_wavg[g, ] <- num / wsum
+  }
+  d_wavg
+}
+
+# Fairness summaries per config: max|d|, the worst L1, and #groups over the flag.
+fairness_summary <- function(M, l1, level) {
+  D <- group_d_matrix(M, l1, level)
+  absD <- abs(D)
+  tibble(
+    config    = colnames(M),
+    max_abs_d = apply(absD, 2, max, na.rm = TRUE),
+    worst_l1  = rownames(D)[apply(absD, 2, which.max)],
+    n_flag    = colSums(absD >= D_FLAG, na.rm = TRUE)
+  )
+}
+```
+
+```{r}
+#| label: fairness
+fairness <- fairness_summary(M_toe, l1_toe, level_toe)
+```
+
+# Section 4 — Pareto Front
+
+```{r}
+#| label: assemble-front
+is_front <- function(abs_r, max_abs_d) {
+  # config i is dominated if some j is >= on validity AND <= on fairness,
+  # with at least one strict.
+  n <- length(abs_r); keep <- rep(TRUE, n)
+  for (i in seq_len(n)) {
+    dom <- (abs_r >= abs_r[i]) & (max_abs_d <= max_abs_d[i]) &
+           ((abs_r > abs_r[i]) | (max_abs_d < max_abs_d[i]))
+    if (any(dom)) keep[i] <- FALSE
+  }
+  keep
+}
+
+points <- validity |>
+  left_join(fairness, by = "config") |>
+  separate(config, into = c("model", "window"), sep = "/", remove = FALSE) |>
+  mutate(window = factor(window, levels = WINDOWS)) |>
+  left_join(model_meta, by = "model") |>
+  mutate(front = is_front(abs_r, max_abs_d))
+
+points |>
+  arrange(desc(front), desc(abs_r)) |>
+  select(model, window, arch, instruct, r, abs_r, max_abs_d, worst_l1, n_flag, front) |>
+  mutate(across(c(r, abs_r, max_abs_d), \(x) round(x, 3))) |>
+  knitr::kable(caption = "All 33 configurations (front first, then by validity).")
+```
+
+## Bootstrap confidence regions
+
+2,000 iterations. ELLIPSE essays are resampled with replacement for `|r|`; TOEFL
+essays are resampled **stratified by proficiency level** for max `|d|` (the two
+corpora are independent samples, so they are resampled independently). We report
+per-axis 95% percentile intervals and, for each configuration, its **bootstrap
+front-membership probability** (share of iterations in which it is non-dominated).
+
+```{r}
+#| label: bootstrap
+n_ell   <- nrow(S_ell)
+lvl_idx <- split(seq_len(nrow(M_toe)), level_toe)   # row indices per stratum
+
+boot_absr <- matrix(NA_real_, N_BOOT, ncol(S_ell), dimnames = list(NULL, colnames(S_ell)))
+boot_maxd <- matrix(NA_real_, N_BOOT, ncol(M_toe), dimnames = list(NULL, colnames(M_toe)))
+boot_front <- matrix(FALSE,   N_BOOT, ncol(S_ell), dimnames = list(NULL, colnames(S_ell)))
+
+for (b in seq_len(N_BOOT)) {
+  # validity: essay-level resample shared across configs
+  ei <- sample.int(n_ell, n_ell, replace = TRUE)
+  ab <- abs(cor(S_ell[ei, ], y_ell[ei])[, 1])
+
+  # fairness: stratified resample
+  ti <- unlist(lapply(lvl_idx, \(ix) sample(ix, length(ix), replace = TRUE)),
+               use.names = FALSE)
+  D  <- group_d_matrix(M_toe[ti, ], l1_toe[ti], level_toe[ti])
+  md <- apply(abs(D), 2, max, na.rm = TRUE)
+
+  boot_absr[b, ] <- ab
+  boot_maxd[b, ] <- md
+  boot_front[b, ] <- is_front(ab, md)
+}
+
+q025 <- \(x) quantile(x, 0.025, names = FALSE)
+q975 <- \(x) quantile(x, 0.975, names = FALSE)
+
+boot_ci <- tibble(
+  config      = colnames(S_ell),
+  absr_lo     = apply(boot_absr, 2, q025),
+  absr_hi     = apply(boot_absr, 2, q975),
+  maxd_lo     = apply(boot_maxd, 2, q025),
+  maxd_hi     = apply(boot_maxd, 2, q975),
+  front_prob  = colMeans(boot_front)
+)
+
+points <- left_join(points, boot_ci, by = "config")
+```
+
+## Selected configuration
+
+```{r}
+#| label: selection
+front_tbl <- points |> filter(front) |> arrange(desc(abs_r))
+
+selected <- front_tbl |> filter(!instruct) |> slice(1)
+
+front_tbl |>
+  select(model, window, arch, instruct, abs_r, max_abs_d, worst_l1, n_flag, front_prob) |>
+  mutate(across(c(abs_r, max_abs_d, front_prob), \(x) round(x, 3))) |>
+  knitr::kable(caption = "Pareto front (non-dominated configurations).")
+
+cat(sprintf(
+  "\nSelected default (highest |r| pure-pretrained on the front):\n  %s / window %s  |  |r| = %.3f  |  max|d| = %.3f  |  worst L1 = %s  |  front prob = %.2f\n",
+  selected$model, selected$window, selected$abs_r, selected$max_abs_d,
+  selected$worst_l1, selected$front_prob))
+```
+
+# Section 5 — Pareto Plot
+
+```{r}
+#| label: pareto-plot
+#| fig-width: 13
+#| fig-height: 5
+# Shared visual language (palette keyed to model family, theme, save helper).
+for (hp in c("_viz_helpers.R", "src/1-predictability-benchmark/_viz_helpers.R")) {
+  if (file.exists(hp)) { source(hp); break }
+}
+
+pa <- points |>
+  mutate(family = factor(model_family(model), levels = FAMILY_LEVELS),
+         lbl    = short_model(model),
+         window = factor(window, levels = c("8", "64", "full")))
+win_labs <- c("8" = "window 8", "64" = "window 64", "full" = "window full")
+selected <- selected |> mutate(window = factor(window, levels = c("8", "64", "full")))
+
+# One config (modernbert-base/full) sits far below the zoomed range; annotate it
+# in the "full" panel rather than let it stretch every panel's y-axis.
+off <- pa |> filter(abs_r < 0.50) |>
+  mutate(lbl = paste0(lbl, " (|r|=", sprintf("%.2f", abs_r), ", off-scale)"),
+         abs_r = 0.515)
+
+p <- ggplot(pa, aes(max_abs_d, abs_r)) +
+  geom_vline(xintercept = D_FLAG, linetype = "dotted", colour = "grey55") +
+  # bootstrap CIs shown only for front configs (uncertainty that changes the pick)
+  geom_errorbar(data = filter(pa, front), aes(ymin = absr_lo, ymax = absr_hi),
+                width = 0, alpha = 0.35, colour = "grey55") +
+  geom_errorbar(data = filter(pa, front), aes(xmin = maxd_lo, xmax = maxd_hi),
+                orientation = "y", width = 0, alpha = 0.35, colour = "grey55") +
+  geom_point(aes(colour = family, shape = instruct), size = 2.7) +
+  geom_point(data = filter(pa, front), shape = 21, size = 4.6, stroke = 1,
+             colour = "black", fill = NA) +
+  geom_point(data = selected, shape = 8, size = 4.6, colour = "black") +
+  ggrepel::geom_text_repel(aes(label = lbl, colour = family), size = 2.5,
+                           max.overlaps = Inf, box.padding = 0.35, seed = 42,
+                           show.legend = FALSE) +
+  geom_text(data = off, aes(label = lbl),
+            colour = "grey45", size = 2.5, vjust = 1) +
+  annotate("text", x = D_FLAG, y = 0.505, label = "|d| = 0.10", hjust = -0.06,
+           size = 2.9, colour = "grey45") +
+  facet_wrap(~window, nrow = 1, labeller = labeller(window = win_labs)) +
+  scale_colour_manual(values = FAMILY_COLORS, drop = FALSE) +
+  scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 17),
+                     labels = c("pretrained", "instruct")) +
+  coord_cartesian(xlim = c(D_FLAG, 0.66), ylim = c(0.50, 0.66)) +
+  labs(
+    x = "Unfairness — max |Cohen's d| across L1 groups (TOEFL 11)   → worse",
+    y = "Validity — |Pearson r| with holistic score (ELLIPSE)   → better",
+    colour = "Model family", shape = "Post-training",
+    title = "Fairness–Validity Pareto Front, faceted by context window",
+    subtitle = paste("Circled = globally non-dominated · star = selected pure-pretrained",
+                     "default · CIs (front only) = 95% bootstrap · dotted = |d|=0.10 flag")) +
+  theme_study1(12)
+
+p
+save_fig(p, "pareto_front", width = 13, height = 5)
+```
+
+# Section 6 — Outputs & Notes
+
+```{r}
+#| label: write-table
+out <- points |>
+  arrange(desc(front), desc(abs_r)) |>
+  select(model, window, arch, instruct, r, abs_r, max_abs_d, worst_l1,
+         n_flag, front, front_prob, absr_lo, absr_hi, maxd_lo, maxd_hi)
+write_csv(out, file.path(RESULTS, "pareto_points.csv"))
+cat("wrote", file.path(RESULTS, "pareto_points.csv"), "and pareto_front.png\n")
+```
+
+**Interpretation caveats (for the write-up):**
+
+- **All correlations are negative** (more predictable text ↔ higher proficiency);
+  validity is reported as the magnitude `|r|`.
+- **Fairness violations are pervasive.** Every configuration flags multiple L1
+  groups at |d| ≥ 0.10, so the front reflects *relative*, not absolute, fairness.
+  Report the selected configuration's max |d| and flagged-group count explicitly.
+- **Thin low-proficiency strata for some L1s** (e.g. GER-low n≈14, HIN-low n≈25)
+  make those stratum-level *d*'s noisy; the bootstrap envelopes capture this.
+- **Instruct models are a contrast condition**, excluded from default selection
+  even when Pareto-optimal.
+- **Truncation:** BERT (512) and GPT-2 (1024) truncate some long essays at the
+  full window (flagged per-row upstream); relevant only for those specific points.
+
+# Reproducibility
+
+```{r}
+#| label: sessioninfo
+cat(sprintf("N_BOOT = %d | seed = 42\n", N_BOOT))
+sessionInfo()
+```
