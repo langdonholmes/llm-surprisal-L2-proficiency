@@ -1,6 +1,6 @@
 # Word Predictability and L2 Proficiency
 
-This project investigates where **word predictability** -- a measure derived from masked language model surprisal -- fits within the structure of second language (L2) writing proficiency. Rather than imposing a theoretical factor structure (e.g., CAF), we use network psychometric methods to empirically discover how word predictability relates to established linguistic features across lexical, syntactic, phraseological, and discourse levels.
+This project investigates where **LLM surprisal** fits within the structure of second language (L2) writing proficiency. Rather than imposing a theoretical factor structure (e.g., CAF), I use network psychometric methods to empirically discover how LLM surprisal relates to established linguistic features across lexical, syntactic, phraseological, and discourse levels.
 
 ## Data
 
