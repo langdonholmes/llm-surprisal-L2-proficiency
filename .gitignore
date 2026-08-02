@@ -25,6 +25,7 @@ dist/
 
 # Quarto render output
 **/*.html
+**/.quarto/
 
 # OS files
 .DS_Store

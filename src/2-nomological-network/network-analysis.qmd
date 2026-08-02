@@ -1,6 +1,6 @@
 ---
 title: "Network Psychometric Analysis of ELLIPSE Metrics"
-subtitle: "Where Does Word Predictability Fit in L2 Writing Proficiency Structure?"
+subtitle: "Where Does Word Predictability Fit in L2 Writing Proficiency Network?"
 format:
   html:
     toc: true
@@ -14,30 +14,26 @@ execute:
 
 # Overview
 
-This analysis complements the CFA approach by using a data-driven
-Gaussian Graphical Model (GGM) to empirically discover how word predictability relates
-to other linguistic features — without imposing a factor structure.
+This analysis fits a Gaussian Graphical Model (GGM) to explore how word 
+predictability relates to other linguistic features.
 
 **Key question:** Does word predictability (`mean_loss`) cluster with
-phraseological, lexical, or other features — or does it form its own community?
+phraseological, lexical, or other features?
 
 # Section 1 — Setup & Data Preparation
 
 ```{r}
 #| label: setup
-library(tidyverse)
+library(tidyverse)  # always
 library(psych)
 library(corrplot)
-library(qgraph)      # visualization only
-library(bootnet)     # edge-weight accuracy CIs + group viz networks only
+library(qgraph)      # visualization
+library(bootnet)     # edge-weight accuracy CIs + group viz networks
 library(igraph)
 library(EGAnet)      # estimation, communities, network loadings, network.compare
 library(lavaan)
 
-# NOTE: EGAnet's signatures have shifted across 2.x releases. The net.loads(),
-# network.compare(), EGA(corr=), and invariance() calls below were verified
-# against the installed EGAnet 2.4.1. Re-check ?net.loads / ?network.compare
-# if you upgrade EGAnet.
+# NOTE: EGAnet's signatures have shifted across 2.x releases. Using EGAnet 2.4.1.
 ```
 
 ```{r}
@@ -57,7 +53,7 @@ cat("Raw data:", nrow(df_raw), "rows x", ncol(df_raw), "columns\n")
 feature_vars <- c(
   # Lexical (4)
   "mtld", "lexical_density", "log_mean_token_freq", "mean_word_length",
-  # Syntactic (4 planned, but clauses_per_tunit is constant)
+  # Syntactic (4)
   "words_per_sentence", "clauses_per_tunit", "mod_per_nom", "mean_dep_distance",
   # Phraseological (3)
   "amod_mi", "dobj_mi", "advmod_mi",
@@ -74,76 +70,43 @@ cat("clauses_per_tunit — unique values:", length(unique(df_features$clauses_pe
     "| sd:", sd(df_features$clauses_per_tunit, na.rm = TRUE), "\n")
 
 # Drop clauses_per_tunit — zero variance (all values = 1)
+# Fix later or replace with another syntactic measure
 df_features$clauses_per_tunit <- NULL
 cat("Dropped clauses_per_tunit (constant). Remaining:", ncol(df_features), "variables\n")
 ```
 
 ```{r}
-#| label: check-collinearity
-
-# mean_entropy removed due to near-perfect correlation with mean_loss (r = 0.97)
-# which created a trivial island in the network
-cat("Note: mean_entropy excluded (r = 0.97 with mean_loss). Using mean_loss + var_loss.\n")
-cat("var_loss captures consistency of predictability (variance of token-level loss).\n")
-```
-
-```{r}
 #| label: missing-data
 
-# Report missingness
+# Report missingness. The few missing values are structural: dependency-MI
+# features (amod/dobj/advmod) are undefined for bigrams unseen in the Dolma
+# reference corpus, and content_word_overlap / sentence_similarity are undefined
+# for single-sentence essays. Rather than listwise-delete (which biases the
+# sample toward "typical" essays), we retain every essay and use
+# pairwise-complete correlations throughout (Isvoranu & Epskamp, 2023).
 missing_counts <- colSums(is.na(df_features))
-cat("Missing values per variable:\n")
+cat("Missing values per variable (retained; handled pairwise):\n")
 print(missing_counts[missing_counts > 0])
-cat("\nTotal rows before listwise deletion:", nrow(df_features), "\n")
-
-# Listwise deletion
-complete_idx <- complete.cases(df_features)
-df_complete <- df_features[complete_idx, ]
-prompt_complete <- df_raw$prompt[complete_idx]
-cat("Total rows after listwise deletion:", nrow(df_complete),
-    "(dropped", nrow(df_features) - nrow(df_complete), "rows)\n")
-```
-
-```{r}
-#| label: winsorize
-
-# Winsorize at 1st/99th percentiles. Retained for continuity; under Spearman
-# (rank-based) estimation this has negligible effect and could be dropped.
-winsorize <- function(x, probs = c(0.01, 0.99)) {
-  q <- quantile(x, probs = probs, na.rm = TRUE)
-  x[x < q[1]] <- q[1]
-  x[x > q[2]] <- q[2]
-  x
-}
-
-# Show pre-winsorization extremes for key variables
-cat("Pre-winsorization extremes:\n")
-cat("  words_per_sentence: max =", max(df_complete$words_per_sentence), "\n")
-cat("  connective_density: max =", max(df_complete$connective_density), "\n")
-
-df_win <- df_complete %>%
-  mutate(across(everything(), winsorize))
-
-cat("\nPost-winsorization extremes:\n")
-cat("  words_per_sentence: max =", max(df_win$words_per_sentence), "\n")
-cat("  connective_density: max =", max(df_win$connective_density), "\n")
+cat("\nEssays retained:", nrow(df_features),
+    "(", sum(!complete.cases(df_features)), "have >=1 pairwise-handled NA)\n")
 ```
 
 ```{r}
 #| label: residualize-on-prompt
 
-# Residualize all variables on prompt to remove systematic prompt-driven variance
-df_resid <- df_win
-r2_values <- numeric(ncol(df_win))
-names(r2_values) <- names(df_win)
+# Residualize every variable on writing prompt to remove systematic
+# prompt-driven variance. na.action = na.exclude keeps each residual vector
+# full length with NA left in the originally-missing positions, so the
+# downstream pairwise-complete correlations can use every available essay.
+df_net <- df_features
+r2_values <- numeric(ncol(df_features))
+names(r2_values) <- names(df_features)
 
-for (var in names(df_win)) {
-  fit <- lm(df_win[[var]] ~ factor(prompt_complete))
-  df_resid[[var]] <- residuals(fit)
+for (var in names(df_features)) {
+  fit <- lm(df_features[[var]] ~ factor(df_raw$prompt), na.action = na.exclude)
+  df_net[[var]] <- residuals(fit)
   r2_values[var] <- summary(fit)$r.squared
 }
-
-df_win <- df_resid  # all downstream code uses residualized data
 
 cat("R² (variance explained by prompt) per variable:\n")
 r2_df <- data.frame(Variable = names(r2_values), R2 = round(r2_values, 4))
@@ -154,14 +117,19 @@ print(r2_df, row.names = FALSE)
 ```{r}
 #| label: define-groups
 
-# Theoretical groupings for coloring (after dropping clauses_per_tunit)
-groups <- list(
-  Lexical       = c("mtld", "lexical_density", "log_mean_token_freq", "mean_word_length"),
-  Syntactic     = c("words_per_sentence", "mod_per_nom", "mean_dep_distance"),
+# Theoretical groupings (construct membership), after dropping clauses_per_tunit
+construct_members <- list(
+  Lexical        = c("mtld", "lexical_density", "log_mean_token_freq", "mean_word_length"),
+  Syntactic      = c("words_per_sentence", "mod_per_nom", "mean_dep_distance"),
   Phraseological = c("amod_mi", "dobj_mi", "advmod_mi"),
-  Cohesion      = c("content_word_overlap", "connective_density", "sentence_similarity"),
+  Cohesion       = c("content_word_overlap", "connective_density", "sentence_similarity"),
   Predictability = c("mean_loss", "var_loss")
 )
+
+# qgraph colours nodes by group only when `groups` holds node INDICES. Convert to
+# indices against the canonical node order (shared by the full/low/high nets).
+node_order <- setdiff(feature_vars, "clauses_per_tunit")
+groups <- lapply(construct_members, function(v) match(v, node_order))
 
 # Short labels for plotting
 short_labels <- c(
@@ -192,8 +160,8 @@ group_colors <- c(
 )
 
 # Map each variable to its group color
-node_colors <- character(ncol(df_win))
-names(node_colors) <- names(df_win)
+node_colors <- character(ncol(df_net))
+names(node_colors) <- names(df_net)
 for (g in names(groups)) {
   node_colors[groups[[g]]] <- group_colors[g]
 }
@@ -206,7 +174,7 @@ for (g in names(groups)) {
 #| label: descriptive-stats
 #| tbl-cap: "Descriptive statistics for all network variables"
 
-desc_stats <- describe(df_win)
+desc_stats <- describe(df_net)
 print(desc_stats[, c("n", "mean", "sd", "min", "max", "skew", "kurtosis")], digits = 3)
 ```
 
@@ -217,7 +185,7 @@ print(desc_stats[, c("n", "mean", "sd", "min", "max", "skew", "kurtosis")], digi
 #| fig-height: 9
 
 # Spearman to match the network estimation input (Isvoranu & Epskamp, 2023)
-cor_mat <- cor(df_win, use = "pairwise.complete.obs", method = "spearman")
+cor_mat <- cor(df_net, use = "pairwise.complete.obs", method = "spearman")
 
 # Use short labels for readability
 colnames(cor_mat) <- short_labels[colnames(cor_mat)]
@@ -236,7 +204,7 @@ corrplot(cor_mat, method = "color", type = "lower",
 #| fig-width: 12
 #| fig-height: 10
 
-df_win %>%
+df_net %>%
   pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
   mutate(variable = short_labels[variable]) %>%
   ggplot(aes(x = value)) +
@@ -255,8 +223,8 @@ df_win %>%
 # Estimate Gaussian Graphical Model (EBICglasso) on Spearman correlations
 # (Isvoranu & Epskamp, 2023). This bootnet object is used only for
 # visualization (Section 4) and edge-weight bootstrapping (Section 7).
-network <- estimateNetwork(df_win, default = "EBICglasso", tuning = 0.5,
-                           corMethod = "spearman")
+network <- estimateNetwork(df_net, default = "EBICglasso", tuning = 0.5,
+                           corMethod = "spearman", missing = "pairwise")
 
 cat("Network estimated with", ncol(network$graph), "nodes\n")
 cat("Non-zero edges:", sum(network$graph[upper.tri(network$graph)] != 0),
@@ -358,8 +326,7 @@ qgraph(network$graph,
 #| fig-width: 10
 #| fig-height: 8
 
-# Strength (primary) + signed ExpectedInfluence. Betweenness/Closeness dropped:
-# non-informative in cross-sectional psychometric networks. Network loadings
+# Strength (primary) + signed ExpectedInfluence. Network loadings
 # (Section 6) are the confound-adjusted node-importance metric and supersede
 # raw strength for interpretation.
 centralityPlot(network$graph, labels = net_labels,
@@ -408,8 +375,8 @@ print(pred_edges)
 #| fig-width: 10
 #| fig-height: 10
 
-ega_result <- EGA(df_win, corr = "spearman", model = "glasso",
-                  algorithm = "walktrap",
+ega_result <- EGA(df_net, corr = "spearman", model = "glasso",
+                  algorithm = "walktrap", na.data = "pairwise",
                   plot.EGA = TRUE)
 
 cat("\nNumber of communities detected:", ega_result$n.dim, "\n")
@@ -447,14 +414,13 @@ cat("  Members:", paste(short_labels[members_var], collapse = ", "), "\n")
 
 ```{r}
 #| label: net-loadings
-#| tbl-cap: "Revised network loadings (standardized) — primary node importance"
+#| tbl-cap: "Revised network loadings (standardized)"
 
 # Network loadings (Christensen, Golino, Abad & Garrido, 2025): confound-adjusted
-# node importance that splits strength by community and, in the revised
-# formulation, adjusts for community size and sign. These supersede raw strength.
+# node importance that splits strength by community and adjusts for community 
+# size and sign.
 # Effect-size guides: ~0.20 small, ~0.35 moderate, ~0.50 large.
-# Verified against EGAnet 2.4.1: net.loads() accepts the EGA object and returns
-# $std (nodes x communities); "revised" is already the >= 2.0.7 default.
+
 nl <- net.loads(ega_result, loading.method = "revised")$std
 
 nl_df <- as.data.frame(round(nl, 3))
@@ -469,13 +435,14 @@ print(nl_df %>% filter(Variable %in% c("Loss", "VarLoss")))
 
 ```{r}
 #| label: boot-ega
-#| fig-cap: "Bootstrap EGA — stability of community assignments"
+#| fig-cap: "Bootstrap EGA: stability of community assignments"
 
 set.seed(42)
-boot_ega <- bootEGA(df_win, iter = 500,
+boot_ega <- bootEGA(df_net, iter = 500,
                     corr = "spearman",
                     model = "glasso",
                     algorithm = "walktrap",
+                    na.data = "pairwise",
                     type = "parametric",
                     verbose = FALSE)
 
@@ -534,34 +501,35 @@ plot(boot_case, statistics = c("strength", "expectedInfluence"))
 
 ```{r}
 #| label: cs-coefficients
+#| tbl-cap: "CS-coefficients (correlation stability)"
 
 cs_coefs <- corStability(boot_case)
-cat("CS-coefficients (correlation stability):\n")
 print(cs_coefs)
-
-cat("\nInterpretation guidelines:\n")
-cat("  CS >= 0.50: Good, centrality is stable and interpretable\n")
-cat("  CS >= 0.25: Acceptable minimum\n")
-cat("  CS < 0.25: Centrality should NOT be interpreted\n")
 ```
+
+**Interpretation guidelines** (Epskamp et al., 2018):
+
+- CS ≥ 0.50 — centrality is stable and interpretable
+- CS ≥ 0.25 — acceptable minimum
+- CS < 0.25 — centrality should **not** be interpreted
 
 
 # Section 8 — Between-Community Loadings (Bridge Behavior)
 
 Bridge behavior is operationalized via **between-community (cross-)loadings**
-from the revised network loadings (Christensen et al., 2025), not Jones et al.
-(2021) bridge strength. Cross-loadings distinguish a genuine bridge (a node that
-loads on multiple communities) from mere between-community correlation.
+from the revised network loadings (Christensen et al., 2025). Cross-loadings 
+distinguish a genuine bridge from between-community correlation.
 
 ```{r}
 #| label: cross-loadings
-#| tbl-cap: "Between-community (cross-)loadings — bridge behavior"
+#| tbl-cap: "Between-community (cross-)loadings"
 
 # `nl` (standardized network loadings, nodes x communities) is computed in
 # Section 6. A node's loading on its OWN community vs. its loadings on the
 # others: high & roughly-equal cross-loadings = integrative/bridge behavior;
 # a single dominant loading = the node belongs to one community.
 # nl's columns are named by community id ("1","2",...), matching ega_result$wc.
+
 assigned <- ega_result$wc  # community per node
 
 cross_load_summary <- function(node) {
@@ -590,43 +558,39 @@ print(do.call(rbind, lapply(c("mean_loss", "var_loss"), cross_load_summary)),
 ```{r}
 #| label: proficiency-split
 
-# Use single Overall score from public ELLIPSE data
-df_raw_complete <- df_raw[complete.cases(df_raw[, feature_vars[feature_vars != "clauses_per_tunit"]]), ]
-prompt_raw_complete <- df_raw_complete$prompt
+# Use single Overall score from public ELLIPSE data.
+df_grp <- df_raw
+prompt_grp <- df_grp$prompt
 
 # Define proficiency groups
-df_raw_complete$prof_group <- case_when(
-  df_raw_complete$Overall <= 2.5 ~ "Low",
-  df_raw_complete$Overall >= 4.0 ~ "High",
+df_grp$prof_group <- case_when(
+  df_grp$Overall <= 2.5 ~ "Low",
+  df_grp$Overall >= 4.0 ~ "High",
   TRUE ~ "Mid"
 )
 
 cat("Proficiency group sizes:\n")
-print(table(df_raw_complete$prof_group))
+print(table(df_grp$prof_group))
 
 # Select feature columns (without clauses_per_tunit)
 keep_vars <- setdiff(feature_vars, "clauses_per_tunit")
 
-# Low proficiency: winsorize then residualize on prompt
-low_idx <- df_raw_complete$prof_group == "Low"
-df_low <- df_raw_complete[low_idx, keep_vars] %>%
-  mutate(across(everything(), winsorize))
-prompt_low <- prompt_raw_complete[low_idx]
-
+# Low proficiency: residualize on prompt
+low_idx <- df_grp$prof_group == "Low"
+df_low <- df_grp[low_idx, keep_vars]
+prompt_low <- prompt_grp[low_idx]
 for (var in names(df_low)) {
-  fit <- lm(df_low[[var]] ~ factor(prompt_low))
-  df_low[[var]] <- residuals(fit)
+  df_low[[var]] <- residuals(lm(df_low[[var]] ~ factor(prompt_low),
+                                na.action = na.exclude))
 }
 
-# High proficiency: winsorize then residualize on prompt
-high_idx <- df_raw_complete$prof_group == "High"
-df_high <- df_raw_complete[high_idx, keep_vars] %>%
-  mutate(across(everything(), winsorize))
-prompt_high <- prompt_raw_complete[high_idx]
-
+# High proficiency: same treatment
+high_idx <- df_grp$prof_group == "High"
+df_high <- df_grp[high_idx, keep_vars]
+prompt_high <- prompt_grp[high_idx]
 for (var in names(df_high)) {
-  fit <- lm(df_high[[var]] ~ factor(prompt_high))
-  df_high[[var]] <- residuals(fit)
+  df_high[[var]] <- residuals(lm(df_high[[var]] ~ factor(prompt_high),
+                                 na.action = na.exclude))
 }
 
 cat("\nLow proficiency n:", nrow(df_low), "\n")
@@ -637,9 +601,9 @@ cat("High proficiency n:", nrow(df_high), "\n")
 #| label: estimate-group-networks
 
 net_low <- estimateNetwork(df_low, default = "EBICglasso", tuning = 0.5,
-                           corMethod = "spearman")
+                           corMethod = "spearman", missing = "pairwise")
 net_high <- estimateNetwork(df_high, default = "EBICglasso", tuning = 0.5,
-                            corMethod = "spearman")
+                            corMethod = "spearman", missing = "pairwise")
 ```
 
 ```{r}
@@ -717,15 +681,15 @@ cat("Saved to fig/network_group_comparison.pdf\n")
 #| label: network-compare
 #| output: false
 
-# EGAnet permutation network comparison replaces NetworkComparisonTest::NCT.
-# Feed the residualized group DATA FRAMES (not the network objects). Verified
-# against EGAnet 2.4.1: nc$network is a matrix with columns sF (signed
-# Frobenius), JSS (Jensen-Shannon similarity), and Total Strength, and rows
-# statistic / p.value / M_permutated / SD_permutated.
+# EGAnet permutation network comparison.
+# Feed the residualized group DATA FRAMES.
+# nc$network is a matrix with columns sF (signed Frobenius),
+# JSS (Jensen-Shannon similarity), and Total Strength.
 set.seed(42)
 nc <- network.compare(
   base = df_low, comparison = df_high,
   corr = "spearman", model = "glasso",
+  na.data = "pairwise",
   iter = 1000, seed = 42
 )
 
@@ -740,7 +704,7 @@ print(nc$network)   # cols: sF (signed Frobenius), JSS, Total Strength
 
 # nc$edges is a list of 15x15 matrices: statistic (High - Low), p.value,
 # p.adjusted (BH), M_permutated, SD_permutated. Report edges whose BH-adjusted
-# permutation p < 0.05 (upper triangle only). Verified against EGAnet 2.4.1.
+# permutation p < 0.05 (upper triangle only).
 padj <- nc$edges$p.adjusted
 stat <- nc$edges$statistic
 ut <- which(upper.tri(padj) & padj < 0.05, arr.ind = TRUE)
@@ -759,18 +723,16 @@ if (nrow(ut) > 0) {
 ```
 
 ```{r}
-#| label: invariance-optional
-#| eval: false
+#| label: invariance
+#| eval: true
 
-# OPTIONAL (author decision — Open Item 3): if RQ4 is "are the network LOADINGS
-# invariant across proficiency" rather than "does the structure differ", use the
-# loadings-based permutation invariance test (Jamison, Christensen & Golino,
-# 2024) instead of / in addition to network.compare above. Left un-run by
-# default; flip `eval` to true if the RQ is framed as invariance.
+# loadings-based permutation invariance test (Jamison, Christensen & Golino, 2024)
+# Alternative/supplement to network.compare above if RQ4 is framed as invariance.
+
 inv <- invariance(
   data = rbind(df_low, df_high),
   groups = c(rep("Low", nrow(df_low)), rep("High", nrow(df_high))),
-  corr = "spearman", iter = 1000, seed = 42
+  corr = "spearman", na.data = "pairwise", iter = 1000, seed = 42
 )
 print(inv$results)   # per-node loading differences + permutation p-values
 ```
@@ -806,61 +768,63 @@ print(pred_edge_table("var_loss"), row.names = FALSE)
 # Summary & Interpretation
 
 ```{r}
-#| label: summary
+#| label: summary-values
+#| echo: false
 
-cat("=" %>% strrep(60), "\n")
-cat("SUMMARY OF NETWORK ANALYSIS RESULTS\n")
-cat("=" %>% strrep(60), "\n\n")
+# Derived quantities for the narrative below (names stripped so inline R prints
+# clean scalars).
+pred_comm      <- unname(ega_result$wc["mean_loss"])
+same_comm      <- names(ega_result$wc)[ega_result$wc == pred_comm]
+varloss_comm   <- unname(ega_result$wc["var_loss"])
+same_comm_var  <- names(ega_result$wc)[ega_result$wc == varloss_comm]
+loss_own       <- as.character(ega_result$wc["mean_loss"])
+loss_own_load  <- round(nl["mean_loss", loss_own], 3)
+loss_max_cross <- round(max(nl["mean_loss", setdiff(colnames(nl), loss_own)]), 3)
+cent_sorted    <- cent %>% arrange(desc(Strength))
+loss_rank      <- which(cent_sorted$Variable == "Loss")
+n_nodes        <- nrow(cent_sorted)
+mi_same_comm   <- unname(pred_comm == ega_result$wc["amod_mi"])
+```
 
-# 1. Community structure
-cat("1. COMMUNITY STRUCTURE (EGA)\n")
-cat("   Number of communities:", ega_result$n.dim, "\n")
-cat("   mean_loss assigned to community:", ega_result$wc["mean_loss"], "\n")
-cat("   var_loss assigned to community:", ega_result$wc["var_loss"], "\n\n")
+## 1. Community structure (EGA)
 
-# What's in the same community as predictability?
-pred_comm <- ega_result$wc["mean_loss"]
-same_comm <- names(ega_result$wc)[ega_result$wc == pred_comm]
-cat("   Variables in same community as mean_loss:\n")
-cat("  ", paste(short_labels[same_comm], collapse = ", "), "\n")
+EGA detected `r ega_result$n.dim` communities. `mean_loss` was assigned to
+community `r pred_comm` and `var_loss` to community `r varloss_comm`.
 
-varloss_comm <- ega_result$wc["var_loss"]
-same_comm_var <- names(ega_result$wc)[ega_result$wc == varloss_comm]
-cat("   Variables in same community as var_loss:\n")
-cat("  ", paste(short_labels[same_comm_var], collapse = ", "), "\n\n")
+- Same community as `mean_loss`: `r paste(short_labels[same_comm], collapse = ", ")`
+- Same community as `var_loss`: `r paste(short_labels[same_comm_var], collapse = ", ")`
 
-# 2. Node importance — network loadings (primary), strength (secondary)
-cat("2. NODE IMPORTANCE (network loadings primary)\n")
-loss_own <- as.character(ega_result$wc["mean_loss"])
-cat("   mean_loss loading on own community:", round(nl["mean_loss", loss_own], 3), "\n")
-cat("   mean_loss max cross-community loading:",
-    round(max(nl["mean_loss", setdiff(colnames(nl), loss_own)]), 3), "\n")
-cent_sorted <- cent %>% arrange(desc(Strength))
-loss_rank <- which(cent_sorted$Variable == "Loss")
-cat("   (secondary) mean_loss raw-strength rank:", loss_rank, "of", nrow(cent_sorted), "\n\n")
+## 2. Node importance
 
-# 3. Bridge behavior — between-community cross-loadings
-cat("3. BRIDGE BEHAVIOR (cross-loadings; see Section 8)\n")
-cat("   High & roughly-equal cross-loadings = integrative/bridge;\n")
-cat("   a single dominant loading = belongs to one community.\n\n")
+`mean_loss` loads `r loss_own_load` on its own community, with a maximum
+cross-community loading of `r loss_max_cross`. As a secondary check, its raw
+strength rank is `r loss_rank` of `r n_nodes`.
 
-# 4. Interpretation framework
-cat("4. INTERPRETATION RELATIVE TO CFA HYPOTHESES\n")
-cat("   | CFA Model | Supporting Evidence |\n")
-cat("   |-----------|--------------------|\n")
-cat("   | Model 1 (Phraseological) | Predictability in same community as MI? ",
-    pred_comm == ega_result$wc["amod_mi"], "|\n")
-cat("   | Model 2 (General factor)  | High centrality? Loss rank =", loss_rank, "|\n")
-cat("   | Novel finding             | Check community membership above |\n\n")
+## 3. Bridge behavior (cross-loadings)
 
-# 5. Stability
-cat("5. STABILITY\n")
-cat("   CS-coefficients reported in Section 7\n")
-cat("   Edge accuracy CIs reported in Section 7\n\n")
+Bridge behavior is read from between-community cross-loadings (Section 8): high
+and roughly-equal cross-loadings indicate an integrative/bridge node, whereas a
+single dominant loading means the node belongs to one community.
 
-# 6. Proficiency differences — permutation network.compare (nc$network)
-cat("6. PROFICIENCY GROUP DIFFERENCES (network.compare)\n")
-cat("   Omnibus structural comparison (Jensen-Shannon, Frobenius/SF,\n")
-cat("   total strength) with permutation p-values:\n")
-print(nc$network)
+## 4. Interpretation relative to CFA hypotheses
+
+| CFA Model | Supporting Evidence |
+|-----------|---------------------|
+| Model 1 (Phraseological) | Predictability shares the MI community: `r mi_same_comm` |
+| Model 2 (General factor)  | `mean_loss` strength rank = `r loss_rank` of `r n_nodes` |
+| Novel finding             | See community membership in Section 6 |
+
+## 5. Stability
+
+CS-coefficients and edge-accuracy CIs are reported in Section 7.
+
+## 6. Proficiency group differences (network.compare)
+
+Omnibus structural comparison: signed Frobenius (sF), Jensen-Shannon similarity
+(JSS), and total strength with permutation *p*-values:
+
+```{r}
+#| label: summary-network-compare
+#| echo: false
+knitr::kable(round(nc$network, 3))
 ```
