@@ -49,12 +49,21 @@ cat("Raw data:", nrow(df_raw), "rows x", ncol(df_raw), "columns\n")
 ```{r}
 #| label: select-features
 
-# Select the 16 feature variables
+# Select the 16 feature variables.
+#
+# The four syntactic indices are the fine-grained dependency battery
+# (src/features/syntactic.py), sampling distinct subconstructs rather than
+# accumulating redundant omnibus measures (Norris & Ortega, 2009; Bulté &
+# Housen, 2012): one phrasal index and three clausal ones. Each normalizes to a
+# syntactic unit rather than to the orthographic sentence, avoiding the
+# punctuation artifacts that compromise sentence-normalized measures in learner
+# corpora (Kyle & Crossley, 2018). `words_per_clause` is also present in the CSV
+# as the reserve substitute index but is not entered here.
 feature_vars <- c(
   # Lexical (4)
   "mtld", "lexical_density", "log_mean_token_freq", "mean_word_length",
   # Syntactic (4)
-  "words_per_sentence", "clauses_per_tunit", "mod_per_nom", "mean_dep_distance",
+  "deps_per_nominal", "advmod_per_clause", "advcl_per_clause", "deps_per_clause",
   # Phraseological (3)
   "amod_mi", "dobj_mi", "advmod_mi",
   # Cohesion (3)
@@ -65,14 +74,21 @@ feature_vars <- c(
 
 df_features <- df_raw[, feature_vars]
 
-# Check clauses_per_tunit variance
-cat("clauses_per_tunit — unique values:", length(unique(df_features$clauses_per_tunit)),
-    "| sd:", sd(df_features$clauses_per_tunit, na.rm = TRUE), "\n")
-
-# Drop clauses_per_tunit — zero variance (all values = 1)
-# Fix later or replace with another syntactic measure
-df_features$clauses_per_tunit <- NULL
-cat("Dropped clauses_per_tunit (constant). Remaining:", ncol(df_features), "variables\n")
+# Variance check: a constant variable cannot enter a network. (The previous
+# clauses_per_tunit index was constant at 1 and had to be dropped here; the
+# unit-normalized battery that replaced it is checked rather than assumed.)
+var_check <- data.frame(
+  Variable = feature_vars,
+  Unique = sapply(df_features, function(x) length(unique(na.omit(x)))),
+  SD = round(sapply(df_features, sd, na.rm = TRUE), 4)
+)
+degenerate <- var_check$Variable[var_check$SD == 0 | is.na(var_check$SD)]
+if (length(degenerate) > 0) {
+  cat("WARNING — zero-variance variables:", paste(degenerate, collapse = ", "), "\n")
+  print(var_check[var_check$Variable %in% degenerate, ], row.names = FALSE)
+} else {
+  cat("All", length(feature_vars), "variables have non-zero variance.\n")
+}
 ```
 
 ```{r}
@@ -114,20 +130,116 @@ r2_df <- r2_df[order(-r2_df$R2), ]
 print(r2_df, row.names = FALSE)
 ```
 
+## Local dependence screening (UVA)
+
+The syntactic battery is not fully independent by construction: adverbial
+modifiers and adverbial clauses are both subsets of clausal dependents, so
+`deps_per_clause` partially subsumes `advmod_per_clause` and
+`advcl_per_clause`. This nesting is a known feature of the Kyle and Crossley
+(2018) index set, which was developed as a candidate pool for feature selection
+rather than as a non-redundant battery. Redundancy is therefore screened
+empirically rather than assumed away.
+
+Unique Variable Analysis (Christensen, Garrido & Golino, 2023) identifies
+locally dependent pairs via weighted topological overlap, at the conventional
+wTO cutoff of .25. **Pre-registered rule:** where a pair of syntactic indices is
+flagged, the broader index is removed in favour of the two narrower ones, on the
+grounds that the narrower indices carry interpretable structural information
+that the aggregate does not. `deps_per_clause` is thus the designated candidate
+for removal. Should the two clause-level modification indices instead prove
+locally dependent with each other, `words_per_clause` is available in the
+metrics table as a substitute phrasal-at-clause-level index.
+
+```{r}
+#| label: uva-screen
+
+# Screen on the residualized data, since that is what every network below uses,
+# with the same pairwise missing-data handling as every other estimate here.
+# reduce = FALSE: UVA reports the overlap, the pre-registered rule below decides.
+uva <- UVA(data = df_net, cut.off = 0.25, reduce = FALSE,
+           na.data = "pairwise", verbose = FALSE)
+
+wto_pairs <- uva$wto$pairwise
+flagged <- wto_pairs[wto_pairs$wto >= 0.25, ]
+flagged <- flagged[order(-flagged$wto), ]
+
+cat("Highest weighted topological overlap:", round(max(wto_pairs$wto), 3), "\n")
+cat("Pairs at or above the .25 cutoff:", nrow(flagged), "\n\n")
+if (nrow(flagged) > 0) print(flagged, row.names = FALSE)
+
+cat("\nTop 8 pairs overall:\n")
+print(head(wto_pairs[order(-wto_pairs$wto), ], 8), row.names = FALSE)
+```
+
+```{r}
+#| label: uva-decision
+
+# Apply the pre-registered rule to the SYNTACTIC battery only. Flagged pairs
+# outside it are reported and retained, with the reason stated, rather than
+# being dropped by a rule that was never specified for them.
+syntactic_battery <- c("deps_per_nominal", "advmod_per_clause",
+                       "advcl_per_clause", "deps_per_clause")
+broader_index <- "deps_per_clause"
+
+syn_flagged <- flagged[flagged$node_i %in% syntactic_battery &
+                         flagged$node_j %in% syntactic_battery, ]
+
+drop_vars <- character(0)
+if (nrow(syn_flagged) > 0) {
+  if (any(apply(syn_flagged[, c("node_i", "node_j")], 1,
+                function(p) broader_index %in% p))) {
+    drop_vars <- broader_index
+    cat("Rule applied: ", broader_index,
+        " is locally dependent with a narrower clausal index and is removed.\n",
+        "Battery reduced to ", length(syntactic_battery) - 1, " indices.\n", sep = "")
+  } else {
+    # The contingency: the two narrow modification indices overlap each other,
+    # and the broader index is not involved. The plan makes words_per_clause the
+    # substitute but does not say which of the two overlapping indices it
+    # replaces, so this branch stops rather than guessing — it has never fired
+    # on these data and an automated choice here would be undocumented.
+    stop("CONTINGENCY: the two clause-level modification indices are locally ",
+         "dependent with each other and the pre-registered rule does not apply. ",
+         "Substitute words_per_clause (present in ellipse_metrics.csv) for one ",
+         "of them; the choice needs to be made and justified explicitly.")
+  }
+} else {
+  cat("No syntactic pair reached the .25 cutoff; the full four-index battery is retained.\n")
+}
+
+other_flagged <- flagged[!(flagged$node_i %in% syntactic_battery &
+                             flagged$node_j %in% syntactic_battery), ]
+if (nrow(other_flagged) > 0) {
+  cat("\nFlagged pairs outside the syntactic battery — RETAINED:\n")
+  print(other_flagged, row.names = FALSE)
+  cat("\n  mean_loss / var_loss are the focal predictability nodes; collapsing\n",
+      "  them would remove the quantity the analysis is about, and whether they\n",
+      "  are interchangeable is itself a research question. Any other pair has\n",
+      "  no pre-registered removal rule, so both members are kept and the\n",
+      "  dependence is carried forward as a caveat on their shared community.\n",
+      sep = "")
+}
+
+df_net <- df_net[, setdiff(names(df_net), drop_vars)]
+df_features <- df_features[, setdiff(names(df_features), drop_vars)]
+cat("\nVariables entering the network:", ncol(df_net), "\n")
+```
+
 ```{r}
 #| label: define-groups
 
-# Theoretical groupings (construct membership), after dropping clauses_per_tunit
+# Theoretical groupings (construct membership), after UVA screening.
 construct_members <- list(
   Lexical        = c("mtld", "lexical_density", "log_mean_token_freq", "mean_word_length"),
-  Syntactic      = c("words_per_sentence", "mod_per_nom", "mean_dep_distance"),
+  Syntactic      = syntactic_battery,
   Phraseological = c("amod_mi", "dobj_mi", "advmod_mi"),
   Cohesion       = c("content_word_overlap", "connective_density", "sentence_similarity"),
   Predictability = c("mean_loss", "var_loss")
 )
+construct_members <- lapply(construct_members, setdiff, drop_vars)
 
 # Canonical node order, shared by the full-sample and proficiency-group networks.
-node_order <- setdiff(feature_vars, "clauses_per_tunit")
+node_order <- setdiff(feature_vars, drop_vars)
 
 # Short labels for plotting
 short_labels <- c(
@@ -135,9 +247,10 @@ short_labels <- c(
   lexical_density = "LexDen",
   log_mean_token_freq = "TokFreq",
   mean_word_length = "WordLen",
-  words_per_sentence = "WPS",
-  mod_per_nom = "ModNom",
-  mean_dep_distance = "DepDist",
+  deps_per_nominal = "DepNom",
+  advmod_per_clause = "AdvMod",
+  advcl_per_clause = "AdvCl",
+  deps_per_clause = "DepCl",
   amod_mi = "AmodMI",
   dobj_mi = "DobjMI",
   advmod_mi = "AdvMI",
@@ -787,8 +900,8 @@ print(data.frame(
   Pct = round(100 * as.numeric(table(df_grp$prof_group)) / nrow(df_grp), 1)
 ), row.names = FALSE)
 
-# Select feature columns (without clauses_per_tunit)
-keep_vars <- setdiff(feature_vars, "clauses_per_tunit")
+# Same variable set as the full-sample network (post-UVA)
+keep_vars <- node_order
 
 # Residualize on prompt within each group, exactly as for the full sample
 residualize_group <- function(g) {

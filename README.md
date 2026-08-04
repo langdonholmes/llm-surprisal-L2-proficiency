@@ -82,7 +82,8 @@ src/
   features/                 # Linguistic feature calculators (shared lib)
     predictability.py       # Word predictability (ModernBERT surprisal + variance)
     lexical.py              # MTLD, lexical density, token frequency, word length
-    syntactic.py            # WPS, clauses/T-unit, modifiers/nominal, dep distance
+    syntactic.py            # Fine-grained battery: deps/nominal, advmod/clause,
+                            #   advcl/clause, deps/clause (+ words/clause reserve)
     phraseological.py       # Dependency MI (amod, dobj, advmod)
     cohesion.py             # Content word overlap, connective density, sentence sim
   util/                     # Shared utilities

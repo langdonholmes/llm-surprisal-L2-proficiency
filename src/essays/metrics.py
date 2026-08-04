@@ -163,7 +163,8 @@ def main(corpus: str = "both"):
     # NaN audit
     feature_cols = [
         "mtld", "lexical_density", "log_mean_token_freq", "mean_word_length",
-        "words_per_sentence", "mod_per_nom", "mean_dep_distance",
+        "deps_per_nominal", "advmod_per_clause", "advcl_per_clause",
+        "deps_per_clause", "words_per_clause",
         "amod_mi", "dobj_mi", "advmod_mi",
         "content_word_overlap", "connective_density", "sentence_similarity",
         "mean_loss", "mean_entropy", "var_loss",
