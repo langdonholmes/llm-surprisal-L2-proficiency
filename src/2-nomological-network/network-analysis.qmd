@@ -126,10 +126,8 @@ construct_members <- list(
   Predictability = c("mean_loss", "var_loss")
 )
 
-# qgraph colours nodes by group only when `groups` holds node INDICES. Convert to
-# indices against the canonical node order (shared by the full/low/high nets).
+# Canonical node order, shared by the full-sample and proficiency-group networks.
 node_order <- setdiff(feature_vars, "clauses_per_tunit")
-groups <- lapply(construct_members, function(v) match(v, node_order))
 
 # Short labels for plotting
 short_labels <- c(
@@ -150,21 +148,70 @@ short_labels <- c(
   var_loss = "VarLoss"
 )
 
-# Color scheme
-group_colors <- c(
-  Lexical = "#E41A1C",        # red
-  Syntactic = "#377EB8",      # blue
-  Phraseological = "#4DAF4A", # green
-  Cohesion = "#FF7F00",       # orange
-  Predictability = "#984EA3"  # purple
+net_labels <- short_labels[node_order]
+
+# --- Visual encoding: COLOUR = theoretical construct ------------------------
+# Shape is reserved for the empirically derived EGA communities (Section 3),
+# which is the reading the figures should give up first and the only channel
+# that survives black-and-white printing intact. The construct palette is
+# therefore deliberately subdued: low chroma so it never competes with the
+# silhouettes, but with the five lightness values spread evenly so the hues
+# still separate into distinguishable greys when the colour is thrown away.
+construct_colors <- setNames(
+  hcl(h = c(70, 250, 140, 320, 20), c = 20, l = c(94, 85, 76, 67, 58)),
+  names(construct_members)
 )
 
-# Map each variable to its group color
-node_colors <- character(ncol(df_net))
-names(node_colors) <- names(df_net)
-for (g in names(groups)) {
-  node_colors[groups[[g]]] <- group_colors[g]
+node_construct <- rep(NA_character_, length(node_order))
+names(node_construct) <- node_order
+for (g in names(construct_members)) {
+  node_construct[construct_members[[g]]] <- g
 }
+node_construct <- node_construct[node_order]
+node_colors <- unname(construct_colors[node_construct])
+
+# Greyscale check: relative luminance of each construct colour, on 0-100.
+# Neighbouring constructs should stay ~8-9 points apart.
+cat("Construct palette and its greyscale equivalent:\n")
+print(data.frame(
+  Construct = names(construct_colors),
+  Hex = unname(construct_colors),
+  Grey = sapply(construct_colors, function(x) {
+    rgb <- col2rgb(x) / 255
+    round(100 * (0.2126 * rgb[1] + 0.7152 * rgb[2] + 0.0722 * rgb[3]), 1)
+  })
+), row.names = FALSE)
+```
+
+```{r}
+#| label: define-shapes
+
+# --- Visual encoding: SHAPE = empirical EGA community -----------------------
+# Communities are assigned shapes from this pool in order, so the encoding
+# still works if a re-run returns a different number of communities.
+#
+# qgraph ships only circle/square/triangle/diamond as built-in shapes, and its
+# built-in "diamond" draws the fill (pch 18) smaller than the border (pch 5),
+# leaving a white ring. Both the rhombus and the 5-pointed star are therefore
+# supplied as custom polygons (coordinates on [-1, 1], scaled to the node box).
+shape_polygons <- list(
+  rhombus = list(x = c(0, 1, 0, -1), y = c(1, 0, -1, 0)),
+  star = local({
+    ang <- seq(pi / 2, pi / 2 + 2 * pi, length.out = 11)[1:10]
+    list(x = rep(c(1, 0.6), 5) * cos(ang), y = rep(c(1, 0.6), 5) * sin(ang))
+  })
+)
+
+# Ordered most- to least-distinguishable at small sizes
+shape_pool <- c("circle", "square", "triangle", "rhombus", "star")
+
+# Shapes with less usable interior than a circle are drawn larger so that the
+# labels stay legible and the *apparent* node areas stay comparable. Size
+# carries no information here.
+shape_scale <- c(circle = 1, square = 1, triangle = 1.3, rhombus = 1.15, star = 1.4)
+
+# Plotting-character equivalents, for the shape half of the legend
+shape_pch <- c(circle = 21, square = 22, triangle = 24, rhombus = 23, star = 8)
 ```
 
 
@@ -215,7 +262,7 @@ df_net %>%
 ```
 
 
-# Section 3 — Network Estimation (EBICglasso)
+# Section 3 — Network Estimation (EBICglasso) & Community Detection
 
 ```{r}
 #| label: estimate-network
@@ -242,79 +289,233 @@ rownames(adj_mat) <- short_labels[rownames(adj_mat)]
 print(adj_mat)
 ```
 
+```{r}
+#| label: ega
+
+# Exploratory Graph Analysis: the empirically derived community structure.
+# Estimated here rather than in Section 6 because every network plot from
+# Section 4 onward colours its nodes by community. Sections 6 and 8 report and
+# interrogate this same `ega_result` object; nothing is re-estimated.
+ega_result <- EGA(df_net, corr = "spearman", model = "glasso",
+                  algorithm = "walktrap", na.data = "pairwise",
+                  plot.EGA = FALSE)
+
+cat("Number of communities detected:", ega_result$n.dim, "\n")
+```
+
+```{r}
+#| label: community-aesthetics
+
+# The full-sample community assignment is reused for every network plot,
+# including the proficiency-group panels in Section 9, so that a shape means
+# the same thing in each figure and the panels stay comparable.
+comm_ids <- sort(unique(ega_result$wc))
+comm_n <- as.integer(table(factor(ega_result$wc, levels = comm_ids)))
+community_shapes <- setNames(
+  shape_pool[seq_along(comm_ids)],
+  paste0("Community ", comm_ids, " (", comm_n, ")")
+)
+node_shapes <- unname(community_shapes[match(ega_result$wc[node_order], comm_ids)])
+
+# Node sizes are fixed here (not per-figure) because the overlap relaxation
+# below works in the same [-1, 1] coordinate frame that qgraph plots into.
+node_vsize <- unname(7.5 * shape_scale[node_shapes])
+
+cat("Construct (colour) x EGA community (shape):\n")
+print(table(Construct = factor(node_construct, levels = names(construct_members)),
+            Community = ega_result$wc[node_order]))
+cat("\nPer-node assignment:\n")
+print(data.frame(
+  Variable  = unname(net_labels),
+  Construct = unname(node_construct),
+  Community = unname(ega_result$wc[node_order])
+), row.names = FALSE)
+```
+
+```{r}
+#| label: plot-helpers
+
+# A spring layout places strongly connected nodes almost on top of each other —
+# Loss and VarLoss have a partial correlation near .7 and land within a node
+# width of each other, so the glyphs collide and the community shapes stop being
+# readable. This nudges any overlapping pair apart while holding every node
+# inside the plotting box, which preserves the spring structure but guarantees
+# the silhouettes stay separable. `radius_scale` converts qgraph's `vsize` into
+# the half-width of a node in plot coordinates.
+relax_overlap <- function(co, vsize, iter = 600, pad = 1.10, radius_scale = 0.019) {
+  r <- vsize * radius_scale
+  lim <- 1 - r
+  n <- nrow(co)
+  for (it in seq_len(iter)) {
+    moved <- FALSE
+    for (i in seq_len(n - 1)) {
+      for (j in (i + 1):n) {
+        d <- co[j, ] - co[i, ]
+        dist <- sqrt(sum(d^2))
+        need <- pad * (r[i] + r[j])
+        if (dist < need) {
+          if (dist < 1e-8) { d <- c(1e-3, 0); dist <- 1e-3 }
+          push <- 0.55 * (need - dist) / 2
+          u <- d / dist
+          co[i, ] <- co[i, ] - u * push
+          co[j, ] <- co[j, ] + u * push
+          moved <- TRUE
+        }
+      }
+    }
+    co[, 1] <- pmax(pmin(co[, 1], lim), -lim)
+    co[, 2] <- pmax(pmin(co[, 2], lim), -lim)
+    if (!moved) break
+  }
+  # Centre, then expand by a single factor so the graph fills the frame instead
+  # of sitting in a band. One factor for both axes: a per-axis rescale would
+  # stretch the layout and misrepresent the distances the spring layout encodes.
+  co <- sweep(co, 2, c(mean(range(co[, 1])), mean(range(co[, 2]))))
+  headroom <- 1 - max(r)
+  scale <- min(headroom / max(abs(co[, 1])), headroom / max(abs(co[, 2])))
+  co * max(1, scale)
+}
+
+# Spring coordinates for one graph, already de-overlapped
+spring_coords <- function(graph, seed = 42) {
+  set.seed(seed)
+  qg <- qgraph(graph, layout = "spring", vsize = node_vsize, DoNotPlot = TRUE)
+  relax_overlap(qg$layout, node_vsize)
+}
+
+# Legend in its own panel so it can never overlap the graph. Three blocks:
+# shape (the primary reading), colour (secondary), edge style (sign).
+draw_network_legend <- function(cex = 0.82, swatches = construct_colors) {
+  op <- par(mar = c(0, 0, 0, 0))
+  on.exit(par(op))
+  plot.new()
+  plot.window(xlim = c(0, 1), ylim = c(0, 1))
+  legend(0, 0.98, legend = names(community_shapes),
+         pch = unname(shape_pch[community_shapes]), pt.bg = "grey92",
+         col = "grey10", pt.lwd = 1.6, pt.cex = 1.8, cex = cex, bty = "n",
+         title = "EGA community (shape)", title.adj = 0, y.intersp = 1.3)
+  legend(0, 0.70, legend = names(construct_colors), pch = 22,
+         pt.bg = unname(swatches), col = "grey45", pt.cex = 1.8,
+         cex = cex, bty = "n", title = "Construct (colour)",
+         title.adj = 0, y.intersp = 1.3)
+  legend(0, 0.34, legend = c("positive", "negative"), lty = c(1, 2),
+         lwd = 2.4, col = "grey25", cex = cex, bty = "n",
+         title = "Partial correlation", title.adj = 0, y.intersp = 1.3)
+}
+
+# Single entry point for every network figure, so the encoding cannot drift.
+#
+# `minimum` hides edges below |.05| and `cut` gives full width and saturation to
+# edges above |.10|: the network is dense (105 possible edges, half of them
+# below |.03|) and one edge — Loss-VarLoss at .70 — otherwise compresses
+# everything else into invisible hairlines. The complete weighted adjacency
+# matrix is printed above, so nothing is lost, only decluttered.
+# `negDashed` makes edge sign readable in black and white.
+plot_network <- function(graph, coords, title = "", legend = TRUE,
+                         minimum = 0.05, cut = 0.10, color = node_colors,
+                         posCol = "#2166AC", negCol = "#B2182B",
+                         swatches = construct_colors, ...) {
+  if (legend) graphics::layout(matrix(1:2, nrow = 1), widths = c(1, 0.32))
+  qg <- qgraph(graph,
+               layout = coords,
+               rescale = FALSE,
+               labels = net_labels,
+               color = color,
+               shape = node_shapes,
+               polygonList = shape_polygons,
+               vsize = node_vsize,
+               borders = TRUE,
+               border.width = 2.6,
+               border.color = "grey10",
+               label.scale.equal = TRUE,
+               label.color = "grey5",
+               negDashed = TRUE,
+               minimum = minimum,
+               cut = cut,
+               esize = 10,
+               legend = FALSE,
+               posCol = posCol,
+               negCol = negCol,
+               title = title,
+               title.cex = 1.2,
+               # qgraph's `mar` pads the [-1, 1] box in tenths; keep it tight so
+               # the graph fills the panel, with extra headroom for the title.
+               mar = c(2, 2, 4, 2),
+               ...)
+  if (legend) {
+    draw_network_legend(swatches = swatches)
+    graphics::layout(1)
+  }
+  invisible(qg)
+}
+```
+
 
 # Section 4 — Network Visualization
 
+Node **shape** encodes the empirically derived EGA community — the primary
+reading, and the one channel that survives black-and-white printing. Node
+**colour** is the a priori theoretical construct, deliberately desaturated so it
+sits behind the shapes. Nodes whose colour disagrees with the shapes around them
+are the cases where the data depart from the a priori grouping. Solid edges are
+positive partial correlations, dashed edges negative.
+
 ```{r}
 #| label: network-spring
-#| fig-cap: "GGM network (spring layout, Fruchterman-Reingold)"
-#| fig-width: 10
-#| fig-height: 10
+#| fig-cap: "GGM network (spring layout, Fruchterman-Reingold). Shape = EGA community, colour = theoretical construct; edges below |.05| omitted."
+#| fig-width: 13
+#| fig-height: 8.5
 
-# Assign short labels for the plot
-net_labels <- short_labels[colnames(network$graph)]
+spring_layout <- spring_coords(network$graph)
 
-spring_layout <- qgraph(network$graph,
-       layout = "spring",
-       labels = net_labels,
-       groups = groups,
-       color = group_colors,
-       legend = TRUE,
-       legend.cex = 0.45,
-       borders = TRUE,
-       border.width = 1.5,
-       vsize = 8,
-       esize = 8,
-       edge.color = NULL,
-       posCol = "#2166AC",
-       negCol = "#B2182B",
-       title = "ELLIPSE Linguistic Features — GGM Network",
-       title.cex = 1.2)
+plot_network(network$graph, spring_layout,
+             title = "ELLIPSE Linguistic Features — GGM Network")
 ```
 
 ```{r}
 #| label: save-spring-plot
 #| include: false
 
-pdf("../../fig/network_spring.pdf", width = 10, height = 10)
-qgraph(network$graph,
-       layout = "spring",
-       labels = net_labels,
-       groups = groups,
-       color = group_colors,
-       legend = TRUE,
-       legend.cex = 0.45,
-       borders = TRUE,
-       border.width = 1.5,
-       vsize = 8,
-       esize = 8,
-       posCol = "#2166AC",
-       negCol = "#B2182B",
-       title = "ELLIPSE Linguistic Features — GGM Network")
+pdf("../../fig/network_spring.pdf", width = 13, height = 8.5)
+plot_network(network$graph, spring_layout,
+             title = "ELLIPSE Linguistic Features — GGM Network")
 dev.off()
 cat("Saved to fig/network_spring.pdf\n")
 ```
 
 ```{r}
 #| label: network-circle
-#| fig-cap: "GGM network (circle layout)"
-#| fig-width: 10
+#| fig-cap: "GGM network (circle layout). Shape = EGA community, colour = theoretical construct; edges below |.05| omitted."
+#| fig-width: 12
 #| fig-height: 10
 
-qgraph(network$graph,
-       layout = "circle",
-       labels = net_labels,
-       groups = groups,
-       color = group_colors,
-       legend = TRUE,
-       legend.cex = 0.45,
-       borders = TRUE,
-       border.width = 1.5,
-       vsize = 8,
-       esize = 8,
-       posCol = "#2166AC",
-       negCol = "#B2182B",
-       title = "ELLIPSE Linguistic Features — GGM Network (Circle)")
+circle_layout <- local({
+  ang <- seq(pi / 2, pi / 2 - 2 * pi, length.out = length(node_order) + 1)[-1]
+  cbind(0.82 * cos(ang), 0.82 * sin(ang))
+})
+
+plot_network(network$graph, circle_layout,
+             title = "ELLIPSE Linguistic Features — GGM Network (Circle)")
+```
+
+```{r}
+#| label: network-spring-greyscale
+#| fig-cap: "Greyscale proof of the spring-layout network: community (shape) and edge sign (dash) remain readable without colour."
+#| fig-width: 13
+#| fig-height: 8.5
+
+# Print check. Constructs collapse onto the grey ramp reported in Section 1;
+# communities and edge sign are unaffected because neither is carried by hue.
+grey_construct <- sapply(construct_colors, function(x) {
+  rgb <- col2rgb(x) / 255
+  grey(0.2126 * rgb[1] + 0.7152 * rgb[2] + 0.0722 * rgb[3])
+})
+
+plot_network(network$graph, spring_layout,
+             title = "GGM Network — greyscale proof",
+             color = unname(grey_construct[node_construct]),
+             swatches = grey_construct,
+             posCol = "grey20", negCol = "grey20")
 ```
 
 
@@ -367,19 +568,15 @@ print(pred_edges)
 ```
 
 
-# Section 6 — Community Detection (EGA)
+# Section 6 — Community Structure (EGA)
+
+`ega_result` is estimated in Section 3 (its communities drive the node colours
+throughout); this section reports and interrogates it.
 
 ```{r}
-#| label: ega
-#| fig-cap: "Exploratory Graph Analysis — community detection"
-#| fig-width: 10
-#| fig-height: 10
+#| label: ega-assignments
 
-ega_result <- EGA(df_net, corr = "spearman", model = "glasso",
-                  algorithm = "walktrap", na.data = "pairwise",
-                  plot.EGA = TRUE)
-
-cat("\nNumber of communities detected:", ega_result$n.dim, "\n")
+cat("Number of communities detected:", ega_result$n.dim, "\n")
 cat("\nCommunity assignments:\n")
 
 # Show assignments with short labels
@@ -562,117 +759,97 @@ print(do.call(rbind, lapply(c("mean_loss", "var_loss"), cross_load_summary)),
 df_grp <- df_raw
 prompt_grp <- df_grp$prompt
 
-# Define proficiency groups
-df_grp$prof_group <- case_when(
-  df_grp$Overall <= 2.5 ~ "Low",
-  df_grp$Overall >= 4.0 ~ "High",
-  TRUE ~ "Mid"
-)
+# Three proficiency groups in (approximately) equal bins. `Overall` is discrete
+# — 9 levels in 0.5 steps, with heavy ties — so exact equal-n tertiles would
+# split essays with identical scores across groups. Instead the two cutpoints
+# are placed at the observed score levels closest to the 1/3 and 2/3 quantiles,
+# which keeps every tied score intact and still yields near-equal bins.
+score_counts <- table(df_grp$Overall)
+score_levels <- as.numeric(names(score_counts))
+cum_prop <- cumsum(score_counts) / nrow(df_grp)
+cut_low  <- score_levels[which.min(abs(cum_prop - 1 / 3))]
+cut_high <- score_levels[which.min(abs(cum_prop - 2 / 3))]
 
-cat("Proficiency group sizes:\n")
-print(table(df_grp$prof_group))
+df_grp$prof_group <- factor(
+  ifelse(df_grp$Overall <= cut_low, "Low",
+         ifelse(df_grp$Overall <= cut_high, "Mid", "High")),
+  levels = c("Low", "Mid", "High")
+)
+prof_levels <- levels(df_grp$prof_group)
+
+cat("Cutpoints on Overall: Low <=", cut_low, "| Mid <=", cut_high, "| High >", cut_high, "\n\n")
+cat("Proficiency group sizes and score ranges:\n")
+print(data.frame(
+  Group = prof_levels,
+  n = as.integer(table(df_grp$prof_group)),
+  Min = tapply(df_grp$Overall, df_grp$prof_group, min),
+  Max = tapply(df_grp$Overall, df_grp$prof_group, max),
+  Pct = round(100 * as.numeric(table(df_grp$prof_group)) / nrow(df_grp), 1)
+), row.names = FALSE)
 
 # Select feature columns (without clauses_per_tunit)
 keep_vars <- setdiff(feature_vars, "clauses_per_tunit")
 
-# Low proficiency: residualize on prompt
-low_idx <- df_grp$prof_group == "Low"
-df_low <- df_grp[low_idx, keep_vars]
-prompt_low <- prompt_grp[low_idx]
-for (var in names(df_low)) {
-  df_low[[var]] <- residuals(lm(df_low[[var]] ~ factor(prompt_low),
-                                na.action = na.exclude))
+# Residualize on prompt within each group, exactly as for the full sample
+residualize_group <- function(g) {
+  idx <- df_grp$prof_group == g
+  d <- df_grp[idx, keep_vars]
+  pr <- prompt_grp[idx]
+  for (var in names(d)) {
+    d[[var]] <- residuals(lm(d[[var]] ~ factor(pr), na.action = na.exclude))
+  }
+  d
 }
-
-# High proficiency: same treatment
-high_idx <- df_grp$prof_group == "High"
-df_high <- df_grp[high_idx, keep_vars]
-prompt_high <- prompt_grp[high_idx]
-for (var in names(df_high)) {
-  df_high[[var]] <- residuals(lm(df_high[[var]] ~ factor(prompt_high),
-                                 na.action = na.exclude))
-}
-
-cat("\nLow proficiency n:", nrow(df_low), "\n")
-cat("High proficiency n:", nrow(df_high), "\n")
+df_prof <- lapply(setNames(prof_levels, prof_levels), residualize_group)
 ```
 
 ```{r}
 #| label: estimate-group-networks
 
-net_low <- estimateNetwork(df_low, default = "EBICglasso", tuning = 0.5,
-                           corMethod = "spearman", missing = "pairwise")
-net_high <- estimateNetwork(df_high, default = "EBICglasso", tuning = 0.5,
-                            corMethod = "spearman", missing = "pairwise")
+nets_prof <- lapply(df_prof, function(d) {
+  estimateNetwork(d, default = "EBICglasso", tuning = 0.5,
+                  corMethod = "spearman", missing = "pairwise")
+})
+
+cat("Non-zero edges per group (of", sum(upper.tri(nets_prof$Low$graph)), "possible):\n")
+print(sapply(nets_prof, function(n) sum(n$graph[upper.tri(n$graph)] != 0)))
 ```
 
 ```{r}
 #| label: group-network-plots
-#| fig-cap: "Network comparison: Low vs High proficiency"
-#| fig-width: 14
-#| fig-height: 7
+#| fig-cap: "Network comparison across three equal-bin proficiency groups. Shape = full-sample EGA community, colour = theoretical construct; layout, edge scaling and the |.05| display threshold are shared across panels."
+#| fig-width: 18
+#| fig-height: 6
 
-# Use the same layout for both (average of spring layouts)
-avg_layout <- averageLayout(net_low$graph, net_high$graph)
+# One layout and one edge-width scale for all three panels, so differences in
+# the pictures are differences in the networks.
+avg_layout <- relax_overlap(
+  do.call(averageLayout, lapply(nets_prof, function(n) n$graph)),
+  node_vsize
+)
+prof_max <- max(abs(unlist(lapply(nets_prof, function(n) n$graph))))
 
-par(mfrow = c(1, 2))
+plot_proficiency_panels <- function() {
+  graphics::layout(matrix(1:4, nrow = 1), widths = c(1, 1, 1, 0.42))
+  for (g in prof_levels) {
+    plot_network(nets_prof[[g]]$graph, avg_layout,
+                 title = paste0(g, " proficiency (n = ", nrow(df_prof[[g]]), ")"),
+                 legend = FALSE,
+                 maximum = prof_max)
+  }
+  draw_network_legend()
+  graphics::layout(1)
+}
 
-qgraph(net_low$graph,
-       layout = avg_layout,
-       labels = net_labels,
-       groups = groups,
-       color = group_colors,
-       legend = FALSE,
-       borders = TRUE,
-       border.width = 1.5,
-       vsize = 7,
-       esize = 8,
-       posCol = "#2166AC",
-       negCol = "#B2182B",
-       title = "Low Proficiency",
-       title.cex = 1.3,
-       maximum = max(abs(c(net_low$graph, net_high$graph))))
-
-qgraph(net_high$graph,
-       layout = avg_layout,
-       labels = net_labels,
-       groups = groups,
-       color = group_colors,
-       legend = FALSE,
-       borders = TRUE,
-       border.width = 1.5,
-       vsize = 7,
-       esize = 8,
-       posCol = "#2166AC",
-       negCol = "#B2182B",
-       title = "High Proficiency",
-       title.cex = 1.3,
-       maximum = max(abs(c(net_low$graph, net_high$graph))))
-
-par(mfrow = c(1, 1))
+plot_proficiency_panels()
 ```
 
 ```{r}
 #| label: save-group-plots
 #| include: false
 
-pdf("../../fig/network_group_comparison.pdf", width = 14, height = 7)
-par(mfrow = c(1, 2))
-qgraph(net_low$graph,
-       layout = avg_layout, labels = net_labels,
-       groups = groups, color = group_colors, legend = FALSE,
-       borders = TRUE, border.width = 1.5, vsize = 7, esize = 8,
-       posCol = "#2166AC", negCol = "#B2182B",
-       title = "Low Proficiency", title.cex = 1.3,
-       maximum = max(abs(c(net_low$graph, net_high$graph))))
-qgraph(net_high$graph,
-       layout = avg_layout, labels = net_labels,
-       groups = groups, color = group_colors, legend = FALSE,
-       borders = TRUE, border.width = 1.5, vsize = 7, esize = 8,
-       posCol = "#2166AC", negCol = "#B2182B",
-       title = "High Proficiency", title.cex = 1.3,
-       maximum = max(abs(c(net_low$graph, net_high$graph))))
-par(mfrow = c(1, 1))
+pdf("../../fig/network_group_comparison.pdf", width = 18, height = 6)
+plot_proficiency_panels()
 dev.off()
 cat("Saved to fig/network_group_comparison.pdf\n")
 ```
@@ -681,44 +858,58 @@ cat("Saved to fig/network_group_comparison.pdf\n")
 #| label: network-compare
 #| output: false
 
-# EGAnet permutation network comparison.
+# EGAnet permutation network comparison, run for all three pairs of groups.
 # Feed the residualized group DATA FRAMES.
 # nc$network is a matrix with columns sF (signed Frobenius),
 # JSS (Jensen-Shannon similarity), and Total Strength.
-set.seed(42)
-nc <- network.compare(
-  base = df_low, comparison = df_high,
-  corr = "spearman", model = "glasso",
-  na.data = "pairwise",
-  iter = 1000, seed = 42
+# In each comparison the statistic is oriented as `comparison - base`.
+prof_pairs <- list(
+  c("Low", "Mid"),
+  c("Mid", "High"),
+  c("Low", "High")
 )
+names(prof_pairs) <- sapply(prof_pairs, paste, collapse = " vs ")
 
-cat("=== Permutation Network Comparison (network.compare) ===\n\n")
-cat("Omnibus structural comparison (statistic + permutation p per measure):\n")
-print(nc$network)   # cols: sF (signed Frobenius), JSS, Total Strength
+set.seed(42)
+nc_list <- lapply(prof_pairs, function(pair) {
+  network.compare(
+    base = df_prof[[pair[1]]], comparison = df_prof[[pair[2]]],
+    corr = "spearman", model = "glasso",
+    na.data = "pairwise",
+    iter = 1000, seed = 42
+  )
+})
+
+cat("=== Permutation Network Comparison (network.compare) ===\n")
+for (nm in names(nc_list)) {
+  cat("\n---", nm, "(statistic oriented as second - first) ---\n")
+  print(nc_list[[nm]]$network)   # cols: sF (signed Frobenius), JSS, Total Strength
+}
 ```
 
 ```{r}
 #| label: network-compare-edges
 #| output: false
 
-# nc$edges is a list of 15x15 matrices: statistic (High - Low), p.value,
+# nc$edges is a list of 15x15 matrices: statistic (comparison - base), p.value,
 # p.adjusted (BH), M_permutated, SD_permutated. Report edges whose BH-adjusted
-# permutation p < 0.05 (upper triangle only).
-padj <- nc$edges$p.adjusted
-stat <- nc$edges$statistic
-ut <- which(upper.tri(padj) & padj < 0.05, arr.ind = TRUE)
-cat("Per-edge differences (BH-adjusted p < 0.05):\n")
-if (nrow(ut) > 0) {
-  sig_edges <- data.frame(
-    Node1 = short_labels[rownames(padj)[ut[, "row"]]],
-    Node2 = short_labels[colnames(padj)[ut[, "col"]]],
-    Statistic = round(stat[ut], 3),
-    p_adjusted = round(padj[ut], 3)
-  ) %>% arrange(p_adjusted)
-  print(sig_edges, row.names = FALSE)
-} else {
-  cat("No individual edges differ after BH correction.\n")
+# permutation p < 0.05 (upper triangle only), for each pair of groups.
+for (nm in names(nc_list)) {
+  padj <- nc_list[[nm]]$edges$p.adjusted
+  stat <- nc_list[[nm]]$edges$statistic
+  ut <- which(upper.tri(padj) & padj < 0.05, arr.ind = TRUE)
+  cat("\n---", nm, "— per-edge differences (BH-adjusted p < 0.05) ---\n")
+  if (nrow(ut) > 0) {
+    sig_edges <- data.frame(
+      Node1 = short_labels[rownames(padj)[ut[, "row"]]],
+      Node2 = short_labels[colnames(padj)[ut[, "col"]]],
+      Statistic = round(stat[ut], 3),
+      p_adjusted = round(padj[ut], 3)
+    ) %>% arrange(p_adjusted)
+    print(sig_edges, row.names = FALSE)
+  } else {
+    cat("No individual edges differ after BH correction.\n")
+  }
 }
 ```
 
@@ -728,10 +919,11 @@ if (nrow(ut) > 0) {
 
 # loadings-based permutation invariance test (Jamison, Christensen & Golino, 2024)
 # Alternative/supplement to network.compare above if RQ4 is framed as invariance.
+# invariance() takes all three groups at once and reports every pairwise contrast.
 
 inv <- invariance(
-  data = rbind(df_low, df_high),
-  groups = c(rep("Low", nrow(df_low)), rep("High", nrow(df_high))),
+  data = do.call(rbind, df_prof),
+  groups = rep(prof_levels, sapply(df_prof, nrow)),
   corr = "spearman", na.data = "pairwise", iter = 1000, seed = 42
 )
 print(inv$results)   # per-node loading differences + permutation p-values
@@ -740,25 +932,28 @@ print(inv$results)   # per-node loading differences + permutation p-values
 ```{r}
 #| label: compare-predictability
 
-# Predictability-focused edge comparison: partial correlation in each group
-# (Spearman group networks) plus the permutation difference test from
-# network.compare (nc$edges: statistic = High - Low, p.value, BH p.adjusted).
-# All matrices indexed by node name to keep columns aligned.
+# Predictability-focused edge comparison: partial correlation in each of the
+# three groups (Spearman group networks) plus the Low-vs-High permutation
+# difference test from network.compare (statistic = High - Low, p.value, BH
+# p.adjusted). All matrices indexed by node name to keep columns aligned.
+nc_lh <- nc_list[["Low vs High"]]
+
 pred_edge_table <- function(node) {
-  partners <- colnames(net_low$graph)
+  partners <- colnames(nets_prof$Low$graph)
   data.frame(
     Partner = short_labels[partners],
-    Low = round(net_low$graph[node, partners], 3),
-    High = round(net_high$graph[node, partners], 3),
-    Diff = round(nc$edges$statistic[node, partners], 3),
-    p_value = round(nc$edges$p.value[node, partners], 3),
-    p_adjusted = round(nc$edges$p.adjusted[node, partners], 3)
+    Low = round(nets_prof$Low$graph[node, partners], 3),
+    Mid = round(nets_prof$Mid$graph[node, partners], 3),
+    High = round(nets_prof$High$graph[node, partners], 3),
+    Diff_HL = round(nc_lh$edges$statistic[node, partners], 3),
+    p_value = round(nc_lh$edges$p.value[node, partners], 3),
+    p_adjusted = round(nc_lh$edges$p.adjusted[node, partners], 3)
   ) %>%
     filter(!Partner %in% c("Loss", "VarLoss")) %>%
-    arrange(desc(abs(Diff)))
+    arrange(desc(abs(Diff_HL)))
 }
 
-cat("mean_loss (Loss) — edge weight Low vs High + permutation test:\n")
+cat("mean_loss (Loss) — edge weight by proficiency group + Low-vs-High test:\n")
 print(pred_edge_table("mean_loss"), row.names = FALSE)
 cat("\nvar_loss (VarLoss):\n")
 print(pred_edge_table("var_loss"), row.names = FALSE)
@@ -820,11 +1015,18 @@ CS-coefficients and edge-accuracy CIs are reported in Section 7.
 
 ## 6. Proficiency group differences (network.compare)
 
-Omnibus structural comparison: signed Frobenius (sF), Jensen-Shannon similarity
-(JSS), and total strength with permutation *p*-values:
+Three equal-bin proficiency groups (Low / Mid / High), all three pairwise
+comparisons. Omnibus structural comparison: signed Frobenius (sF),
+Jensen-Shannon similarity (JSS), and total strength with permutation
+*p*-values. The statistic is oriented as (second group − first group).
 
 ```{r}
 #| label: summary-network-compare
 #| echo: false
-knitr::kable(round(nc$network, 3))
+nc_summary <- do.call(rbind, lapply(names(nc_list), function(nm) {
+  m <- round(nc_list[[nm]]$network, 3)
+  data.frame(Comparison = nm, Quantity = rownames(m), m, row.names = NULL,
+             check.names = FALSE)
+}))
+knitr::kable(nc_summary)
 ```
