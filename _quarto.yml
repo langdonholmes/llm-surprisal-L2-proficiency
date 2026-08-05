@@ -1,0 +1,17 @@
+# Quarto project configuration.
+#
+# The only reason this file exists is `execute-dir: project`. Without it,
+# Quarto executes each notebook with the working directory set to that
+# notebook's own folder, so R never sources the project-root `.Rprofile` and
+# renv never activates -- renders silently resolve packages from the system
+# library instead of `renv/library`, which makes renv.lock a description of an
+# environment nothing actually runs in.
+#
+# With `execute-dir: project`, every render starts at the repo root, the root
+# `.Rprofile` runs `renv/activate.R`, and the lockfile governs. All paths
+# inside notebooks are therefore relative to the REPO ROOT, not to the .qmd.
+project:
+  type: default
+  execute-dir: project
+  render:
+    - src/**/*.qmd

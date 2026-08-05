@@ -53,7 +53,7 @@ set.seed(42)
 ```{r}
 #| label: load-data
 
-d_raw <- read_csv("../../data/ellipse/ellipse_metrics.csv",
+d_raw <- read_csv("data/ellipse/ellipse_metrics.csv",
                   show_col_types = FALSE)
 
 d <- d_raw |>

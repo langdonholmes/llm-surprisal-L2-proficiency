@@ -33,3 +33,6 @@ Thumbs.db
 
 # Log Files
 *.log
+
+/.quarto/
+**/*.quarto_ipynb

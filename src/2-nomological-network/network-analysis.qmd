@@ -41,7 +41,7 @@ library(lavaan)
 # ellipse_metrics.csv carries the 16 linguistic features + ELLIPSE scores +
 # predictability (mean_loss, var_loss) from the Study 1 benchmark model
 # (Llama-3.1-8B base). All networks below use Spearman correlations.
-df_raw <- read.csv("../../data/ellipse/ellipse_metrics.csv")
+df_raw <- read.csv("data/ellipse/ellipse_metrics.csv")
 
 cat("Raw data:", nrow(df_raw), "rows x", ncol(df_raw), "columns\n")
 ```
@@ -589,7 +589,7 @@ plot_network(network$graph, spring_layout,
 #| label: save-spring-plot
 #| include: false
 
-pdf("../../fig/network_spring.pdf", width = 13, height = 8.5)
+pdf("fig/network_spring.pdf", width = 13, height = 8.5)
 plot_network(network$graph, spring_layout,
              title = "ELLIPSE Linguistic Features — GGM Network")
 dev.off()
@@ -801,7 +801,7 @@ plot(boot_nonparam, labels = net_labels,
 #| label: save-edge-boot
 #| include: false
 
-pdf("../../fig/network_edge_bootstrap.pdf", width = 12, height = 10)
+pdf("fig/network_edge_bootstrap.pdf", width = 12, height = 10)
 plot(boot_nonparam, labels = net_labels,
      order = "sample", CIstyle = "quantiles")
 dev.off()
@@ -975,7 +975,7 @@ plot_proficiency_panels()
 #| label: save-group-plots
 #| include: false
 
-pdf("../../fig/network_group_comparison.pdf", width = 18, height = 6)
+pdf("fig/network_group_comparison.pdf", width = 18, height = 6)
 plot_proficiency_panels()
 dev.off()
 cat("Saved to fig/network_group_comparison.pdf\n")
