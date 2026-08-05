@@ -61,11 +61,18 @@ d <- d_raw |>
     text_id_kaggle,
     prompt,
     neg_loss    = -mean_loss,
+    cohesion    = Cohesion,
+    syntax      = Syntax,
+    vocabulary  = Vocabulary,
     phraseology = Phraseology,
     grammar     = Grammar,
-    vocabulary  = Vocabulary,
+    conventions = Conventions,
     n_tokens    = n_tokens
   )
+
+# The six analytic criteria, in the order ELLIPSE reports them.
+crit <- c("cohesion", "syntax", "vocabulary",
+          "phraseology", "grammar", "conventions")
 
 cat("Rows loaded:", nrow(d), "\n")
 na_counts <- colSums(is.na(d))
@@ -77,7 +84,7 @@ d <- drop_na(d)
 cat("Complete cases used:", nrow(d), "\n\n")
 
 cat("Rating scales (ELLIPSE ratings are ordinal, 1-5 in 0.5 steps):\n")
-print(map_dfr(d[c("phraseology", "grammar", "vocabulary")],
+print(map_dfr(d[crit],
               \(x) tibble(min = min(x), max = max(x),
                           levels = n_distinct(x), sd = sd(x)),
               .id = "variable"))
@@ -99,7 +106,7 @@ indistinguishable and re-ranking is far slower.
 ```{r}
 #| label: rank-transform
 
-vars <- c("neg_loss", "phraseology", "grammar", "vocabulary", "n_tokens")
+vars <- c("neg_loss", crit, "n_tokens")
 dr <- d |> mutate(across(all_of(vars), \(x) rank(x)))
 ```
 
@@ -217,7 +224,7 @@ print(as.data.frame(res2), row.names = FALSE)
 prop <- res2 |>
   filter(component %in% c("U_phr", "U_gram", "Common")) |>
   mutate(pct_of_R2 = round(100 * estimate / est2[["R2"]], 1)) |>
-  select(component, estimate, pct_of_R2)
+  dplyr::select(component, estimate, pct_of_R2)
 
 cat("Share of the explained variance (R2 =", round(est2[["R2"]], 4), "):\n")
 print(as.data.frame(prop), row.names = FALSE)
@@ -304,6 +311,198 @@ Commonality components can legitimately be **negative**, which indicates
 suppression rather than an error. Any negative component above should be read
 that way, not as a computational problem.
 
+# Relative importance across all six criteria
+
+Commonality analysis exposes the problem but does not solve it: with ~70% of the
+explained variance shared, the *unique* components understate every predictor,
+and they understate the correlated ones most. Ranking criteria by unique
+variance therefore rewards whichever rating happens to be least redundant with
+the others, which is not the same as importance.
+
+**LMG** (Lindeman, Merenda & Gold, 1980), the Shapley-value decomposition,
+answers the question the unique components cannot. It averages each predictor's
+sequential $R^2$ contribution over **all $6! = 720$ orderings** of entry, so
+shared variance is *allocated* among the predictors that share it rather than
+discarded. The weights are non-negative and sum exactly to $R^2$, which makes
+them readable as "this criterion's share of the explained variance."
+
+Both metrics are reported below, because the contrast between them is
+informative in itself:
+
+- `lmg` — Shapley share, shared variance allocated.
+- `last` — the variance a criterion adds when entered last. This is exactly the
+  squared semipartial, and exactly the *unique* commonality component from the
+  sections above, generalized to six predictors.
+
+A criterion with a large `lmg` but a near-zero `last` contributes almost
+entirely through variance it shares with the other ratings.
+
+```{r}
+#| label: relimp-setup
+library(relaimpo)
+
+m_all <- lm(reformulate(crit, "neg_loss"), data = dr)
+cat("Full model R2 =", round(summary(m_all)$r.squared, 5), "\n")
+```
+
+```{r}
+#| label: relimp-coherence
+
+# `last` from relaimpo must reproduce the unique commonality components
+# computed by hand earlier. Checked on the two-predictor model so the two
+# sections are demonstrably the same decomposition, not merely similar.
+m2 <- lm(neg_loss ~ phraseology + grammar, data = dr)
+last2 <- calc.relimp(m2, type = "last", rela = FALSE)$last
+
+coh <- tibble(
+  component   = c("U_phr", "U_gram"),
+  commonality = c(est2[["U_phr"]], est2[["U_gram"]]),
+  relaimpo_last = c(last2[["phraseology"]], last2[["grammar"]])
+) |> mutate(abs_diff = abs(commonality - relaimpo_last))
+
+print(as.data.frame(coh), row.names = FALSE)
+stopifnot(all(coh$abs_diff < 1e-10))
+cat("\nrelaimpo's `last` reproduces the commonality unique components exactly.\n")
+```
+
+```{r}
+#| label: relimp-point
+
+ri_raw  <- calc.relimp(m_all, type = c("lmg", "last"), rela = FALSE)
+ri_rela <- calc.relimp(m_all, type = c("lmg", "last"), rela = TRUE)
+
+ri_tab <- tibble(
+  criterion = crit,
+  lmg       = as.numeric(ri_raw$lmg[crit]),
+  lmg_pct   = 100 * as.numeric(ri_rela$lmg[crit]),
+  last      = as.numeric(ri_raw$last[crit]),
+  last_pct  = 100 * as.numeric(ri_rela$last[crit])
+) |>
+  mutate(shared_share = round(100 * (1 - last / lmg), 1)) |>
+  arrange(desc(lmg)) |>
+  mutate(across(c(lmg, last), \(x) round(x, 5)),
+         across(c(lmg_pct, last_pct), \(x) round(x, 1)))
+
+print(as.data.frame(ri_tab), row.names = FALSE)
+cat("\nlmg sums to", round(sum(ri_raw$lmg), 5),
+    "= R2 =", round(summary(m_all)$r.squared, 5), "\n")
+cat("shared_share = percentage of a criterion's LMG weight that is NOT unique.\n")
+```
+
+## Bootstrap intervals
+
+`rela = FALSE` is used for the bootstrap so the weights stay in variance units
+and the intervals are not distorted by the sum-to-100% constraint that
+normalization imposes. `diff = TRUE` yields intervals on every pairwise
+difference, which is the focal test; `rank = TRUE` yields intervals on each
+criterion's rank position.
+
+```{r}
+#| label: relimp-boot
+
+set.seed(42)
+bb <- boot.relimp(m_all, b = 2000, type = "lmg",
+                  rank = TRUE, diff = TRUE, rela = FALSE)
+ev <- booteval.relimp(bb, level = 0.95)
+```
+
+```{r}
+#| label: relimp-boot-table
+
+nm <- ev@namen[-1]
+boot_tab <- tibble(
+  criterion = nm,
+  lmg       = as.numeric(ev@lmg),
+  lower     = as.numeric(ev@lmg.lower[1, ]),
+  upper     = as.numeric(ev@lmg.upper[1, ])
+) |>
+  arrange(desc(lmg)) |>
+  mutate(across(c(lmg, lower, upper), \(x) round(x, 5)))
+
+print(as.data.frame(boot_tab), row.names = FALSE)
+```
+
+```{r}
+#| label: relimp-plot
+#| fig-height: 3.5
+#| fig-width: 7
+#| fig-cap: "LMG relative importance with 95% bootstrap intervals (2,000 replicates)"
+
+boot_tab |>
+  mutate(criterion = factor(criterion, levels = rev(criterion))) |>
+  ggplot(aes(x = lmg, y = criterion)) +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.18,
+                 colour = "grey40") +
+  geom_point(size = 2.6) +
+  labs(x = expression("LMG share of " * R^2), y = NULL) +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+```
+
+## Pairwise differences
+
+relaimpo's own formatted output, which carries the rank letters:
+
+```{r}
+#| label: relimp-print
+print(ev)
+```
+
+```{r}
+#| label: relimp-diffs
+
+# The @diffnam slot comes back empty from booteval.relimp, but the difference
+# vectors are ordered exactly as combn() enumerates the pairs, so the labels
+# are reconstructed rather than read off. The stopifnot guards that assumption.
+pair_mat <- combn(nm, 2)
+pair_names <- paste0(pair_mat[1, ], " - ", pair_mat[2, ])
+stopifnot(length(pair_names) == length(as.numeric(ev@lmg.diff)))
+
+diff_tab <- tibble(
+  pair  = pair_names,
+  diff  = as.numeric(ev@lmg.diff),
+  lower = as.numeric(ev@lmg.diff.lower[1, ]),
+  upper = as.numeric(ev@lmg.diff.upper[1, ])
+) |>
+  mutate(excludes_zero = ifelse(lower > 0 | upper < 0, "yes", "no"),
+         across(c(diff, lower, upper), \(x) round(x, 5))) |>
+  arrange(desc(abs(diff)))
+
+print(as.data.frame(diff_tab), row.names = FALSE)
+
+cat("\nDifferences whose 95% interval excludes zero:",
+    sum(diff_tab$excludes_zero == "yes"), "of", nrow(diff_tab), "\n")
+```
+
+```{r}
+#| label: relimp-focal
+
+focal <- diff_tab |>
+  filter(str_detect(pair, "phraseology"), str_detect(pair, "grammar"))
+cat("Focal comparison (phraseology vs grammar):\n")
+print(as.data.frame(focal), row.names = FALSE)
+
+cat("\nInterpretation: a negative difference means grammar carries the larger",
+    "\nLMG share. The comparison is reliable only if the interval excludes 0.\n")
+```
+
+## Rank stability
+
+```{r}
+#| label: relimp-ranks
+
+rank_tab <- tibble(
+  criterion  = nm,
+  rank_est   = as.numeric(ev@lmg.rank),
+  rank_lower = as.numeric(ev@lmg.rank.lower[1, ]),
+  rank_upper = as.numeric(ev@lmg.rank.upper[1, ])
+) |> arrange(rank_est)
+stopifnot(nrow(rank_tab) == length(nm))
+
+print(as.data.frame(rank_tab), row.names = FALSE)
+cat("\nRank 1 = largest LMG weight. Intervals are over 2,000 bootstrap samples.\n")
+```
+
 # Robustness
 
 ## Controlling for essay length
@@ -365,7 +564,7 @@ comparison <- bind_rows(
   res2_resid |> mutate(model = "prompt-residualized")
 ) |>
   filter(component %in% c("U_phr", "U_gram", "Common", "R2", "Diff")) |>
-  select(model, component, estimate, lower, upper) |>
+  dplyr::select(model, component, estimate, lower, upper) |>
   pivot_wider(names_from = model, values_from = c(estimate, lower, upper))
 
 print(as.data.frame(comparison), row.names = FALSE)
