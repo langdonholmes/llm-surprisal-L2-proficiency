@@ -38,7 +38,7 @@ library(lavaan)
 
 ```{r}
 #| label: load-data
-# ellipse_metrics.csv carries the 13 linguistic features + ELLIPSE scores +
+# ellipse_metrics.csv carries the 16 linguistic features + ELLIPSE scores +
 # predictability (mean_loss, var_loss) from the Study 1 benchmark model
 # (Llama-3.1-8B base). All networks below use Spearman correlations.
 df_raw <- read.csv("../../data/ellipse/ellipse_metrics.csv")
@@ -46,24 +46,73 @@ df_raw <- read.csv("../../data/ellipse/ellipse_metrics.csv")
 cat("Raw data:", nrow(df_raw), "rows x", ncol(df_raw), "columns\n")
 ```
 
+## A note on clauses per T-unit
+
+`clauses_per_tunit` (C/T) is computed and retained in the metrics table but is
+**not entered into the network**. On this corpus it does not measure
+subordination; it measures punctuation.
+
+The T-unit is the only denominator in the battery that depends on sentence
+segmentation, and spaCy segments on punctuation. Hunt (1965) designed the T-unit
+precisely to be punctuation-independent, but a dependency operationalization does
+not inherit that immunity: an unpunctuated run-on arrives as a single sentence,
+and its independent clauses are attached to one another as though subordinate.
+`src/features/syntactic.py::_is_independent` recovers many of them — it cut the
+maximum C/T from 31 to 11 and the SD from 1.38 to 0.79 — but not enough. The
+evidence, on 6,482 essays:
+
+| Index | Spearman *r* with words per terminal punctuation mark |
+|---|---|
+| **C/T** | **+0.726** |
+| MLC | +0.117 |
+| CN/C | +0.121 |
+| CP/C | +0.078 |
+
+- 45% of the corpus exceeds 25 words per terminal punctuation mark.
+- C/T correlates −0.205 with Overall proficiency across all essays, but −0.014
+  among well-punctuated essays only (8–25 words per mark, *n* = 3,590). The
+  entire association is the confound.
+- In the run including C/T, it did not join the syntactic community. It loaded
+  0.478 on the *cohesion* community alongside sentence similarity (0.621) and
+  connective density (0.543), and its highest local dependence was with
+  connective density (wTO = .348) — a discourse-surface variable, not a
+  syntactic one.
+
+So the network placement, the proficiency correlation, and the local dependence
+all agree with the mechanism. Retaining C/T would put a punctuation index into
+the model labelled as subordination. This is the same failure mode that words per
+sentence was excluded for. Subordination is consequently not represented in the
+battery; a punctuation-independent alternative that normalizes per clause rather
+than per T-unit (e.g. adverbial clauses per clause) would be the way to restore
+it.
+
 ```{r}
 #| label: select-features
 
-# Select the 16 feature variables.
+# Select the 15 feature variables.
 #
-# The four syntactic indices are the fine-grained dependency battery
-# (src/features/syntactic.py), sampling distinct subconstructs rather than
-# accumulating redundant omnibus measures (Norris & Ortega, 2009; Bulté &
-# Housen, 2012): one phrasal index and three clausal ones. Each normalizes to a
-# syntactic unit rather than to the orthographic sentence, avoiding the
-# punctuation artifacts that compromise sentence-normalized measures in learner
-# corpora (Kyle & Crossley, 2018). `words_per_clause` is also present in the CSV
-# as the reserve substitute index but is not entered here.
+# The three syntactic indices (src/features/syntactic.py) sample distinct
+# subconstructs rather than accumulating redundant omnibus measures (Norris &
+# Ortega, 2009; Bulté & Housen, 2012): length at the clausal level (MLC), and
+# phrasal elaboration and phrasal coordination at the NP level (CN/C, CP/C).
+# All three are L2SCA indices (Lu, 2010, 2011), so the battery is directly
+# comparable to the large body of work using that tool, and one clause
+# definition serves all three denominators.
+#
+# Three further indices are in the CSV but deliberately NOT entered:
+#   - `clauses_per_tunit`  -- a punctuation index here; see the note above.
+#   - `deps_per_clause`    -- (Kyle & Crossley, 2018) indexes the same
+#                             clausal-length subconstruct as MLC, which is the
+#                             far more widely reported measure.
+#   - `deps_per_nominal`   -- (Kyle & Crossley, 2018) behaved as an island,
+#                             loading -.098 on its own community and
+#                             correlating ~.00 with every ELLIPSE subscore.
 feature_vars <- c(
   # Lexical (4)
   "mtld", "lexical_density", "log_mean_token_freq", "mean_word_length",
-  # Syntactic (4)
-  "deps_per_nominal", "advmod_per_clause", "advcl_per_clause", "deps_per_clause",
+  # Syntactic (3)
+  "mean_length_of_clause",
+  "complex_nominals_per_clause", "coord_phrases_per_clause",
   # Phraseological (3)
   "amod_mi", "dobj_mi", "advmod_mi",
   # Cohesion (3)
@@ -74,9 +123,9 @@ feature_vars <- c(
 
 df_features <- df_raw[, feature_vars]
 
-# Variance check: a constant variable cannot enter a network. (The previous
-# clauses_per_tunit index was constant at 1 and had to be dropped here; the
-# unit-normalized battery that replaced it is checked rather than assumed.)
+# Variance check: a constant variable cannot enter a network. (An early version
+# of the syntactic battery produced an index that was constant at 1 and had to
+# be caught here, so every battery since is checked rather than assumed.)
 var_check <- data.frame(
   Variable = feature_vars,
   Unique = sapply(df_features, function(x) length(unique(na.omit(x)))),
@@ -132,103 +181,55 @@ print(r2_df, row.names = FALSE)
 
 ## Local dependence screening (UVA)
 
-The syntactic battery is not fully independent by construction: adverbial
-modifiers and adverbial clauses are both subsets of clausal dependents, so
-`deps_per_clause` partially subsumes `advmod_per_clause` and
-`advcl_per_clause`. This nesting is a known feature of the Kyle and Crossley
-(2018) index set, which was developed as a candidate pool for feature selection
-rather than as a non-redundant battery. Redundancy is therefore screened
-empirically rather than assumed away.
+The syntactic battery is not independent by construction. All three indices share
+the clause as a denominator, and MLC's numerator — the word count — necessarily
+includes the postmodifiers that make a nominal complex and the conjuncts that
+make a coordinate phrase, so MLC is structurally entangled with CN/C and CP/C.
+Local dependence is therefore worth measuring.
 
-Unique Variable Analysis (Christensen, Garrido & Golino, 2023) identifies
-locally dependent pairs via weighted topological overlap, at the conventional
-wTO cutoff of .25. **Pre-registered rule:** where a pair of syntactic indices is
-flagged, the broader index is removed in favour of the two narrower ones, on the
-grounds that the narrower indices carry interpretable structural information
-that the aggregate does not. `deps_per_clause` is thus the designated candidate
-for removal. Should the two clause-level modification indices instead prove
-locally dependent with each other, `words_per_clause` is available in the
-metrics table as a substitute phrasal-at-clause-level index.
+Unique Variable Analysis (Christensen, Garrido & Golino, 2023) quantifies it via
+weighted topological overlap. This section **reports** wTO and does not act on
+it: no variable is removed or combined here, and the conventional .25 cutoff is
+printed only as a reference line. Local dependence is evidence to weigh, not a
+decision procedure — which indices belong in the network is a question about
+constructs, and a topological-overlap statistic cannot settle it. Where a pair
+looks dependent, the reading of that pair's shared community is qualified in the
+discussion rather than the pair being pruned.
 
 ```{r}
 #| label: uva-screen
 
 # Screen on the residualized data, since that is what every network below uses,
 # with the same pairwise missing-data handling as every other estimate here.
-# reduce = FALSE: UVA reports the overlap, the pre-registered rule below decides.
+# reduce = FALSE: report the overlap only. Nothing downstream consumes this.
 uva <- UVA(data = df_net, cut.off = 0.25, reduce = FALSE,
            na.data = "pairwise", verbose = FALSE)
 
 wto_pairs <- uva$wto$pairwise
-flagged <- wto_pairs[wto_pairs$wto >= 0.25, ]
-flagged <- flagged[order(-flagged$wto), ]
+wto_pairs <- wto_pairs[order(-wto_pairs$wto), ]
 
 cat("Highest weighted topological overlap:", round(max(wto_pairs$wto), 3), "\n")
-cat("Pairs at or above the .25 cutoff:", nrow(flagged), "\n\n")
-if (nrow(flagged) > 0) print(flagged, row.names = FALSE)
+cat("Pairs at or above the .25 reference line:",
+    sum(wto_pairs$wto >= 0.25), "of", nrow(wto_pairs), "\n\n")
 
-cat("\nTop 8 pairs overall:\n")
-print(head(wto_pairs[order(-wto_pairs$wto), ], 8), row.names = FALSE)
+cat("Top 12 pairs by wTO (reported, not acted on):\n")
+print(head(wto_pairs, 12), row.names = FALSE)
 ```
 
 ```{r}
-#| label: uva-decision
+#| label: define-battery
 
-# Apply the pre-registered rule to the SYNTACTIC battery only. Flagged pairs
-# outside it are reported and retained, with the reason stated, rather than
-# being dropped by a rule that was never specified for them.
-syntactic_battery <- c("deps_per_nominal", "advmod_per_clause",
-                       "advcl_per_clause", "deps_per_clause")
-broader_index <- "deps_per_clause"
+# Every variable in feature_vars enters the network; UVA above is diagnostic.
+syntactic_battery <- c("mean_length_of_clause",
+                       "complex_nominals_per_clause", "coord_phrases_per_clause")
 
-syn_flagged <- flagged[flagged$node_i %in% syntactic_battery &
-                         flagged$node_j %in% syntactic_battery, ]
-
-drop_vars <- character(0)
-if (nrow(syn_flagged) > 0) {
-  if (any(apply(syn_flagged[, c("node_i", "node_j")], 1,
-                function(p) broader_index %in% p))) {
-    drop_vars <- broader_index
-    cat("Rule applied: ", broader_index,
-        " is locally dependent with a narrower clausal index and is removed.\n",
-        "Battery reduced to ", length(syntactic_battery) - 1, " indices.\n", sep = "")
-  } else {
-    # The contingency: the two narrow modification indices overlap each other,
-    # and the broader index is not involved. The plan makes words_per_clause the
-    # substitute but does not say which of the two overlapping indices it
-    # replaces, so this branch stops rather than guessing — it has never fired
-    # on these data and an automated choice here would be undocumented.
-    stop("CONTINGENCY: the two clause-level modification indices are locally ",
-         "dependent with each other and the pre-registered rule does not apply. ",
-         "Substitute words_per_clause (present in ellipse_metrics.csv) for one ",
-         "of them; the choice needs to be made and justified explicitly.")
-  }
-} else {
-  cat("No syntactic pair reached the .25 cutoff; the full four-index battery is retained.\n")
-}
-
-other_flagged <- flagged[!(flagged$node_i %in% syntactic_battery &
-                             flagged$node_j %in% syntactic_battery), ]
-if (nrow(other_flagged) > 0) {
-  cat("\nFlagged pairs outside the syntactic battery — RETAINED:\n")
-  print(other_flagged, row.names = FALSE)
-  cat("\n  mean_loss / var_loss are the focal predictability nodes; collapsing\n",
-      "  them would remove the quantity the analysis is about, and whether they\n",
-      "  are interchangeable is itself a research question. Any other pair has\n",
-      "  no pre-registered removal rule, so both members are kept and the\n",
-      "  dependence is carried forward as a caveat on their shared community.\n",
-      sep = "")
-}
-
-df_net <- df_net[, setdiff(names(df_net), drop_vars)]
-df_features <- df_features[, setdiff(names(df_features), drop_vars)]
-cat("\nVariables entering the network:", ncol(df_net), "\n")
+cat("Variables entering the network:", ncol(df_net), "\n")
 ```
 
 ```{r}
 #| label: define-groups
 
-# Theoretical groupings (construct membership), after UVA screening.
+# Theoretical groupings (construct membership).
 construct_members <- list(
   Lexical        = c("mtld", "lexical_density", "log_mean_token_freq", "mean_word_length"),
   Syntactic      = syntactic_battery,
@@ -236,10 +237,9 @@ construct_members <- list(
   Cohesion       = c("content_word_overlap", "connective_density", "sentence_similarity"),
   Predictability = c("mean_loss", "var_loss")
 )
-construct_members <- lapply(construct_members, setdiff, drop_vars)
 
 # Canonical node order, shared by the full-sample and proficiency-group networks.
-node_order <- setdiff(feature_vars, drop_vars)
+node_order <- feature_vars
 
 # Short labels for plotting
 short_labels <- c(
@@ -247,10 +247,10 @@ short_labels <- c(
   lexical_density = "LexDen",
   log_mean_token_freq = "TokFreq",
   mean_word_length = "WordLen",
-  deps_per_nominal = "DepNom",
-  advmod_per_clause = "AdvMod",
-  advcl_per_clause = "AdvCl",
-  deps_per_clause = "DepCl",
+  clauses_per_tunit = "C/T",
+  mean_length_of_clause = "MLC",
+  complex_nominals_per_clause = "CN/C",
+  coord_phrases_per_clause = "CP/C",
   amod_mi = "AmodMI",
   dobj_mi = "DobjMI",
   advmod_mi = "AdvMI",
@@ -759,10 +759,24 @@ boot_ega <- bootEGA(df_net, iter = 500,
 cat("Modal number of communities across bootstraps:",
     as.numeric(names(sort(table(boot_ega$n.dim), decreasing = TRUE))[1]), "\n")
 
-# Structural consistency
-cat("\nItem stability (proportion of bootstraps in modal community):\n")
-stab <- boot_ega$frequency
-print(round(stab, 3))
+# boot_ega$frequency is the distribution of the NUMBER of dimensions across
+# bootstraps -- not a per-item quantity. Item and dimension stability come from
+# dimensionStability(), which is what actually answers "does this node keep
+# landing in the same community?".
+cat("\nDistribution of the number of communities across bootstraps:\n")
+print(round(boot_ega$frequency, 3))
+
+dim_stab <- dimensionStability(boot_ega, verbose = FALSE)
+
+cat("\nStructural consistency (proportion of bootstraps in which each",
+    "\nempirical community is exactly recovered):\n")
+print(round(dim_stab$dimension.stability$structural.consistency, 3))
+
+cat("\nItem stability (proportion of bootstraps in which each node is",
+    "\nassigned to its empirical community):\n")
+item_stab <- dim_stab$item.stability$item.stability$empirical.dimensions
+names(item_stab) <- short_labels[names(item_stab)]
+print(round(sort(item_stab), 3))
 ```
 
 
@@ -900,7 +914,7 @@ print(data.frame(
   Pct = round(100 * as.numeric(table(df_grp$prof_group)) / nrow(df_grp), 1)
 ), row.names = FALSE)
 
-# Same variable set as the full-sample network (post-UVA)
+# Same variable set as the full-sample network
 keep_vars <- node_order
 
 # Residualize on prompt within each group, exactly as for the full sample

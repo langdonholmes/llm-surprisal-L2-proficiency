@@ -19,10 +19,9 @@ Linguistic features are computed from spaCy parses and a Dolma reference corpus:
 | Lexical density | Lexical | spaCy POS |
 | Log token frequency | Lexical | Dolma reference |
 | Mean word length | Lexical | spaCy |
-| Words per sentence | Syntactic | spaCy |
-| Clauses per T-unit | Syntactic | spaCy |
-| Modifiers per nominal | Syntactic | spaCy |
-| Mean dependency distance | Syntactic | spaCy |
+| Mean length of clause (MLC) | Syntactic | spaCy |
+| Complex nominals per clause (CN/C) | Syntactic | spaCy |
+| Coordinate phrases per clause (CP/C) | Syntactic | spaCy |
 | amod MI | Phraseological | Dolma reference |
 | dobj MI | Phraseological | Dolma reference |
 | advmod MI | Phraseological | Dolma reference |
@@ -82,8 +81,10 @@ src/
   features/                 # Linguistic feature calculators (shared lib)
     predictability.py       # Word predictability (ModernBERT surprisal + variance)
     lexical.py              # MTLD, lexical density, token frequency, word length
-    syntactic.py            # Fine-grained battery: deps/nominal, advmod/clause,
-                            #   advcl/clause, deps/clause (+ words/clause reserve)
+    syntactic.py            # L2SCA battery (Lu 2010/11): MLC, CN/C, CP/C
+                            #   (C/T + K&C 2018 deps/clause, deps/nominal are
+                            #    computed but not entered — C/T indexes
+                            #    punctuation here, MLC supersedes deps/clause)
     phraseological.py       # Dependency MI (amod, dobj, advmod)
     cohesion.py             # Content word overlap, connective density, sentence sim
   util/                     # Shared utilities
