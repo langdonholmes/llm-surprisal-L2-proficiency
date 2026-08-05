@@ -8,7 +8,7 @@ import spacy
 from spacy.tokens import DocBin
 from tqdm.auto import tqdm
 
-from features import calculate_all_features, MiCalculator
+from features import calculate_all_features, MiCalculator, n_words
 from util.paths import (
     ELLIPSE_DIR,
     ELLIPSE_DOCBINS_DIR,
@@ -139,6 +139,10 @@ def main(corpus: str = "both"):
     results = []
     for i, doc in tqdm(enumerate(docs), total=len(docs), desc="Calculating features"):
         features = calculate_all_features(doc, token_freq, total_tokens, mi_calculator)
+        # Essay length, on the same tokenization every other index here uses.
+        # Not a complexity feature -- carried as a covariate for analyses that
+        # need to show an effect is not just a length effect.
+        features["n_tokens"] = n_words(doc)
         features["text_id_kaggle"] = filenames[i]
         results.append(features)
 

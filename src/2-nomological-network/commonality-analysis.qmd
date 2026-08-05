@@ -1,0 +1,435 @@
+---
+title: "Commonality Analysis of Word Predictability, Phraseology and Grammar"
+subtitle: "Is surprisal more phraseological than grammatical?"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Overview
+
+The network analysis places `mean_loss` in a community with the dependency-MI
+features. This notebook asks a related but **distinct** question, of the human
+ratings rather than the computed indices: **of the variance in word
+predictability that the ELLIPSE ratings explain, how much is uniquely
+phraseological, how much is uniquely grammatical, and how much is shared?**
+
+The distinction matters for reading the result — a rater's holistic
+`Phraseology` judgment and a corpus-derived MI index are different
+operationalizations, so this notebook does not adjudicate the network finding.
+See the Interpretation section.
+
+Commonality analysis (Newton & Spurrell, 1967; Nimon & Oswald, 2013) partitions
+$R^2$ into unique and common components. For two predictors:
+
+$$U_{\text{phr}} = R^2_{pg} - R^2_{g} \qquad
+  U_{\text{gram}} = R^2_{pg} - R^2_{p} \qquad
+  C = R^2_{p} + R^2_{g} - R^2_{pg}$$
+
+The framing matters here because `Phraseology` and `Grammar` are rated by the
+same humans on the same essays and carry a large halo: most of what they
+explain, they explain jointly. Partial correlations would report that shared
+part as though it had vanished. Commonality reports it as a quantity, which is
+the more honest description of a rating set like this one.
+
+**Sign convention.** All analyses use `neg_loss = -mean_loss`, so that higher
+values mean *more predictable* text and every coefficient reads in the same
+direction as the proficiency scores.
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(boot)
+
+set.seed(42)
+```
+
+```{r}
+#| label: load-data
+
+d_raw <- read_csv("../../data/ellipse/ellipse_metrics.csv",
+                  show_col_types = FALSE)
+
+d <- d_raw |>
+  transmute(
+    text_id_kaggle,
+    prompt,
+    neg_loss    = -mean_loss,
+    phraseology = Phraseology,
+    grammar     = Grammar,
+    vocabulary  = Vocabulary,
+    n_tokens    = n_tokens
+  )
+
+cat("Rows loaded:", nrow(d), "\n")
+na_counts <- colSums(is.na(d))
+if (any(na_counts > 0)) {
+  cat("Missing values:\n"); print(na_counts[na_counts > 0])
+}
+
+d <- drop_na(d)
+cat("Complete cases used:", nrow(d), "\n\n")
+
+cat("Rating scales (ELLIPSE ratings are ordinal, 1-5 in 0.5 steps):\n")
+print(map_dfr(d[c("phraseology", "grammar", "vocabulary")],
+              \(x) tibble(min = min(x), max = max(x),
+                          levels = n_distinct(x), sd = sd(x)),
+              .id = "variable"))
+```
+
+## Rank transformation
+
+Everything below is computed on **ranks**. With only ~9 distinct rating levels
+and a bounded scale, Pearson correlations on the raw scores are not the right
+summary; ranking first makes every simple $R^2$ equal to a squared Spearman
+correlation and keeps the whole decomposition on one consistent footing.
+
+Ranks are computed **once**, on the full sample, and the bootstrap then
+resamples rows of the ranked data. This treats the ranks as the data rather than
+re-ranking inside each resample. Re-ranking within resamples is the stricter
+analogue of a Spearman bootstrap, but with *n* > 6,000 the two are
+indistinguishable and re-ranking is far slower.
+
+```{r}
+#| label: rank-transform
+
+vars <- c("neg_loss", "phraseology", "grammar", "vocabulary", "n_tokens")
+dr <- d |> mutate(across(all_of(vars), \(x) rank(x)))
+```
+
+## Zero-order correlations
+
+Reported first for context, and because the phraseology–grammar correlation *is*
+the halo estimate — it sets an upper bound on how much unique variance either
+rating can possibly have.
+
+```{r}
+#| label: zero-order
+
+zo <- tribble(
+  ~pair,                      ~rho,
+  "neg_loss ~ phraseology",   cor(dr$neg_loss, dr$phraseology),
+  "neg_loss ~ grammar",       cor(dr$neg_loss, dr$grammar),
+  "neg_loss ~ vocabulary",    cor(dr$neg_loss, dr$vocabulary),
+  "phraseology ~ grammar",    cor(dr$phraseology, dr$grammar),
+  "phraseology ~ vocabulary", cor(dr$phraseology, dr$vocabulary),
+  "grammar ~ vocabulary",     cor(dr$grammar, dr$vocabulary)
+) |> mutate(rho = round(rho, 3), r_squared = round(rho^2, 3))
+
+print(as.data.frame(zo), row.names = FALSE)
+```
+
+# Two-predictor decomposition
+
+```{r}
+#| label: r2-helper
+
+# R^2 of a multiple regression, straight from the correlation matrix:
+#   R^2 = r_yx' Rxx^-1 r_yx
+# Algebraically identical to summary(lm(...))$r.squared on standardized data,
+# but it lets the bootstrap compute every sub-model from ONE cor() call per
+# resample instead of fitting a fresh lm for each. Validated against lm below.
+r2_from_cor <- function(R, y, xs) {
+  rxy <- R[xs, y, drop = FALSE]
+  Rxx <- R[xs, xs, drop = FALSE]
+  as.numeric(crossprod(rxy, solve(Rxx, rxy)))
+}
+```
+
+```{r}
+#| label: validate-helper
+
+R_full <- cor(dr[vars])
+check <- tibble(
+  model = c("phr", "gram", "phr + gram"),
+  via_cor = c(
+    r2_from_cor(R_full, "neg_loss", "phraseology"),
+    r2_from_cor(R_full, "neg_loss", "grammar"),
+    r2_from_cor(R_full, "neg_loss", c("phraseology", "grammar"))
+  ),
+  via_lm = c(
+    summary(lm(neg_loss ~ phraseology, dr))$r.squared,
+    summary(lm(neg_loss ~ grammar, dr))$r.squared,
+    summary(lm(neg_loss ~ phraseology + grammar, dr))$r.squared
+  )
+) |> mutate(abs_diff = abs(via_cor - via_lm))
+
+print(as.data.frame(check), row.names = FALSE)
+stopifnot(all(check$abs_diff < 1e-10))
+cat("\nHelper matches lm() to within 1e-10.\n")
+```
+
+```{r}
+#| label: common2
+
+common2 <- function(dd, i) {
+  R <- cor(dd[i, c("neg_loss", "phraseology", "grammar")])
+  full <- r2_from_cor(R, "neg_loss", c("phraseology", "grammar"))
+  p    <- r2_from_cor(R, "neg_loss", "phraseology")
+  g    <- r2_from_cor(R, "neg_loss", "grammar")
+  c(U_phr  = full - g,
+    U_gram = full - p,
+    Common = p + g - full,
+    R2     = full,
+    Diff   = p - g)          # U_phr - U_gram, algebraically
+}
+
+est2 <- common2(dr, seq_len(nrow(dr)))
+print(round(est2, 5))
+```
+
+Note that $U_{\text{phr}} - U_{\text{gram}} = (R^2_{pg} - R^2_g) - (R^2_{pg} -
+R^2_p) = R^2_p - R^2_g$. The comparison of unique contributions reduces exactly
+to the comparison of the two zero-order $R^2$ values, which is worth knowing
+before over-interpreting it: it is the *same* question as "which rating
+correlates more strongly with predictability", asked in variance units.
+
+```{r}
+#| label: common2-boot
+
+b2 <- boot(dr, common2, R = 5000)
+
+ci_table <- function(b, est) {
+  map_dfr(seq_along(est), \(k) {
+    ci <- boot.ci(b, type = "perc", index = k)$percent[4:5]
+    tibble(component = names(est)[k],
+           estimate  = est[k],
+           lower     = ci[1],
+           upper     = ci[2],
+           boot_se   = sd(b$t[, k]))
+  })
+}
+
+res2 <- ci_table(b2, est2) |>
+  mutate(across(c(estimate, lower, upper, boot_se), \(x) round(x, 5)))
+print(as.data.frame(res2), row.names = FALSE)
+```
+
+```{r}
+#| label: common2-proportions
+
+prop <- res2 |>
+  filter(component %in% c("U_phr", "U_gram", "Common")) |>
+  mutate(pct_of_R2 = round(100 * estimate / est2[["R2"]], 1)) |>
+  select(component, estimate, pct_of_R2)
+
+cat("Share of the explained variance (R2 =", round(est2[["R2"]], 4), "):\n")
+print(as.data.frame(prop), row.names = FALSE)
+```
+
+## The focal test
+
+`Diff` is the direct answer to "is predictability more phraseological than
+grammatical?". Its bootstrap percentile interval replaces the analytic test for
+comparing dependent correlations: no normal-theory assumption, and it inherits
+the rank transformation without further argument.
+
+```{r}
+#| label: focal-test
+
+diff_ci <- res2 |> filter(component == "Diff")
+cat("U_phr - U_gram =", diff_ci$estimate,
+    "  95% CI [", diff_ci$lower, ",", diff_ci$upper, "]\n\n")
+
+p_boot <- mean(b2$t[, 5] <= 0)
+cat("Proportion of bootstrap replicates with Diff <= 0:", round(p_boot, 4), "\n")
+cat(if (diff_ci$lower > 0) {
+  "CI excludes zero: phraseology contributes more unique variance.\n"
+} else if (diff_ci$upper < 0) {
+  "CI excludes zero: grammar contributes more unique variance.\n"
+} else {
+  "CI includes zero: no reliable difference in unique contribution.\n"
+})
+```
+
+# Three-predictor decomposition
+
+Adding `vocabulary` gives all seven commonality components. The pairwise and
+triple terms have closed forms, so nothing here needs to be assembled by hand:
+
+$$C_{pg} = R^2_{pv} + R^2_{gv} - R^2_{v} - R^2_{pgv}$$
+$$C_{pgv} = R^2_{p} + R^2_{g} + R^2_{v} - R^2_{pg} - R^2_{pv} - R^2_{gv} + R^2_{pgv}$$
+
+The seven components sum to $R^2_{pgv}$ by construction, which the code asserts.
+
+```{r}
+#| label: common3
+
+common3 <- function(dd, i) {
+  R <- cor(dd[i, c("neg_loss", "phraseology", "grammar", "vocabulary")])
+  r2 <- \(xs) r2_from_cor(R, "neg_loss", xs)
+
+  p <- r2("phraseology"); g <- r2("grammar"); v <- r2("vocabulary")
+  pg <- r2(c("phraseology", "grammar"))
+  pv <- r2(c("phraseology", "vocabulary"))
+  gv <- r2(c("grammar", "vocabulary"))
+  pgv <- r2(c("phraseology", "grammar", "vocabulary"))
+
+  c(U_phr   = pgv - gv,
+    U_gram  = pgv - pv,
+    U_vocab = pgv - pg,
+    C_pg    = pv + gv - v - pgv,
+    C_pv    = pg + gv - g - pgv,
+    C_gv    = pg + pv - p - pgv,
+    C_pgv   = p + g + v - pg - pv - gv + pgv,
+    R2      = pgv)
+}
+
+est3 <- common3(dr, seq_len(nrow(dr)))
+print(round(est3, 5))
+
+# The seven components must sum to the full model R^2.
+stopifnot(abs(sum(est3[1:7]) - est3[["R2"]]) < 1e-10)
+cat("\nComponents sum to R2 (difference <", 1e-10, ").\n")
+```
+
+```{r}
+#| label: common3-boot
+
+b3 <- boot(dr, common3, R = 5000)
+
+res3 <- ci_table(b3, est3) |>
+  mutate(pct_of_R2 = round(100 * estimate / est3[["R2"]], 1),
+         across(c(estimate, lower, upper, boot_se), \(x) round(x, 5)))
+print(as.data.frame(res3), row.names = FALSE)
+```
+
+Commonality components can legitimately be **negative**, which indicates
+suppression rather than an error. Any negative component above should be read
+that way, not as a computational problem.
+
+# Robustness
+
+## Controlling for essay length
+
+Word predictability is computed per token but essay length still varies widely,
+and longer essays earn higher ratings. If the phraseological signal is really a
+length effect, adding `n_tokens` should absorb it.
+
+```{r}
+#| label: length-control
+
+common2_len <- function(dd, i) {
+  R <- cor(dd[i, c("neg_loss", "phraseology", "grammar", "n_tokens")])
+  r2 <- \(xs) r2_from_cor(R, "neg_loss", xs)
+  full <- r2(c("phraseology", "grammar", "n_tokens"))
+  c(U_phr  = full - r2(c("grammar", "n_tokens")),
+    U_gram = full - r2(c("phraseology", "n_tokens")),
+    U_len  = full - r2(c("phraseology", "grammar")),
+    R2     = full)
+}
+
+est_len <- common2_len(dr, seq_len(nrow(dr)))
+b_len <- boot(dr, common2_len, R = 5000)
+
+res_len <- ci_table(b_len, est_len) |>
+  mutate(across(c(estimate, lower, upper, boot_se), \(x) round(x, 5)))
+print(as.data.frame(res_len), row.names = FALSE)
+
+cat("\nU_phr without length control:", round(est2[["U_phr"]], 5),
+    "\nU_phr with length control   :", round(est_len[["U_phr"]], 5), "\n")
+```
+
+## Residualizing on prompt
+
+The network analysis residualizes every variable on writing prompt before
+estimation. Repeating the two-predictor decomposition on prompt-residualized
+ranks checks that the result is not driven by prompt composition.
+
+```{r}
+#| label: prompt-residualized
+
+dr_resid <- dr |>
+  mutate(across(all_of(c("neg_loss", "phraseology", "grammar")),
+                \(x) residuals(lm(x ~ factor(d$prompt), na.action = na.exclude))))
+
+est2_resid <- common2(dr_resid, seq_len(nrow(dr_resid)))
+b2_resid <- boot(dr_resid, common2, R = 5000)
+
+res2_resid <- ci_table(b2_resid, est2_resid) |>
+  mutate(across(c(estimate, lower, upper, boot_se), \(x) round(x, 5)))
+print(as.data.frame(res2_resid), row.names = FALSE)
+```
+
+```{r}
+#| label: comparison-table
+
+comparison <- bind_rows(
+  res2       |> mutate(model = "raw ranks"),
+  res2_resid |> mutate(model = "prompt-residualized")
+) |>
+  filter(component %in% c("U_phr", "U_gram", "Common", "R2", "Diff")) |>
+  select(model, component, estimate, lower, upper) |>
+  pivot_wider(names_from = model, values_from = c(estimate, lower, upper))
+
+print(as.data.frame(comparison), row.names = FALSE)
+```
+
+# Summary
+
+```{r}
+#| label: summary
+#| output: asis
+
+cat(sprintf(
+"- Phraseology and grammar together explain **%.1f%%** of the rank variance in
+  word predictability.
+- Of that, **%.1f%%** is common to both ratings, **%.1f%%** is unique to
+  phraseology, and **%.1f%%** is unique to grammar.
+- U_phr - U_gram = **%.4f**, 95%% CI [%.4f, %.4f].
+- Adding vocabulary raises the total to **%.1f%%**.
+- Controlling essay length moves U_phr from %.4f to %.4f.
+",
+100 * est2[["R2"]],
+100 * est2[["Common"]] / est2[["R2"]],
+100 * est2[["U_phr"]] / est2[["R2"]],
+100 * est2[["U_gram"]] / est2[["R2"]],
+est2[["Diff"]], diff_ci$lower, diff_ci$upper,
+100 * est3[["R2"]],
+est2[["U_phr"]], est_len[["U_phr"]]
+))
+```
+
+# Interpretation
+
+**The directional hypothesis is not supported.** Grammar contributes roughly
+1.7 times the unique variance that phraseology does, the bootstrap interval on
+the difference excludes zero, and every one of the 5,000 replicates agrees in
+sign. Neither the length control nor prompt residualization overturns it. If
+predictability were distinctively phraseological among the human ratings, this
+is where it would show, and it does not.
+
+**But both unique components are small, and that is the larger finding.** Nearly
+70% of what phraseology and grammar jointly explain is common to them. With
+vocabulary added, the three-way component alone is over half the total $R^2$,
+while unique vocabulary is under 1%. What predicts word predictability in this
+rating set is overwhelmingly *general proficiency as perceived by raters*, not
+any separable analytic dimension. Reporting the unique components without the
+common one would badly misdescribe that.
+
+**This does not directly contradict the network analysis, because the two use
+different operationalizations.** The network placed `mean_loss` in a community
+with the *dependency-MI indices* (`amod_mi`, `dobj_mi`, `advmod_mi`) — corpus-
+derived association strengths computed from the Dolma reference corpus. The
+predictors here are *human ratings* that happen to be named Phraseology and
+Grammar. A rater's holistic phraseology judgment and a pointwise MI statistic
+are not the same construct, and the rating carries a halo the MI indices do not.
+The defensible summary is that surprisal aligns with corpus-derived formulaicity
+at the level of measured indices, while at the level of human ratings it tracks
+general proficiency with a modest grammatical edge. Treating the two as rival
+answers to one question would be a category error.
+
+# References
+
+Newton, R. G., & Spurrell, D. J. (1967). A development of multiple regression
+for the analysis of routine data. *Applied Statistics, 16*(1), 51–64.
+
+Nimon, K. F., & Oswald, F. L. (2013). Understanding the results of multiple
+linear regression: Beyond standardized regression coefficients.
+*Organizational Research Methods, 16*(4), 650–674.

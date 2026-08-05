@@ -6,6 +6,7 @@ from .syntactic import (
     deps_per_clause,
     deps_per_nominal,
     mean_length_of_clause,
+    n_words,
 )
 from .phraseological import MiCalculator
 from .cohesion import connective_density, content_word_overlap, sentence_similarity

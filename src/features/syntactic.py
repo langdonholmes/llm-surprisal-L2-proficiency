@@ -287,7 +287,7 @@ def clauses_per_tunit(doc) -> float:
     return len(clauses) / n_tunits
 
 
-def _n_words(doc) -> int:
+def n_words(doc) -> int:
     """Count words, excluding punctuation and whitespace.
 
     L2SCA's word count is a count of terminal nodes in the parse minus
@@ -315,7 +315,7 @@ def mean_length_of_clause(doc) -> float:
     clauses = _clause_heads(doc)
     if not clauses:
         return np.nan
-    return _n_words(doc) / len(clauses)
+    return n_words(doc) / len(clauses)
 
 
 def complex_nominals_per_clause(doc) -> float:
