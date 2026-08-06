@@ -1,6 +1,6 @@
 ---
 title: "Network Psychometric Analysis of ELLIPSE Metrics"
-subtitle: "Where Does Word Predictability Fit in L2 Writing Proficiency Network?"
+subtitle: "Where Does Word Predictability Fit in the L2 Writing Proficiency Network?"
 format:
   html:
     toc: true
@@ -14,13 +14,13 @@ execute:
 
 # Overview
 
-This analysis fits a Gaussian Graphical Model (GGM) to explore how word 
+This analysis fits a Gaussian Graphical Model (GGM) to explore how word
 predictability relates to other linguistic features.
 
-**Key question:** Does word predictability (`mean_loss`) cluster with
+**Key question.** Does word predictability (`mean_loss`) cluster with
 phraseological, lexical, or other features?
 
-# Section 1 — Setup & Data Preparation
+# Section 1. Setup and Data Preparation
 
 ```{r}
 #| label: setup
@@ -55,11 +55,11 @@ subordination; it measures punctuation.
 The T-unit is the only denominator in the battery that depends on sentence
 segmentation, and spaCy segments on punctuation. Hunt (1965) designed the T-unit
 precisely to be punctuation-independent, but a dependency operationalization does
-not inherit that immunity: an unpunctuated run-on arrives as a single sentence,
+not inherit that immunity. An unpunctuated run-on arrives as a single sentence,
 and its independent clauses are attached to one another as though subordinate.
-`src/features/syntactic.py::_is_independent` recovers many of them — it cut the
-maximum C/T from 31 to 11 and the SD from 1.38 to 0.79 — but not enough. The
-evidence, on 6,482 essays:
+`src/features/syntactic.py::_is_independent` recovers many of them, cutting the
+maximum C/T from 31 to 11 and the SD from 1.38 to 0.79, but not enough. Here is
+the evidence, on 6,482 essays.
 
 | Index | Spearman *r* with words per terminal punctuation mark |
 |---|---|
@@ -75,16 +75,16 @@ evidence, on 6,482 essays:
 - In the run including C/T, it did not join the syntactic community. It loaded
   0.478 on the *cohesion* community alongside sentence similarity (0.621) and
   connective density (0.543), and its highest local dependence was with
-  connective density (wTO = .348) — a discourse-surface variable, not a
+  connective density (wTO = .348), a discourse-surface variable rather than a
   syntactic one.
 
 So the network placement, the proficiency correlation, and the local dependence
 all agree with the mechanism. Retaining C/T would put a punctuation index into
-the model labelled as subordination. This is the same failure mode that words per
-sentence was excluded for. Subordination is consequently not represented in the
-battery; a punctuation-independent alternative that normalizes per clause rather
-than per T-unit (e.g. adverbial clauses per clause) would be the way to restore
-it.
+the model labelled as subordination, which is the same failure mode that words
+per sentence was excluded for. Subordination is consequently not represented in
+the battery. Restoring it would take a punctuation-independent alternative that
+normalizes per clause rather than per T-unit, such as adverbial clauses per
+clause.
 
 ```{r}
 #| label: select-features
@@ -133,7 +133,7 @@ var_check <- data.frame(
 )
 degenerate <- var_check$Variable[var_check$SD == 0 | is.na(var_check$SD)]
 if (length(degenerate) > 0) {
-  cat("WARNING — zero-variance variables:", paste(degenerate, collapse = ", "), "\n")
+  cat("WARNING: zero-variance variables:", paste(degenerate, collapse = ", "), "\n")
   print(var_check[var_check$Variable %in% degenerate, ], row.names = FALSE)
 } else {
   cat("All", length(feature_vars), "variables have non-zero variance.\n")
@@ -182,19 +182,19 @@ print(r2_df, row.names = FALSE)
 ## Local dependence screening (UVA)
 
 The syntactic battery is not independent by construction. All three indices share
-the clause as a denominator, and MLC's numerator — the word count — necessarily
+the clause as a denominator, and MLC's numerator (the word count) necessarily
 includes the postmodifiers that make a nominal complex and the conjuncts that
 make a coordinate phrase, so MLC is structurally entangled with CN/C and CP/C.
 Local dependence is therefore worth measuring.
 
 Unique Variable Analysis (Christensen, Garrido & Golino, 2023) quantifies it via
 weighted topological overlap. This section **reports** wTO and does not act on
-it: no variable is removed or combined here, and the conventional .25 cutoff is
-printed only as a reference line. Local dependence is evidence to weigh, not a
-decision procedure — which indices belong in the network is a question about
-constructs, and a topological-overlap statistic cannot settle it. Where a pair
-looks dependent, the reading of that pair's shared community is qualified in the
-discussion rather than the pair being pruned.
+it. No variable is removed or combined here, and the conventional .25 cutoff is
+printed only as a reference line. Local dependence is evidence to weigh rather
+than a decision procedure. Which indices belong in the network is a question
+about constructs, and a topological-overlap statistic cannot settle it. Where a
+pair looks dependent, the reading of that pair's shared community is qualified in
+the discussion instead of the pair being pruned.
 
 ```{r}
 #| label: uva-screen
@@ -328,7 +328,7 @@ shape_pch <- c(circle = 21, square = 22, triangle = 24, rhombus = 23, star = 8)
 ```
 
 
-# Section 2 — Descriptive Statistics & Correlation Matrix
+# Section 2. Descriptive Statistics and Correlation Matrix
 
 ```{r}
 #| label: descriptive-stats
@@ -375,7 +375,7 @@ df_net %>%
 ```
 
 
-# Section 3 — Network Estimation (EBICglasso) & Community Detection
+# Section 3. Network Estimation (EBICglasso) and Community Detection
 
 ```{r}
 #| label: estimate-network
@@ -448,7 +448,7 @@ print(data.frame(
 ```{r}
 #| label: plot-helpers
 
-# A spring layout places strongly connected nodes almost on top of each other —
+# A spring layout places strongly connected nodes almost on top of each other.
 # Loss and VarLoss have a partial correlation near .7 and land within a node
 # width of each other, so the glyphs collide and the community shapes stop being
 # readable. This nudges any overlapping pair apart while holding every node
@@ -519,8 +519,8 @@ draw_network_legend <- function(cex = 0.82, swatches = construct_colors) {
 # Single entry point for every network figure, so the encoding cannot drift.
 #
 # `minimum` hides edges below |.05| and `cut` gives full width and saturation to
-# edges above |.10|: the network is dense (105 possible edges, half of them
-# below |.03|) and one edge — Loss-VarLoss at .70 — otherwise compresses
+# edges above |.10|. The network is dense (105 possible edges, half of them
+# below |.03|) and one edge, Loss-VarLoss at .70, otherwise compresses
 # everything else into invisible hairlines. The complete weighted adjacency
 # matrix is printed above, so nothing is lost, only decluttered.
 # `negDashed` makes edge sign readable in black and white.
@@ -564,9 +564,9 @@ plot_network <- function(graph, coords, title = "", legend = TRUE,
 ```
 
 
-# Section 4 — Network Visualization
+# Section 4. Network Visualization
 
-Node **shape** encodes the empirically derived EGA community — the primary
+Node **shape** encodes the empirically derived EGA community. That is the primary
 reading, and the one channel that survives black-and-white printing. Node
 **colour** is the a priori theoretical construct, deliberately desaturated so it
 sits behind the shapes. Nodes whose colour disagrees with the shapes around them
@@ -582,7 +582,7 @@ positive partial correlations, dashed edges negative.
 spring_layout <- spring_coords(network$graph)
 
 plot_network(network$graph, spring_layout,
-             title = "ELLIPSE Linguistic Features — GGM Network")
+             title = "ELLIPSE Linguistic Features (GGM Network)")
 ```
 
 ```{r}
@@ -591,7 +591,7 @@ plot_network(network$graph, spring_layout,
 
 pdf("fig/network_spring.pdf", width = 13, height = 8.5)
 plot_network(network$graph, spring_layout,
-             title = "ELLIPSE Linguistic Features — GGM Network")
+             title = "ELLIPSE Linguistic Features (GGM Network)")
 dev.off()
 cat("Saved to fig/network_spring.pdf\n")
 ```
@@ -608,7 +608,7 @@ circle_layout <- local({
 })
 
 plot_network(network$graph, circle_layout,
-             title = "ELLIPSE Linguistic Features — GGM Network (Circle)")
+             title = "ELLIPSE Linguistic Features (GGM Network, Circle Layout)")
 ```
 
 ```{r}
@@ -625,14 +625,14 @@ grey_construct <- sapply(construct_colors, function(x) {
 })
 
 plot_network(network$graph, spring_layout,
-             title = "GGM Network — greyscale proof",
+             title = "GGM Network, Greyscale Proof",
              color = unname(grey_construct[node_construct]),
              swatches = grey_construct,
              posCol = "grey20", negCol = "grey20")
 ```
 
 
-# Section 5 — Centrality Analysis
+# Section 5. Centrality Analysis
 
 ```{r}
 #| label: centrality-plot
@@ -681,7 +681,7 @@ print(pred_edges)
 ```
 
 
-# Section 6 — Community Structure (EGA)
+# Section 6. Community Structure (EGA)
 
 `ega_result` is estimated in Section 3 (its communities drive the node colours
 throughout); this section reports and interrogates it.
@@ -727,7 +727,7 @@ cat("  Members:", paste(short_labels[members_var], collapse = ", "), "\n")
 #| tbl-cap: "Revised network loadings (standardized)"
 
 # Network loadings (Christensen, Golino, Abad & Garrido, 2025): confound-adjusted
-# node importance that splits strength by community and adjusts for community 
+# node importance that splits strength by community and adjusts for community
 # size and sign.
 # Effect-size guides: ~0.20 small, ~0.35 moderate, ~0.50 large.
 
@@ -780,7 +780,7 @@ print(round(sort(item_stab), 3))
 ```
 
 
-# Section 7 — Network Stability (bootnet)
+# Section 7. Network Stability (bootnet)
 
 ```{r}
 #| label: boot-edges
@@ -831,17 +831,17 @@ cs_coefs <- corStability(boot_case)
 print(cs_coefs)
 ```
 
-**Interpretation guidelines** (Epskamp et al., 2018):
+**Interpretation guidelines** (Epskamp et al., 2018)
 
-- CS ≥ 0.50 — centrality is stable and interpretable
-- CS ≥ 0.25 — acceptable minimum
-- CS < 0.25 — centrality should **not** be interpreted
+- CS ≥ 0.50 means centrality is stable and interpretable
+- CS ≥ 0.25 is the acceptable minimum
+- CS < 0.25 means centrality should **not** be interpreted
 
 
-# Section 8 — Between-Community Loadings (Bridge Behavior)
+# Section 8. Between-Community Loadings (Bridge Behavior)
 
 Bridge behavior is operationalized via **between-community (cross-)loadings**
-from the revised network loadings (Christensen et al., 2025). Cross-loadings 
+from the revised network loadings (Christensen et al., 2025). Cross-loadings
 distinguish a genuine bridge from between-community correlation.
 
 ```{r}
@@ -849,9 +849,10 @@ distinguish a genuine bridge from between-community correlation.
 #| tbl-cap: "Between-community (cross-)loadings"
 
 # `nl` (standardized network loadings, nodes x communities) is computed in
-# Section 6. A node's loading on its OWN community vs. its loadings on the
-# others: high & roughly-equal cross-loadings = integrative/bridge behavior;
-# a single dominant loading = the node belongs to one community.
+# Section 6. What matters is a node's loading on its OWN community against its
+# loadings on the others. High and roughly-equal cross-loadings mean
+# integrative bridge behavior, a single dominant loading means the node
+# belongs to one community.
 # nl's columns are named by community id ("1","2",...), matching ega_result$wc.
 
 assigned <- ega_result$wc  # community per node
@@ -872,12 +873,12 @@ cross_load_summary <- function(node) {
 cat("Standardized loadings (nodes x communities):\n")
 print(round(nl, 3))
 
-cat("\nPredictability nodes — in-community vs cross-community loading:\n")
+cat("\nPredictability nodes, in-community vs cross-community loading:\n")
 print(do.call(rbind, lapply(c("mean_loss", "var_loss"), cross_load_summary)),
       row.names = FALSE)
 ```
 
-# Section 9 — Network Comparison by Proficiency Level
+# Section 9. Network Comparison by Proficiency Level
 
 ```{r}
 #| label: proficiency-split
@@ -886,8 +887,8 @@ print(do.call(rbind, lapply(c("mean_loss", "var_loss"), cross_load_summary)),
 df_grp <- df_raw
 prompt_grp <- df_grp$prompt
 
-# Three proficiency groups in (approximately) equal bins. `Overall` is discrete
-# — 9 levels in 0.5 steps, with heavy ties — so exact equal-n tertiles would
+# Three proficiency groups in (approximately) equal bins. `Overall` is discrete,
+# with 9 levels in 0.5 steps and heavy ties, so exact equal-n tertiles would
 # split essays with identical scores across groups. Instead the two cutpoints
 # are placed at the observed score levels closest to the 1/3 and 2/3 quantiles,
 # which keeps every tied score intact and still yields near-equal bins.
@@ -1025,7 +1026,7 @@ for (nm in names(nc_list)) {
   padj <- nc_list[[nm]]$edges$p.adjusted
   stat <- nc_list[[nm]]$edges$statistic
   ut <- which(upper.tri(padj) & padj < 0.05, arr.ind = TRUE)
-  cat("\n---", nm, "— per-edge differences (BH-adjusted p < 0.05) ---\n")
+  cat("\n---", nm, "per-edge differences (BH-adjusted p < 0.05) ---\n")
   if (nrow(ut) > 0) {
     sig_edges <- data.frame(
       Node1 = short_labels[rownames(padj)[ut[, "row"]]],
@@ -1080,14 +1081,14 @@ pred_edge_table <- function(node) {
     arrange(desc(abs(Diff_HL)))
 }
 
-cat("mean_loss (Loss) — edge weight by proficiency group + Low-vs-High test:\n")
+cat("mean_loss (Loss), edge weight by proficiency group + Low-vs-High test:\n")
 print(pred_edge_table("mean_loss"), row.names = FALSE)
 cat("\nvar_loss (VarLoss):\n")
 print(pred_edge_table("var_loss"), row.names = FALSE)
 ```
 
 
-# Summary & Interpretation
+# Summary and Interpretation
 
 ```{r}
 #| label: summary-values
@@ -1124,8 +1125,8 @@ strength rank is `r loss_rank` of `r n_nodes`.
 
 ## 3. Bridge behavior (cross-loadings)
 
-Bridge behavior is read from between-community cross-loadings (Section 8): high
-and roughly-equal cross-loadings indicate an integrative/bridge node, whereas a
+Bridge behavior is read from between-community cross-loadings (Section 8). High
+and roughly-equal cross-loadings indicate an integrative bridge node, whereas a
 single dominant loading means the node belongs to one community.
 
 ## 4. Interpretation relative to CFA hypotheses
