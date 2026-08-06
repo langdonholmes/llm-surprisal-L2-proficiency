@@ -1,0 +1,44 @@
+---
+title: "Sensitivity Analysis: Network Without var_loss"
+subtitle: "Does mean_loss keep its community placement on its own?"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Why this run exists
+
+`mean_loss` and `var_loss` are the two predictability nodes, and in the main
+network they sit on an edge of about .70, by a wide margin the strongest in the
+graph. A pair that tightly coupled can hold a community open between them, so
+the placement of `mean_loss` alongside the dependency-MI indices might be
+partly an artifact of having a near-duplicate node adjacent to it rather than a
+statement about `mean_loss` itself.
+
+This run drops `var_loss` and re-estimates everything. The question it answers
+is narrow. Does `mean_loss` still land with `amod_mi`, `dobj_mi` and
+`advmod_mi` when it has to get there without its twin?
+
+Requested by Alex as a sensitivity check on the main analysis.
+
+**How to read it.** Everything below is the main notebook's analysis run on 14
+nodes instead of 15. Community *numbering* is arbitrary and will not match the
+main notebook, so compare membership rather than labels. The companion run that
+drops `mean_loss` instead is in `network-no-meanloss.qmd`.
+
+```{r}
+#| label: drop-parameter
+#| code-fold: false
+
+# The one predictability node held out of this run. Everything else is
+# shared with the main notebook via ../_network-body.qmd.
+drop_var <- "var_loss"
+```
+
+{{< include ../_network-body.qmd >}}

@@ -1,0 +1,50 @@
+---
+title: "Sensitivity Analysis: Network Without mean_loss"
+subtitle: "Where does var_loss land on its own?"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Why this run exists
+
+`mean_loss` and `var_loss` are the two predictability nodes, and in the main
+network they sit on an edge of about .70, by a wide margin the strongest in the
+graph. That coupling makes it hard to tell how much of `var_loss`'s position is
+its own and how much is inherited from the node it is tied to.
+
+This run drops `mean_loss` and re-estimates everything, which is the mirror of
+the companion run in `network-no-varloss.qmd`. Read together, the two say
+whether the predictability construct behaves the same way whichever of its two
+indicators is carrying it. If `var_loss` lands with the dependency-MI indices
+here as well, the placement is a property of predictability rather than of
+`mean_loss` specifically.
+
+Requested by Alex as a sensitivity check on the main analysis.
+
+**How to read it.** Everything below is the main notebook's analysis run on 14
+nodes instead of 15. Community *numbering* is arbitrary and will not match the
+main notebook or the companion run, so compare membership rather than labels.
+
+Note that `var_loss` is the weaker of the two indicators in the main network
+(loading −.534 on its community against −.858 for `mean_loss`), so a messier
+result here is not by itself evidence against the main finding. What would
+matter is `var_loss` joining a *different* community rather than joining the
+same one less strongly.
+
+```{r}
+#| label: drop-parameter
+#| code-fold: false
+
+# The one predictability node held out of this run. Everything else is
+# shared with the main notebook via ../_network-body.qmd.
+drop_var <- "mean_loss"
+```
+
+{{< include ../_network-body.qmd >}}
