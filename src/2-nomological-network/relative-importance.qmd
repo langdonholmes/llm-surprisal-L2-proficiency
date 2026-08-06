@@ -1,6 +1,6 @@
 ---
-title: "Relative Importance and Criterion Profiles"
-subtitle: "Which ELLIPSE criteria does word predictability track?"
+title: "Relative Importance of the ELLIPSE Criteria"
+subtitle: "Which ratings does word predictability track?"
 format:
   html:
     toc: true
@@ -14,44 +14,33 @@ execute:
 
 # Overview
 
-The network analysis places `mean_loss` in a community with the dependency-MI
-features. This notebook asks a related but **distinct** question, of the human
-ratings rather than the computed indices: **across the six ELLIPSE analytic
-criteria, which ones does word predictability track, and by how much?**
+The network analysis puts `mean_loss` in a community with the dependency-MI
+features. This notebook asks a different question, about the human ratings
+rather than the computed indices. Across the six ELLIPSE analytic criteria,
+which ones does word predictability track, and by how much?
 
-Two complementary answers are given.
+All six criteria go into one regression, and LMG splits the resulting $R^2$ into
+a non-negative share for each criterion.
 
-1. **Relative importance (LMG).** The six criteria jointly predict
-   predictability; LMG partitions that $R^2$ into a non-negative share per
-   criterion. This is a *variance-explained* answer.
-2. **Criterion profile similarity.** Every measured index has a profile of
-   correlations across the six criteria. Comparing predictability's profile to
-   the profile of the phraseological family and of the syntactic-elaboration
-   family asks whether predictability *behaves like* one family or the other.
-   This is a *pattern* answer, and it does not depend on how much variance
-   anything explains.
+One caveat up front. A rater's holistic `Phraseology` judgment and a
+corpus-derived MI index are different operationalizations, so nothing here
+adjudicates the network finding. The Interpretation section comes back to that.
 
-The distinction from the network analysis matters for reading either result — a
-rater's holistic `Phraseology` judgment and a corpus-derived MI index are
-different operationalizations, so this notebook does not adjudicate the network
-finding. See the Interpretation section.
-
-**Sign convention.** All analyses use `neg_loss = -mean_loss`, so that higher
-values mean *more predictable* text and every coefficient reads in the same
-direction as the proficiency scores.
+**Sign convention.** Everything uses `neg_loss = -mean_loss`, so higher values
+mean more predictable text and every coefficient reads in the same direction as
+the proficiency scores.
 
 ```{r}
 #| label: setup
 library(tidyverse)
-library(boot)
 library(relaimpo)
 
 set.seed(42)
 ```
 
-`relaimpo` attaches `MASS`, which masks `dplyr::select()`. Loading it here rather
-than mid-document means any masking problem surfaces at the top of the render;
-`select()` is qualified where it is used.
+`relaimpo` attaches `MASS`, which masks `dplyr::select()`. Loading it up here
+rather than mid-document means any masking trouble shows up at the top of the
+render instead of halfway down.
 
 ```{r}
 #| label: load-data
@@ -62,14 +51,6 @@ d_raw <- read_csv("data/ellipse/ellipse_metrics.csv",
 # The six analytic criteria, in the order ELLIPSE reports them.
 crit <- c("cohesion", "syntax", "vocabulary",
           "phraseology", "grammar", "conventions")
-
-# The two index families compared against predictability in the profile
-# analysis. `mi_vars` is the phraseological family (pointwise MI of dependency
-# bigrams against Dolma); `syn_vars` is the syntactic-elaboration family (the
-# L2SCA battery, minus C/T -- see network-analysis.qmd for why C/T is excluded).
-mi_vars  <- c("amod_mi", "dobj_mi", "advmod_mi")
-syn_vars <- c("mean_length_of_clause", "complex_nominals_per_clause",
-              "coord_phrases_per_clause")
 
 d <- d_raw |>
   transmute(
@@ -82,8 +63,7 @@ d <- d_raw |>
     phraseology = Phraseology,
     grammar     = Grammar,
     conventions = Conventions,
-    n_tokens    = n_tokens,
-    across(all_of(c(mi_vars, syn_vars)))
+    n_tokens    = n_tokens
   )
 
 cat("Rows loaded:", nrow(d), "\n")
@@ -104,26 +84,26 @@ print(map_dfr(d[crit],
 
 ## Rank transformation
 
-Everything below is computed on **ranks**. With only ~9 distinct rating levels
-and a bounded scale, Pearson correlations on the raw scores are not the right
-summary; ranking first makes every correlation a Spearman correlation and every
-simple $R^2$ a squared Spearman correlation, which keeps the regression and the
-profile analysis on one consistent footing.
+Everything below runs on **ranks**. The ratings have about nine distinct levels
+on a bounded scale, so Pearson correlations of the raw scores aren't the right
+summary. Ranking first makes every correlation a Spearman correlation and every
+simple $R^2$ a squared Spearman correlation, which keeps the whole notebook on
+one footing.
 
-Ranks are computed **once**, on the full sample, and the bootstrap then
-resamples rows of the ranked data. This treats the ranks as the data rather than
+Ranks get computed once, on the full sample, and the bootstrap then resamples
+rows of the ranked data. That treats the ranks as the data rather than
 re-ranking inside each resample. Re-ranking within resamples is the stricter
-analogue of a Spearman bootstrap, but with *n* > 6,000 the two are
-indistinguishable and re-ranking is far slower.
+analogue of a Spearman bootstrap, but with more than 6,000 essays the two are
+indistinguishable and re-ranking is much slower.
 
 ```{r}
 #| label: rank-transform
 
-vars <- c("neg_loss", crit, "n_tokens", mi_vars, syn_vars)
+vars <- c("neg_loss", crit, "n_tokens")
 dr <- d |> mutate(across(all_of(vars), \(x) rank(x)))
 
 # Pearson on average ranks is Spearman on the raw values, exactly. Verified
-# rather than asserted, because the whole notebook rests on it.
+# rather than asserted, since the whole notebook rests on it.
 stopifnot(all(abs(
   cor(dr$neg_loss, dr[crit]) -
   cor(d$neg_loss, d[crit], method = "spearman")
@@ -134,7 +114,7 @@ cat("Rank-Pearson reproduces Spearman to within 1e-12.\n")
 ## Zero-order correlations
 
 Reported first for context, and because the criterion intercorrelations *are*
-the halo estimate — they set an upper bound on how much unique variance any one
+the halo estimate. They set an upper bound on how much unique variance any one
 rating can possibly have.
 
 ```{r}
@@ -152,27 +132,27 @@ cat("\nMean off-diagonal criterion intercorrelation:",
 
 # Relative importance across the six criteria
 
-With the criteria this heavily intercorrelated, the *unique* variance of each
-one (its squared semipartial) understates every predictor, and understates the
-most redundant ones most. Ranking criteria by unique variance therefore rewards
-whichever rating happens to be least redundant with the others, which is not the
+The criteria are heavily intercorrelated, so the unique variance of each one
+(its squared semipartial) understates every predictor, and understates the most
+redundant ones worst. Ranking criteria by unique variance ends up rewarding
+whichever rating happens to be least redundant with the others, which isn't the
 same thing as importance.
 
 **LMG** (Lindeman, Merenda & Gold, 1980), the Shapley-value decomposition,
-answers the question the unique components cannot. It averages each predictor's
-sequential $R^2$ contribution over **all $6! = 720$ orderings** of entry, so
-shared variance is *allocated* among the predictors that share it rather than
-discarded. The weights are non-negative and sum exactly to $R^2$, which makes
-them readable as "this criterion's share of the explained variance."
+answers the question the unique components can't. It averages each predictor's
+sequential $R^2$ contribution over all $6! = 720$ orderings of entry, so shared
+variance gets *allocated* among the predictors that share it rather than thrown
+away. The weights are non-negative and sum exactly to $R^2$, so they read as
+"this criterion's share of the explained variance".
 
-Both metrics are reported below, because the contrast between them is
-informative in itself:
+Both metrics show up below, because the contrast between them is informative on
+its own.
 
-- `lmg` — Shapley share, shared variance allocated.
-- `last` — the variance a criterion adds when entered last. This is exactly the
-  squared semipartial, i.e. the criterion's *unique* contribution.
+- `lmg` is the Shapley share, with shared variance allocated.
+- `last` is the variance a criterion adds when it enters last. That's exactly
+  the squared semipartial, the criterion's unique contribution.
 
-A criterion with a large `lmg` but a near-zero `last` contributes almost
+A criterion with a large `lmg` and a near-zero `last` is contributing almost
 entirely through variance it shares with the other ratings.
 
 ```{r}
@@ -186,9 +166,9 @@ cat("Full model R2 =", round(r2_full, 5), "\n")
 ```{r}
 #| label: relimp-validate
 
-# `last` must equal R2(full) - R2(full minus that criterion), by definition.
+# `last` has to equal R2(full) - R2(full minus that criterion), by definition.
 # Checked against refitted models so the decomposition is demonstrably the
-# quantity claimed for it, not merely a number relaimpo returned.
+# quantity claimed for it, not just a number relaimpo handed back.
 drop_last <- map_dbl(crit, \(s)
   r2_full - summary(lm(reformulate(setdiff(crit, s), "neg_loss"), dr))$r.squared)
 last_ri <- calc.relimp(m_all, type = "last", rela = FALSE)$last[crit]
@@ -229,11 +209,10 @@ cat("shared_share = percentage of a criterion's LMG weight that is NOT unique.\n
 
 ## Bootstrap intervals
 
-`rela = FALSE` is used for the bootstrap so the weights stay in variance units
-and the intervals are not distorted by the sum-to-100% constraint that
-normalization imposes. `diff = TRUE` yields intervals on every pairwise
-difference, which is the focal test; `rank = TRUE` yields intervals on each
-criterion's rank position.
+`rela = FALSE` keeps the weights in variance units, so the intervals aren't
+distorted by the sum-to-100% constraint that normalization imposes.
+`diff = TRUE` gives intervals on every pairwise difference, which is the focal
+test, and `rank = TRUE` gives intervals on each criterion's rank position.
 
 ```{r}
 #| label: relimp-boot
@@ -281,7 +260,7 @@ ggsave("fig/lmg_relative_importance.pdf", width = 7, height = 3.5)
 
 ## Pairwise differences
 
-relaimpo's own formatted output, which carries the rank letters:
+relaimpo's own formatted output, which carries the rank letters.
 
 ```{r}
 #| label: relimp-print
@@ -322,8 +301,8 @@ focal <- diff_tab |>
 cat("Focal comparison (phraseology vs grammar):\n")
 print(as.data.frame(focal), row.names = FALSE)
 
-cat("\nInterpretation: a negative difference means grammar carries the larger",
-    "\nLMG share. The comparison is reliable only if the interval excludes 0.\n")
+cat("\nA negative difference means grammar carries the larger LMG share.",
+    "\nThe comparison is only reliable if the interval excludes 0.\n")
 ```
 
 ## Rank stability
@@ -345,17 +324,17 @@ cat("\nRank 1 = largest LMG weight. Intervals are over 2,000 bootstrap samples.\
 
 ## Robustness
 
-Point estimates only. The bootstrap above establishes the sampling uncertainty
-on the LMG weights; these checks ask whether the *point* estimates move under
-two plausible confounds, which does not require re-running 2,000 replicates
-twice.
+Point estimates only. The bootstrap above already establishes sampling
+uncertainty on the weights, and these two checks only ask whether the point
+estimates move under a couple of plausible confounds, which doesn't need 2,000
+replicates run twice.
 
-**Essay length.** Predictability is computed per token, but essay length still
-varies widely and longer essays earn higher ratings. Entering `n_tokens` as a
-seventh predictor lets it take whatever share is really length.
+**Essay length.** Predictability is computed per token, but length still varies
+a lot and longer essays earn higher ratings. Putting `n_tokens` in as a seventh
+predictor lets it take whatever share is really length.
 
 **Prompt.** The network analysis residualizes every variable on writing prompt
-before estimation; repeating that here checks that the ordering is not driven by
+before estimation. Doing the same here checks that the ordering isn't driven by
 prompt composition.
 
 ```{r}
@@ -390,184 +369,6 @@ cat("LMG share taken by n_tokens itself:",
     round(as.numeric(lmg_len[["n_tokens"]]), 5), "\n")
 ```
 
-# Criterion profile analysis
-
-LMG answers "how much variance". It cannot answer "does predictability behave
-like a phraseological index or like a syntactic-elaboration index", because the
-MI and L2SCA indices are not in that regression at all — only the human ratings
-are.
-
-The profile approach compares *shapes*. Each measured index has a profile: its
-Spearman correlation with each of the six criteria. Two indices that tap the
-same construct should rise and fall across the criteria together, whatever their
-overall magnitude. Family profiles are the mean of the member indices' profiles,
-which averages away index-specific noise.
-
-**What a profile correlation does and does not measure.** Correlating two
-six-element profiles centres each one first, so it discards *elevation* — how
-strongly an index correlates with the ratings on average — and reports only
-*pattern*. That is the intended quantity: a weak index and a strong index that
-distribute their association across the criteria identically should score 1.0.
-Elevation is reported separately below, because it is exactly what the
-correlation throws away.
-
-**The n = 6 caveat.** A profile correlation is computed over six points, and
-those six criteria are themselves heavily intercorrelated, so the profiles are
-compressed into a narrow band and small shifts move the correlation a lot. The
-bootstrap resamples essays and recomputes the whole pipeline, so the intervals
-carry the sampling uncertainty in the profile estimates; they do **not** turn
-n = 6 into a larger effective sample. The intervals are wide by construction and
-should be read that way. A jackknife over the six criteria is reported below as
-the complement to the bootstrap: it asks whether any one criterion carries a
-similarity on its own, which resampling essays cannot detect.
-
-**Low-elevation profiles are the fragile case.** Centring rescales every profile
-to the same footing, so an index whose correlations with all six criteria sit
-near zero contributes its *shape* at full weight even though that shape is a
-small difference between small numbers. The elaboration indices are in this
-regime. The per-index table at the end of the section is the check: a family
-result that survives only through one near-null member should not be reported as
-a family result.
-
-```{r}
-#| label: profiles
-
-# One correlation matrix per resample; every profile is read off it.
-profile_stat <- function(dd, i) {
-  R <- cor(dd[i, c("neg_loss", crit, mi_vars, syn_vars)])
-  loss <- R[crit, "neg_loss"]
-  phr  <- rowMeans(R[crit, mi_vars,  drop = FALSE])
-  syn  <- rowMeans(R[crit, syn_vars, drop = FALSE])
-  c(loss, phr, syn,
-    sim_phr     = cor(loss, phr),
-    sim_syn     = cor(loss, syn),
-    sim_phr_syn = cor(phr,  syn),
-    sim_diff    = cor(loss, phr) - cor(loss, syn))
-}
-
-est_p <- profile_stat(dr, seq_len(nrow(dr)))
-
-prof <- tibble(
-  criterion   = crit,
-  loss        = est_p[1:6],
-  phraseology = est_p[7:12],
-  elaboration = est_p[13:18]
-)
-
-cat("Profiles (Spearman correlation with each criterion):\n")
-print(as.data.frame(prof |> mutate(across(-criterion, \(x) round(x, 3)))),
-      row.names = FALSE)
-
-cat("\nElevation (mean correlation across the six criteria):\n")
-print(round(colMeans(prof[-1]), 3))
-
-cat("\nProfile similarity:\n")
-print(round(est_p[c("sim_phr", "sim_syn", "sim_phr_syn", "sim_diff")], 3))
-```
-
-```{r}
-#| label: profile-boot
-
-b_p <- boot(dr, profile_stat, R = 2000)
-
-sim_idx <- match(c("sim_phr", "sim_syn", "sim_phr_syn", "sim_diff"),
-                 names(est_p))
-sim_tab <- map_dfr(sim_idx, \(k) {
-  ci <- boot.ci(b_p, type = "perc", index = k)$percent[4:5]
-  tibble(quantity = names(est_p)[k], estimate = est_p[k],
-         lower = ci[1], upper = ci[2], boot_se = sd(b_p$t[, k]))
-}) |>
-  mutate(across(c(estimate, lower, upper, boot_se), \(x) round(x, 3)))
-
-print(as.data.frame(sim_tab), row.names = FALSE)
-
-cat("\nsim_diff = sim_phr - sim_syn. Positive means predictability's profile",
-    "\nresembles the phraseological family more closely than the elaboration",
-    "\nfamily. Proportion of replicates with sim_diff <= 0:",
-    round(mean(b_p$t[, sim_idx[4]] <= 0), 4), "\n")
-```
-
-```{r}
-#| label: profile-plot
-#| fig-height: 4.2
-#| fig-width: 8
-#| fig-cap: "Criterion profiles for word predictability, the phraseological (MI) family and the syntactic-elaboration family. Left: raw Spearman correlations. Right: each profile mean-centred, which is the scale the profile-similarity correlations are computed on."
-
-prof_long <- prof |>
-  pivot_longer(-criterion, names_to = "profile", values_to = "rho") |>
-  group_by(profile) |>
-  mutate(centred = rho - mean(rho)) |>
-  ungroup() |>
-  pivot_longer(c(rho, centred), names_to = "scale", values_to = "value") |>
-  mutate(
-    criterion = factor(criterion,
-                       levels = prof$criterion[order(prof$loss)]),
-    profile   = factor(profile,
-                       levels = c("loss", "phraseology", "elaboration"),
-                       labels = c("predictability", "phraseology (MI)",
-                                  "elaboration (L2SCA)")),
-    scale     = factor(scale, levels = c("rho", "centred"),
-                       labels = c("raw correlation", "mean-centred"))
-  )
-
-ggplot(prof_long, aes(x = value, y = criterion,
-                      colour = profile, shape = profile)) +
-  geom_vline(xintercept = 0, colour = "grey85", linewidth = 0.4) +
-  geom_point(size = 2.8, alpha = 0.9) +
-  facet_wrap(~ scale, scales = "free_x") +
-  scale_colour_manual(values = c("predictability"      = "#1b4965",
-                                 "phraseology (MI)"    = "#c1666b",
-                                 "elaboration (L2SCA)" = "#5e8c61")) +
-  scale_shape_manual(values = c(16, 17, 15)) +
-  labs(x = "Spearman correlation with criterion", y = NULL,
-       colour = NULL, shape = NULL) +
-  theme_minimal(base_size = 11) +
-  theme(panel.grid.minor = element_blank(),
-        legend.position = "bottom",
-        strip.text = element_text(face = "bold"))
-
-ggsave("fig/criterion_profiles.pdf", width = 8, height = 4.2)
-```
-
-```{r}
-#| label: profile-jackknife
-
-# With six points, one criterion can carry a profile correlation on its own.
-# Recomputing each similarity with each criterion held out shows whether it
-# does. The bootstrap above cannot see this: it resamples essays, not criteria.
-jack <- map_dfr(crit, \(s) {
-  k <- which(crit != s)
-  tibble(dropped = s,
-         sim_phr = cor(prof$loss[k], prof$phraseology[k]),
-         sim_syn = cor(prof$loss[k], prof$elaboration[k]))
-}) |>
-  mutate(sim_diff = sim_phr - sim_syn,
-         across(where(is.numeric), \(x) round(x, 3)))
-
-print(as.data.frame(jack), row.names = FALSE)
-cat("\nFull-profile values for comparison: sim_phr =",
-    round(est_p[["sim_phr"]], 3), " sim_syn =", round(est_p[["sim_syn"]], 3),
-    " sim_diff =", round(est_p[["sim_diff"]], 3), "\n")
-```
-
-```{r}
-#| label: profile-members
-
-# A family mean can hide disagreement among its members. The per-index profiles
-# show whether the family is a coherent thing to average in the first place.
-member <- cor(dr[c(mi_vars, syn_vars)], dr[crit])
-cat("Per-index profiles:\n")
-print(round(member, 3))
-
-cat("\nWithin-family profile agreement (mean pairwise correlation):\n")
-agree <- \(vs) mean(cor(t(member[vs, , drop = FALSE]))[lower.tri(diag(length(vs)))])
-cat("  phraseology (MI):    ", round(agree(mi_vars), 3), "\n")
-cat("  elaboration (L2SCA): ", round(agree(syn_vars), 3), "\n")
-
-cat("\nSimilarity of each index's profile to the predictability profile:\n")
-print(round(sort(apply(member, 1, \(p) cor(p, est_p[1:6])), decreasing = TRUE), 3))
-```
-
 # Summary
 
 ```{r}
@@ -577,111 +378,64 @@ print(round(sort(apply(member, 1, \(p) cor(p, est_p[1:6])), decreasing = TRUE), 
 cat(sprintf(
 "- The six criteria jointly explain **%.1f%%** of the rank variance in word
   predictability.
-- The largest LMG share is **%s** (%.4f, 95%% CI [%.4f, %.4f]); **%d of %d**
+- The largest LMG share is **%s** (%.4f, 95%% CI [%.4f, %.4f]), and **%d of %d**
   pairwise differences have intervals excluding zero.
-- Unique variance is small throughout: the median criterion holds **%.0f%%** of
+- Unique variance is small throughout. The median criterion holds **%.0f%%** of
   its LMG weight in variance shared with the other ratings.
-- Predictability's criterion profile correlates **%.2f** with the phraseological
-  family and **%.2f** with the elaboration family (difference %.2f, 95%% CI
-  [%.2f, %.2f]).
-- Under the criterion jackknife the negative similarity holds (%.2f to %.2f)
-  but the positive one does not: dropping **%s** moves it to **%.2f**.
+- Neither the length control nor prompt residualization changes the ordering,
+  and `n_tokens` takes only %.4f of the variance on its own.
 ",
 100 * r2_full,
 boot_tab$criterion[1], boot_tab$lmg[1], boot_tab$lower[1], boot_tab$upper[1],
 sum(diff_tab$excludes_zero == "yes"), nrow(diff_tab),
 median(ri_tab$shared_share),
-est_p[["sim_phr"]], est_p[["sim_syn"]], est_p[["sim_diff"]],
-sim_tab$lower[sim_tab$quantity == "sim_diff"],
-sim_tab$upper[sim_tab$quantity == "sim_diff"],
-max(jack$sim_syn), min(jack$sim_syn),
-jack$dropped[which.min(jack$sim_phr)], min(jack$sim_phr)
+as.numeric(lmg_len[["n_tokens"]])
 ))
 ```
 
 # Interpretation
 
+**The directional hypothesis doesn't hold up.** Grammar takes the largest LMG
+share, ranks first in all 2,000 bootstrap samples, and beats phraseology by an
+interval that excludes zero. Neither the length control nor prompt
+residualization disturbs the ordering. If predictability were distinctively
+phraseological as raters perceive it, this is where it would show, and it
+doesn't.
+
 **Read the LMG weights, not the unique components.** The criteria are rated by
-the same humans on the same essays and carry a large halo — the mean
-intercorrelation is reported above. Under that much redundancy the squared
+the same humans on the same essays and carry a large halo, which the mean
+intercorrelation above puts a number on. Under that much redundancy the squared
 semipartials shrink toward zero for every criterion, and shrink most for the
-ones most entangled with the rest, so a ranking by unique variance measures
-distinctiveness rather than importance. The `shared_share` column makes the
-problem concrete: for the criteria with the smallest unique components, nearly
-all of the LMG weight is variance held in common. LMG allocates that shared
-variance instead of discarding it, which is why it is the reported quantity.
+ones most entangled with the rest, so a ranking by unique variance is measuring
+distinctiveness rather than importance. The `shared_share` column makes that
+concrete. For the criteria with the smallest unique components, nearly all of
+the LMG weight is variance held in common. LMG allocates that shared variance
+instead of discarding it, which is why it's the reported quantity.
 
-**Among the ratings, the directional hypothesis is not supported.** Grammar takes
-the largest LMG share, ranks first in every one of the 2,000 bootstrap samples,
-and beats phraseology by an interval that excludes zero. Neither the length
-control nor prompt residualization disturbs the ordering. If predictability were
-distinctively phraseological *as raters perceive it*, this is where it would
-show, and it does not. The one ambiguity is phraseology versus conventions,
-which is the single pair of fifteen whose interval covers zero — a criterion
-about spelling and punctuation is holding its own against a criterion about
-formulaic language, which is worth pre-empting in the write-up rather than
-leaving for a reader to notice.
+**One loose end worth pre-empting.** Phraseology versus conventions is the only
+pair of the fifteen whose interval covers zero. A criterion about spelling and
+punctuation is holding its own against a criterion about formulaic language, and
+it's better to raise that in the write-up than to let a reader find it. The
+obvious reading is that conventions is picking up mechanical accuracy that the
+language model also finds predictable, which would be a confound rather than a
+result.
 
-**The pattern question gives a different answer, but only half of it is robust.**
-LMG asks which *ratings* predictability tracks; the profile analysis asks which
-*family of measured indices* it resembles in shape. Taken at face value the
-second answer flips sign: predictability's profile correlates +0.58 with the
-phraseological family and −0.62 with the elaboration family, a gap of 1.20 that
-no bootstrap replicate contradicts. The jackknife does not let both halves
-stand.
-
-- **The negative half is robust.** Dropping any single criterion leaves
-  `sim_syn` between −0.48 and −0.74, and the per-index table shows it is not one
-  index's doing either: MLC (−0.67) and CN/C (−0.95) point that way
-  independently, with CP/C near zero. Predictability's profile is genuinely
-  *unlike* the elaboration family's.
-- **The positive half is not.** Dropping cohesion sends `sim_phr` from +0.58 to
-  −0.08. The resemblance to the MI family rests almost entirely on cohesion
-  being the low point of both profiles; over the other five criteria the two
-  profiles do not agree, and they disagree most on vocabulary, which is near the
-  top of the MI profile and near the bottom of predictability's. Report this as
-  "predictability and the MI indices are both least associated with cohesion",
-  not as a general profile match.
-
-`sim_diff` stays positive under every jackknife (0.66 to 1.34), so the *ordering*
-survives — predictability is closer to the MI family than to the elaboration
-family. But that ordering is carried by the elaboration term, not by a positive
-match to MI. The dissimilarity is the finding; the similarity is one shared low
-point.
-
-What predictability shares with the *ratings*, meanwhile, is mostly general
-proficiency: the median criterion holds around 90% of its LMG weight in variance
-common to the others, and grammar leads because it is the rating closest to that
-general factor. Elevation and pattern answer different questions, and only the
-pattern comparison is free of the halo, because centring removes exactly the
-elevation the halo inflates.
-
-**Read alongside the network analysis, this is weak convergence at best.** The
-network placed `mean_loss` in a community with the dependency-MI indices. The
-profile analysis is consistent with that but does not independently corroborate
-it, because the part of the profile result that would corroborate it — a
-positive match to the MI family — is the part that fails the jackknife. What the
-profile analysis contributes on its own evidence is the *exclusion*: whatever
-predictability is tracking, it is not syntactic elaboration. The LMG result
-neither supports nor contradicts the network finding, because its predictors are
-*human ratings* that happen to be named Phraseology and Grammar — a rater's
-holistic phraseology judgment and a pointwise MI statistic are not the same
-construct. The defensible summary is that surprisal is clearly dissociated from
-syntactic elaboration, plausibly but not decisively aligned with corpus-derived
-formulaicity, and at the level of human ratings tracks general proficiency with
-a grammatical edge.
+**None of this adjudicates the network analysis.** The network placed
+`mean_loss` in a community with the dependency-MI indices (`amod_mi`,
+`dobj_mi`, `advmod_mi`), which are corpus-derived association strengths computed
+against the Dolma reference corpus. The predictors here are human ratings that
+happen to be named Phraseology and Grammar. A rater's holistic phraseology
+judgment and a pointwise MI statistic aren't the same construct, and the rating
+carries a halo the MI indices don't. The defensible summary is that surprisal
+aligns with corpus-derived formulaicity at the level of measured indices, while
+at the level of human ratings it tracks general proficiency with a grammatical
+edge. Treating the two as rival answers to one question would be a category
+error.
 
 # References
-
-Davison, M. L., & Davenport, E. C. (2002). Identifying criterion-related
-patterns of predictor scores using multiple regression. *Psychological Methods,
-7*(4), 468–484.
 
 Grömping, U. (2006). Relative importance for linear regression in R: The package
 relaimpo. *Journal of Statistical Software, 17*(1), 1–27.
 
 Lindeman, R. H., Merenda, P. F., & Gold, R. Z. (1980). *Introduction to
 bivariate and multivariate analysis.* Scott, Foresman.
-
-Lu, X. (2010). Automatic analysis of syntactic complexity in second language
-writing. *International Journal of Corpus Linguistics, 15*(4), 474–496.
