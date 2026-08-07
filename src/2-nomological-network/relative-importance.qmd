@@ -22,7 +22,7 @@ which ones does word predictability track, and by how much?
 All six criteria go into one regression, and LMG splits the resulting $R^2$ into
 a non-negative share for each criterion.
 
-One caveat up front. A rater's holistic `Phraseology` judgment and a
+NOTE: A rater's holistic `Phraseology` judgment and a
 corpus-derived MI index are different operationalizations, so nothing here
 adjudicates the network finding. The Interpretation section comes back to that.
 
@@ -37,10 +37,6 @@ library(relaimpo)
 
 set.seed(42)
 ```
-
-`relaimpo` attaches `MASS`, which masks `dplyr::select()`. Loading it up here
-rather than mid-document means any masking trouble shows up at the top of the
-render instead of halfway down.
 
 ```{r}
 #| label: load-data
@@ -87,14 +83,11 @@ print(map_dfr(d[crit],
 Everything below runs on **ranks**. The ratings have about nine distinct levels
 on a bounded scale, so Pearson correlations of the raw scores aren't the right
 summary. Ranking first makes every correlation a Spearman correlation and every
-simple $R^2$ a squared Spearman correlation, which keeps the whole notebook on
-one footing.
+simple $R^2$ a squared Spearman correlation.
 
 Ranks get computed once, on the full sample, and the bootstrap then resamples
 rows of the ranked data. That treats the ranks as the data rather than
-re-ranking inside each resample. Re-ranking within resamples is the stricter
-analogue of a Spearman bootstrap, but with more than 6,000 essays the two are
-indistinguishable and re-ranking is much slower.
+re-ranking inside each resample.
 
 ```{r}
 #| label: rank-transform
@@ -113,7 +106,7 @@ cat("Rank-Pearson reproduces Spearman to within 1e-12.\n")
 
 ## Zero-order correlations
 
-Reported first for context, and because the criterion intercorrelations *are*
+Reported first for context, and because the criterion intercorrelations represent
 the halo estimate. They set an upper bound on how much unique variance any one
 rating can possibly have.
 
@@ -139,18 +132,20 @@ whichever rating happens to be least redundant with the others, which isn't the
 same thing as importance.
 
 **LMG** (Lindeman, Merenda & Gold, 1980), the Shapley-value decomposition,
-answers the question the unique components can't. It averages each predictor's
-sequential $R^2$ contribution over all $6! = 720$ orderings of entry, so shared
-variance gets *allocated* among the predictors that share it rather than thrown
-away. The weights are non-negative and sum exactly to $R^2$, so they read as
+averages each predictor's sequential $R^2$ contribution over all $6! = 720$
+orderings of entry, so shared variance gets allocated among the predictors.
+The weights are non-negative and sum exactly to $R^2$, so they read as
 "this criterion's share of the explained variance".
 
-Both metrics show up below, because the contrast between them is informative on
-its own.
+Quantities reported:
 
-- `lmg` is the Shapley share, with shared variance allocated.
+- `lmg` is the Shapley share, with shared variance allocated. Mainly reported
+  for congruence with the bootstrap intervals, which are in variance units.
+- `lmg_pct` is the same share expressed as a percentage of $R^2$.
 - `last` is the variance a criterion adds when it enters last. That's exactly
   the squared semipartial, the criterion's unique contribution.
+- `last_pct` is the same unique contribution expressed as a percentage of $R^2$.
+- `shared_share` is the percentage of a criterion's LMG weight that is NOT unique.
 
 A criterion with a large `lmg` and a near-zero `last` is contributing almost
 entirely through variance it shares with the other ratings.
@@ -166,9 +161,6 @@ cat("Full model R2 =", round(r2_full, 5), "\n")
 ```{r}
 #| label: relimp-validate
 
-# `last` has to equal R2(full) - R2(full minus that criterion), by definition.
-# Checked against refitted models so the decomposition is demonstrably the
-# quantity claimed for it, not just a number relaimpo handed back.
 drop_last <- map_dbl(crit, \(s)
   r2_full - summary(lm(reformulate(setdiff(crit, s), "neg_loss"), dr))$r.squared)
 last_ri <- calc.relimp(m_all, type = "last", rela = FALSE)$last[crit]
@@ -272,7 +264,7 @@ print(ev)
 
 # The @diffnam slot comes back empty from booteval.relimp, but the difference
 # vectors are ordered exactly as combn() enumerates the pairs, so the labels
-# are reconstructed rather than read off. The stopifnot guards that assumption.
+# are reconstructed rather than read off.
 pair_mat <- combn(nm, 2)
 pair_names <- paste0(pair_mat[1, ], " - ", pair_mat[2, ])
 stopifnot(length(pair_names) == length(as.numeric(ev@lmg.diff)))
@@ -402,23 +394,11 @@ residualization disturbs the ordering. If predictability were distinctively
 phraseological as raters perceive it, this is where it would show, and it
 doesn't.
 
-**Read the LMG weights, not the unique components.** The criteria are rated by
-the same humans on the same essays and carry a large halo, which the mean
-intercorrelation above puts a number on. Under that much redundancy the squared
-semipartials shrink toward zero for every criterion, and shrink most for the
-ones most entangled with the rest, so a ranking by unique variance is measuring
-distinctiveness rather than importance. The `shared_share` column makes that
-concrete. For the criteria with the smallest unique components, nearly all of
-the LMG weight is variance held in common. LMG allocates that shared variance
-instead of discarding it, which is why it's the reported quantity.
-
-**One loose end worth pre-empting.** Phraseology versus conventions is the only
+**Phraseology vs. Conventions** Phraseology versus conventions is the only
 pair of the fifteen whose interval covers zero. A criterion about spelling and
-punctuation is holding its own against a criterion about formulaic language, and
-it's better to raise that in the write-up than to let a reader find it. The
-obvious reading is that conventions is picking up mechanical accuracy that the
-language model also finds predictable, which would be a confound rather than a
-result.
+punctuation is holding its own against a criterion about formulaic language. The
+reading is that conventions is picking up mechanical accuracy that the
+language model also finds predictable.
 
 **None of this adjudicates the network analysis.** The network placed
 `mean_loss` in a community with the dependency-MI indices (`amod_mi`,
@@ -426,11 +406,11 @@ result.
 against the Dolma reference corpus. The predictors here are human ratings that
 happen to be named Phraseology and Grammar. A rater's holistic phraseology
 judgment and a pointwise MI statistic aren't the same construct, and the rating
-carries a halo the MI indices don't. The defensible summary is that surprisal
-aligns with corpus-derived formulaicity at the level of measured indices, while
-at the level of human ratings it tracks general proficiency with a grammatical
-edge. Treating the two as rival answers to one question would be a category
-error.
+carries a halo the MI indices don't. The summary is that surprisal
+aligns with corpus-derived formulaicity at the level of measured indices of 
+Sophistication and Complexity, while at the level of human ratings that include
+Accuracy measures, it tracks general proficiency with an accuracy edge (both
+grammatical accuracy and mechanical accuracy).
 
 # References
 
