@@ -7128,6 +7128,39 @@
       "Author": "Sacha Epskamp [aut, cre], Simon Stuber [ctb], Jason Nak [ctb], Myrthe Veenman [ctb], Terrence D. Jorgensen [ctb] (ORCID: <https://orcid.org/0000-0001-5111-6773>), Adela Maria Isvoranu [ctb]",
       "Repository": "CRAN"
     },
+    "sensemakr": {
+      "Package": "sensemakr",
+      "Version": "0.1.6",
+      "Source": "Repository",
+      "Type": "Package",
+      "Title": "Sensitivity Analysis Tools for Regression Models",
+      "Date": "2024-07-22",
+      "Authors@R": "c( person(\"Carlos\", \"Cinelli\", role = c(\"aut\", \"cre\"), email = \"carloscinelli@hotmail.com\"), person(\"Jeremy\", \"Ferwerda\", role = \"aut\"), person(\"Chad\", \"Hazlett\", role = \"aut\"), person(\"Danielle\", \"Tsao\", role = \"ctb\"), person(\"Aaron\", \"Rudkin\", role = \"ctb\"), person(\"Grigorij\", \"Ljubownikow\", role = \"ctb\") )",
+      "Author": "Carlos Cinelli [aut, cre], Jeremy Ferwerda [aut], Chad Hazlett [aut], Danielle Tsao [ctb], Aaron Rudkin [ctb], Grigorij Ljubownikow [ctb]",
+      "Maintainer": "Carlos Cinelli <carloscinelli@hotmail.com>",
+      "Description": "Implements a suite of sensitivity analysis tools  that extends the traditional omitted variable bias framework and makes it easier  to understand the impact of omitted variables in regression models, as discussed in Cinelli, C. and Hazlett, C. (2020), \"Making Sense of Sensitivity: Extending Omitted Variable Bias.\" Journal of the Royal Statistical Society, Series B (Statistical Methodology) <doi:10.1111/rssb.12348>.",
+      "URL": "https://github.com/carloscinelli/sensemakr",
+      "BugReports": "https://github.com/carloscinelli/sensemakr/issues",
+      "License": "GPL-3",
+      "Depends": [
+        "R (>= 3.1.0)"
+      ],
+      "Encoding": "UTF-8",
+      "RoxygenNote": "7.2.3",
+      "Suggests": [
+        "testthat",
+        "covr",
+        "knitr",
+        "rmarkdown",
+        "png",
+        "stargazer",
+        "fixest"
+      ],
+      "LazyData": "true",
+      "VignetteBuilder": "knitr",
+      "NeedsCompilation": "no",
+      "Repository": "CRAN"
+    },
     "shape": {
       "Package": "shape",
       "Version": "1.4.6.1",
@@ -7861,6 +7894,28 @@
       "NeedsCompilation": "no",
       "Author": "Yihui Xie [aut, cre, cph] (ORCID: <https://orcid.org/0000-0003-0645-5666>), Posit Software, PBC [cph, fnd], Christophe Dervieux [ctb] (ORCID: <https://orcid.org/0000-0003-4474-2498>), Devon Ryan [ctb] (ORCID: <https://orcid.org/0000-0002-8549-0971>), Ethan Heinzen [ctb], Fernando Cagua [ctb]",
       "Maintainer": "Yihui Xie <xie@yihui.name>",
+      "Repository": "CRAN"
+    },
+    "truncnorm": {
+      "Package": "truncnorm",
+      "Version": "1.0-9",
+      "Source": "Repository",
+      "Title": "Truncated Normal Distribution",
+      "Description": "Density, probability, quantile and random number generation functions for the truncated normal distribution.",
+      "Authors@R": "c(person(\"Olaf\", \"Mersmann\", role=c(\"aut\", \"cre\"),  email=\"olafm@p-value.net\"), person(\"Heike\", \"Trautmann\", role=c(\"aut\")), person(\"Detlef\", \"Steuer\", role=c(\"aut\")), person(\"Björn\", \"Bornkamp\", role=c(\"aut\")))",
+      "URL": "https://github.com/olafmersmann/truncnorm",
+      "BugReports": "https://github.com/olafmersmann/truncnorm/issues",
+      "Depends": [
+        "R (>= 3.4.0)"
+      ],
+      "Suggests": [
+        "testthat"
+      ],
+      "License": "GPL (>= 2)",
+      "Encoding": "UTF-8",
+      "NeedsCompilation": "yes",
+      "Author": "Olaf Mersmann [aut, cre], Heike Trautmann [aut], Detlef Steuer [aut], Björn Bornkamp [aut]",
+      "Maintainer": "Olaf Mersmann <olafm@p-value.net>",
       "Repository": "CRAN"
     },
     "tzdb": {

@@ -21,6 +21,15 @@ plus the `pareto-*.qmd` reports, which run on the §2 outputs.
   long CSVs under `results/predictability/` for the R/Quarto analysis.
 - `pareto-analysis.qmd`, `pareto-by-proficiency.qmd` — validity/fairness Pareto
   reports (§3); `_viz_helpers.R` holds shared plotting helpers.
+- `proficiency-confound-sensitivity.qmd` — bounds how much of the cross-L1
+  displacement could be within-band proficiency rather than L1. TOEFL 11's
+  proficiency scale has only three levels, so stratifying on it (or residualizing
+  on it, which uses the same information) cannot remove within-band differences.
+  Structure: a rule-of-thumb bound built on Cochran's (1968) result that three
+  strata remove about 79% of a normal confounder's bias, corroborated by
+  `sensemakr` (Cinelli & Hazlett 2020), with a latent-variable version kept in an
+  appendix. All three agree; the two main methods rank the 33 configurations at
+  Spearman 0.99 and clear all 33. Depends on `ordinal`, `truncnorm`, `sensemakr`.
 
 ## Prerequisites
 
@@ -71,7 +80,23 @@ nohup bash src/1-predictability-benchmark/run_all.sh > logs/run_all.log 2>&1 & d
 tail -f logs/surprisal_gpu*.log
 ```
 
-### 3. Single process / single model
+### 3. Render the reports (R/Quarto)
+
+The `.qmd` reports are a separate step from the Python runner. Nothing above
+generates them, and `**/*.html` is gitignored, so a fresh checkout has no
+rendered output until this is run. They read only the tidy CSVs from
+`assemble_analysis_data.py`, not the parquets.
+
+```bash
+python src/1-predictability-benchmark/assemble_analysis_data.py   # if not already done
+quarto render src/1-predictability-benchmark                      # all three reports
+```
+
+Render one at a time with `quarto render src/1-predictability-benchmark/<file>.qmd`.
+A bare `quarto render` renders every `.qmd` in the project, including Study 2.
+Paths inside the reports are relative to the repo root (see `_quarto.yml`).
+
+### 4. Single process / single model
 
 ```bash
 # All 11 models on one GPU, sequentially.

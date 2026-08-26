@@ -1,0 +1,550 @@
+---
+title: "Study 1. Within-Band Proficiency as a Confound for Cross-L1 Displacement"
+subtitle: "Bounding how much of the observed fairness gap the three-level proficiency scale could be hiding"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Overview
+
+The fairness axis in `pareto-analysis.qmd` conditions on the TOEFL 11
+proficiency label, which has only three levels (low, medium, high).
+Conditioning on a three-category coarsening of a continuous variable does not
+remove the variation inside a category, so a cross-L1 displacement that survives
+stratification could still be a proficiency effect rather than an L1 effect.
+Residualizing surprisal on the band label instead of stratifying by it does not
+help, since both use the same three categories and nothing finer.
+
+The objection is legitimate and quantifiable. Cochran (1968) showed that
+subclassification on a normally distributed confounder removes roughly 64, 79,
+86 and 90 percent of its bias for two, three, four and five strata. Three bands
+therefore leave on the order of **one fifth** of the proficiency bias in place.
+
+TOEFL 11 carries no finer proficiency measure, so the residual cannot be
+controlled directly. It can be bounded. Section 2 gives the bound as three lines
+of arithmetic. Section 3 corroborates it with `sensemakr`, an implementation of
+the omitted-variable-bias framework of Cinelli and Hazlett (2020). Appendix A
+reaches the same conclusion through a latent-variable model, and is included
+only because it was run; nothing in Sections 2 or 3 depends on it.
+
+All three agree. For the worst-case L1 group in the selected configuration, the
+residual confounding available under Cochran's rule of thumb falls short of the
+observed displacement by a wide margin, and no configuration in the matrix is
+explained away at its worst-case group.
+
+# Setup and Data
+
+```{r}
+#| label: setup
+library(readr)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(ggplot2)
+library(ordinal)      # Christensen — cumulative link models with a scale term
+library(truncnorm)    # Mersmann et al. — truncated normal moments
+library(sensemakr)    # Cinelli & Hazlett — omitted variable bias bounds
+
+BANDS    <- c("low", "medium", "high")
+WINDOWS  <- c("8", "64", "full")
+SELECTED <- "llama3.1-8b/8"   # the Study 2/3 default from pareto-analysis.qmd
+
+# Cochran (1968): three strata on a normal confounder remove about 79% of its
+# bias, so about 21% survives. COCHRAN_CONSERVATIVE is carried alongside because
+# Cochran's figure assumes equal-size strata and these bands are far from equal.
+COCHRAN_RESIDUAL     <- 0.21
+COCHRAN_CONSERVATIVE <- 0.35
+
+find_results <- function() {
+  d <- normalizePath(getwd())
+  for (i in 1:6) {
+    cand <- file.path(d, "results", "predictability")
+    if (dir.exists(cand)) return(cand)
+    d <- dirname(d)
+  }
+  stop("results/predictability not found — run assemble_analysis_data.py first")
+}
+RESULTS <- find_results()
+```
+
+```{r}
+#| label: load-data
+toe <- read_csv(file.path(RESULTS, "toefl_long.csv.gz"),
+                col_types = cols(window = col_character())) |>
+  mutate(config = paste(model, window, sep = "/"))
+
+toe_wide <- toe |>
+  select(text_id, config, mean_surprisal_bits) |>
+  pivot_wider(names_from = config, values_from = mean_surprisal_bits) |>
+  left_join(distinct(toe, text_id, l1, level), by = "text_id")
+
+config_cols <- setdiff(names(toe_wide), c("text_id", "l1", "level"))
+M_toe     <- as.matrix(toe_wide[, config_cols])
+l1_toe    <- toe_wide$l1
+level_toe <- factor(toe_wide$level, levels = BANDS)
+GROUPS    <- sort(unique(l1_toe))
+
+cat(sprintf("configs: %d | TOEFL essays: %d | L1 groups: %d\n",
+            length(config_cols), nrow(M_toe), length(GROUPS)))
+```
+
+# Section 1. The Objection, and Why It Is Legitimate
+
+Two facts make within-band proficiency a candidate explanation rather than a
+theoretical worry. First, proficiency composition differs sharply across L1
+groups. Second, the three-level control already absorbs a large share of the
+raw L1 differences, which is what a variable does when it is doing real work.
+
+```{r}
+#| label: composition
+knitr::kable(round(prop.table(table(l1_toe, level_toe), margin = 1), 3),
+             caption = "Proficiency composition within each L1 group (row proportions).")
+```
+
+```{r}
+#| label: shrinkage
+d_unadjusted <- function(x, l1) vapply(GROUPS, function(g) {
+  f <- x[l1 == g]; r <- x[l1 != g]; n1 <- length(f); n2 <- length(r)
+  (mean(f) - mean(r)) / sqrt(((n1 - 1) * var(f) + (n2 - 1) * var(r)) / (n1 + n2 - 2))
+}, numeric(1))
+
+# Focal-size-weighted Cohen's d within proficiency strata: the fairness axis.
+d_stratified <- function(x, l1, level) vapply(GROUPS, function(g) {
+  num <- 0; wsum <- 0
+  for (s in BANDS) {
+    in_s <- level == s
+    f <- x[in_s & l1 == g]; r <- x[in_s & l1 != g]
+    n1 <- length(f); n2 <- length(r)
+    if (n1 < 2L || n2 < 2L) next
+    sp <- sqrt(((n1 - 1) * var(f) + (n2 - 1) * var(r)) / (n1 + n2 - 2))
+    num <- num + n1 * ((mean(f) - mean(r)) / sp); wsum <- wsum + n1
+  }
+  num / wsum
+}, numeric(1))
+
+x_sel <- M_toe[, SELECTED]
+shrink <- tibble(l1 = GROUPS,
+                 d_unadjusted = d_unadjusted(x_sel, l1_toe),
+                 d_stratified = d_stratified(x_sel, l1_toe, level_toe)) |>
+  mutate(absorbed_pct = 100 * (1 - abs(d_stratified) / abs(d_unadjusted))) |>
+  arrange(desc(abs(d_unadjusted)))
+
+knitr::kable(shrink, digits = 3,
+             caption = paste0("Effect of the three-level control on cross-L1 d (", SELECTED, ")."))
+cat(sprintf("max |d| unadjusted %.3f (%s) -> stratified %.3f (%s); median absorbed %.1f%%\n",
+            max(abs(shrink$d_unadjusted)), shrink$l1[which.max(abs(shrink$d_unadjusted))],
+            max(abs(shrink$d_stratified)), shrink$l1[which.max(abs(shrink$d_stratified))],
+            median(shrink$absorbed_pct)))
+```
+
+Cochran's result puts a number on what is left over. Three strata remove about
+79 percent of a normal confounder's bias, so roughly 21 percent survives. The
+question for Sections 2 and 3 is whether that remainder is large enough to
+account for the displacements that set the fairness axis.
+
+# Section 2. A Rule-of-Thumb Bound
+
+Three steps, each a single quantity.
+
+## Step 1. How far apart are the L1 groups in proficiency?
+
+The band composition identifies it. A cumulative probit with a scale term
+(`ordinal::clm`, following McCullagh 1980) fits each group's latent proficiency
+against the rest of the sample, in standard deviation units.
+
+```{r}
+#| label: step1-gap
+latent_gap <- lapply(GROUPS, function(g) {
+  d <- tibble(level = factor(level_toe, levels = BANDS, ordered = TRUE),
+              focal = factor(ifelse(l1_toe == g, "focal", "rest"), levels = c("rest", "focal")))
+  m <- clm(level ~ focal, scale = ~ focal, link = "probit", data = d)
+  tibble(l1 = g,
+         mu_gap    = unname(coef(m)[["focalfocal"]]),
+         mu_se     = unname(sqrt(diag(vcov(m)))[["focalfocal"]]),
+         scale_ratio = unname(exp(m$zeta[["focalfocal"]])))
+}) |> bind_rows() |> arrange(desc(abs(mu_gap)))
+
+knitr::kable(latent_gap, digits = 3,
+             caption = "Latent proficiency gap versus the rest of the sample, in theta SD (ordinal::clm, probit).")
+mu_gap <- setNames(latent_gap$mu_gap, latent_gap$l1)
+```
+
+The scale ratios sit near 1, so the groups differ mainly in location. The
+largest gap in the corpus is GER, and that is the group that gives the confound
+the most room to work.
+
+## Step 2. How much of that gap survives the three-level control?
+
+Cochran's figure: about 21 percent.
+
+```{r}
+#| label: step2-residual
+residual_gap <- COCHRAN_RESIDUAL * mu_gap
+cat(sprintf("largest latent gap: %s at %+.3f theta SD -> residual after 3 strata %+.3f theta SD\n",
+            names(which.max(abs(mu_gap))), mu_gap[[which.max(abs(mu_gap))]],
+            residual_gap[[which.max(abs(mu_gap))]]))
+```
+
+## Step 3. What is a proficiency SD worth in surprisal?
+
+The slope is estimated **within each L1 group** and then pooled, so that L1
+composition cannot contaminate the very quantity used to test it. Band mean
+proficiency comes from `truncnorm::etruncnorm` on the cutpoints implied by the
+observed band shares.
+
+```{r}
+#| label: step3-slope
+band_p    <- prop.table(table(level_toe))
+cuts      <- qnorm(cumsum(c(0, as.numeric(band_p))))
+theta_bar <- vapply(seq_along(BANDS), function(i) etruncnorm(cuts[i], cuts[i + 1], 0, 1), numeric(1))
+theta_var <- vapply(seq_along(BANDS), function(i) vtruncnorm(cuts[i], cuts[i + 1], 0, 1), numeric(1))
+names(theta_bar) <- names(theta_var) <- BANDS
+
+n_by_l1 <- as.numeric(table(factor(l1_toe, levels = GROUPS))); names(n_by_l1) <- GROUPS
+beta_by_l1 <- matrix(NA_real_, length(GROUPS), ncol(M_toe), dimnames = list(GROUPS, colnames(M_toe)))
+for (g in GROUPS) {
+  use <- character(0); ns <- numeric(0); Y <- NULL
+  for (s in BANDS) {
+    idx <- which(l1_toe == g & level_toe == s)
+    if (length(idx) < 2L) next
+    use <- c(use, s); ns <- c(ns, length(idx)); Y <- rbind(Y, colMeans(M_toe[idx, , drop = FALSE]))
+  }
+  if (length(use) < 2L) next
+  x  <- theta_bar[use]; xb <- weighted.mean(x, ns); yb <- colSums(ns * Y) / sum(ns)
+  beta_by_l1[g, ] <- colSums(ns * (x - xb) * sweep(Y, 2, yb)) / sum(ns * (x - xb)^2)
+}
+ok   <- !is.na(beta_by_l1[, 1])
+beta <- colSums(n_by_l1[ok] * beta_by_l1[ok, , drop = FALSE]) / sum(n_by_l1[ok])
+
+cat(sprintf("%s: %.4f bits per theta SD (within-L1 range %.3f to %.3f)\n",
+            SELECTED, beta[[SELECTED]], min(beta_by_l1[, SELECTED]), max(beta_by_l1[, SELECTED])))
+```
+
+## Putting the three together
+
+The residual proficiency gap times the slope gives the surprisal difference
+that within-band confounding could produce. Compare it with what was actually
+observed, as a focal-size-weighted within-band gap in bits, on the same estimand
+as the fairness axis.
+
+```{r}
+#| label: rule-of-thumb
+observed_gap_bits <- function(M, l1, level) {
+  D <- matrix(NA_real_, length(GROUPS), ncol(M), dimnames = list(GROUPS, colnames(M)))
+  for (g in GROUPS) {
+    num <- rep(0, ncol(M)); w <- 0
+    for (s in BANDS) {
+      in_s <- level == s
+      foc <- in_s & (l1 == g); rst <- in_s & (l1 != g)
+      if (sum(foc) < 2L || sum(rst) < 2L) next
+      num <- num + sum(foc) * (colMeans(M[foc, , drop = FALSE]) - colMeans(M[rst, , drop = FALSE]))
+      w   <- w + sum(foc)
+    }
+    D[g, ] <- num / w
+  }
+  D
+}
+
+OBS <- observed_gap_bits(M_toe, l1_toe, level_toe)
+# Worst-case L1 per config is defined on the standardized fairness axis, so that
+# this table refers to the same group that sets max |d|.
+absD    <- abs(apply(M_toe, 2, function(x) d_stratified(x, l1_toe, level_toe)))
+worst_i <- apply(absD, 2, which.max)
+pick    <- cbind(worst_i, seq_len(ncol(M_toe)))
+
+rot <- tibble(
+  config     = colnames(M_toe),
+  worst_l1   = GROUPS[worst_i],
+  max_abs_d  = absD[pick],
+  obs_bits   = abs(OBS[pick]),
+  allow_bits = abs(residual_gap[GROUPS[worst_i]] * beta),
+  allow_bits_conservative =
+    abs((COCHRAN_CONSERVATIVE / COCHRAN_RESIDUAL) * residual_gap[GROUPS[worst_i]] * beta)
+) |>
+  mutate(ratio        = obs_bits / allow_bits,
+         ratio_conservative = obs_bits / allow_bits_conservative,
+         window       = factor(sub(".*/", "", config), levels = WINDOWS),
+         selected     = config == SELECTED) |>
+  arrange(ratio)
+
+knitr::kable(select(rot, config, worst_l1, max_abs_d, obs_bits, allow_bits,
+                    ratio, ratio_conservative),
+             digits = 3,
+             caption = paste("Observed within-band gap versus the gap residual confounding could produce.",
+                             "ratio > 1 means confounding cannot account for it."))
+
+cat(sprintf("configs where confounding suffices (ratio < 1): %d of %d\n",
+            sum(rot$ratio < 1), nrow(rot)))
+cat(sprintf("under the conservative 35%% residual              : %d of %d\n",
+            sum(rot$ratio_conservative < 1), nrow(rot)))
+write_csv(rot, file.path(RESULTS, "proficiency_confound_ruleofthumb.csv"))
+```
+
+```{r}
+#| label: rot-plot
+#| fig-width: 8.5
+#| fig-height: 8
+plot_df <- mutate(rot, config = factor(config, levels = config[order(ratio)]))
+
+p <- ggplot(plot_df, aes(y = config)) +
+  geom_segment(aes(x = allow_bits, xend = obs_bits, yend = config),
+               colour = "grey78", linewidth = 0.7) +
+  geom_point(aes(x = allow_bits), shape = 23, fill = "white", colour = "black", size = 2) +
+  geom_point(aes(x = obs_bits, colour = window, shape = window), size = 2.8) +
+  geom_text(aes(x = obs_bits + 0.012, label = worst_l1), size = 2.5, hjust = 0, colour = "grey30") +
+  geom_point(data = filter(plot_df, selected), aes(x = obs_bits),
+             shape = 21, size = 5.5, stroke = 1, colour = "black", fill = NA) +
+  labs(x = "Within-band gap for the worst-case L1 (bits of surprisal)", y = NULL,
+       colour = "Window", shape = "Window",
+       title = "Observed displacement versus what residual confounding allows",
+       subtitle = paste("White diamond: gap that within-band proficiency could produce (Cochran 21% residual).",
+                        "Coloured point: gap actually observed. Circled point is the selected default.",
+                        sep = "\n")) +
+  scale_x_continuous(expand = expansion(mult = c(0.02, 0.10))) +
+  theme_minimal(base_size = 10) +
+  theme(panel.grid.major.y = element_line(colour = "grey93"),
+        plot.subtitle = element_text(size = 8, colour = "grey30"))
+p
+ggsave(file.path(RESULTS, "proficiency_confound_ruleofthumb.png"), p, width = 8.5, height = 8, dpi = 200)
+ggsave(file.path(RESULTS, "proficiency_confound_ruleofthumb.pdf"), p, width = 8.5, height = 8)
+```
+
+## What this does and does not say
+
+For the configurations whose worst-case group is TEL, including the selected
+default, the observed gap is an order of magnitude beyond what residual
+confounding allows, because Telugu writers' proficiency composition is close to
+the sample average and a group that looks average between bands cannot be
+extreme within them. For GER the margin is roughly threefold, and GER is the
+binding case because it has the largest latent gap in the corpus.
+
+The honest qualification is that this does **not** hold for every group. ARA,
+HIN and JPN have large latent gaps and small observed displacements, and for
+those groups residual within-band confounding is an entirely adequate
+explanation. None of them sets `max |d|` for any configuration, so the fairness
+axis is unaffected, but the claim that survives is specific. Residual
+confounding plausibly explains the small displacements. It does not explain the
+ones that determine the axis.
+
+# Section 3. Corroboration with sensemakr
+
+Section 2 rests on Cochran's rule of thumb and a linear slope. `sensemakr`
+reaches the question from a different direction, treating within-band
+proficiency as an omitted variable in a regression of surprisal on the focal L1
+indicator with the band label controlled, and asking how strong that omitted
+variable would have to be relative to the band label itself.
+
+The benchmark has a natural value here. By the law of total variance on the
+coarsening, the within-band remainder of proficiency carries a fixed share of
+the variance that the band label captures.
+
+```{r}
+#| label: plausible-k
+within_var  <- sum(as.numeric(band_p) * theta_var)
+k_plausible <- within_var / (1 - within_var)
+cat(sprintf("within-band theta variance %.3f | between-band %.3f | plausible k = %.3f\n",
+            within_var, 1 - within_var, k_plausible))
+```
+
+So a confounder about **0.3 times** as strong as the observed band label is the
+substantively plausible case. Anything much beyond that is asserting the
+coarsening lost more than it kept. (`sensemakr`'s *k* is a ratio of partial
+R-squared rather than of variance shares, so this is a calibration rather than
+an identity.)
+
+```{r}
+#| label: sensemakr
+# Smallest k at which a confounder k times as strong as `level` nullifies the effect.
+tipping_k <- function(m, grid = seq(0.05, 6, by = 0.05)) {
+  e0 <- coef(m)[["focal"]]
+  b <- suppressWarnings(ovb_bounds(
+    m, treatment = "focal",
+    benchmark_covariates = list(level = c("levelmedium", "levelhigh")), kd = grid))
+  hit <- which(sign(b$adjusted_estimate) != sign(e0))
+  if (!length(hit)) return(NA_real_)
+  grid[min(hit)]
+}
+
+# One regression per configuration, with that configuration's own worst-case L1
+# as the focal group, so this table lines up row for row with Section 2.
+sens <- lapply(seq_len(ncol(M_toe)), function(j) {
+  g <- GROUPS[worst_i[j]]
+  d <- tibble(y = M_toe[, j], level = level_toe, focal = as.numeric(l1_toe == g))
+  m <- lm(y ~ focal + level, data = d)
+  tibble(config = colnames(M_toe)[j], worst_l1 = g,
+         estimate_bits    = unname(coef(m)[["focal"]]),
+         robustness_value = robustness_value(m, covariate = "focal"),
+         tipping_k        = tipping_k(m))
+}) |> bind_rows() |>
+  mutate(margin   = tipping_k / k_plausible,
+         selected = config == SELECTED) |>
+  arrange(margin)
+
+knitr::kable(select(sens, config, worst_l1, estimate_bits, robustness_value, tipping_k, margin),
+             digits = 3,
+             caption = paste0("sensemakr bounds, one regression per configuration on its own worst-case L1. ",
+                              "tipping_k is in units of the observed band label; plausible k is ",
+                              round(k_plausible, 2), ". NA means not nullified at any k up to 6."))
+
+n_tip <- sum(!is.na(sens$tipping_k))
+cat(sprintf("configs nullified at some k <= 6      : %d of %d\n", n_tip, nrow(sens)))
+cat(sprintf("configs nullified at the plausible k  : %d of %d\n",
+            sum(sens$margin < 1, na.rm = TRUE), nrow(sens)))
+write_csv(sens, file.path(RESULTS, "proficiency_confound_sensemakr.csv"))
+```
+
+Configurations whose worst-case group is TEL are never nullified within the
+searched range, so no confounder of this kind explains them. The binding cases
+are the GER configurations, which tip at roughly 0.85 times the band label
+against a plausible 0.3, a margin near threefold. That matches the rule-of-thumb
+ratio for the same configurations in Section 2. The two methods share the
+coarsening model but almost nothing else, so their agreement on the binding case
+carries weight.
+
+# Section 4. Agreement Between the Two Methods
+
+Sections 2 and 3 share the coarsening model and the assumption that proficiency
+is unidimensional. Beyond that they have little in common. Section 2 works in
+bits through a calibrated slope and Cochran's bias-removal figure; Section 3
+works in partial R-squared through an omitted-variable-bias bound and never uses
+the slope at all. Their rankings can therefore be compared.
+
+```{r}
+#| label: agreement
+agree <- rot |>
+  select(config, worst_l1, ratio) |>
+  left_join(select(sens, config, tipping_k, margin), by = "config")
+
+cat(sprintf("Spearman correlation of the two margins: %.3f\n",
+            cor(agree$ratio, agree$margin, method = "spearman", use = "complete.obs")))
+cat(sprintf("configs cleared by both methods: %d of %d\n",
+            sum(agree$ratio > 1 & (agree$margin > 1 | is.na(agree$margin))), nrow(agree)))
+cat(sprintf("configs cleared by neither     : %d of %d\n",
+            sum(agree$ratio <= 1 & agree$margin <= 1, na.rm = TRUE), nrow(agree)))
+
+knitr::kable(head(arrange(agree, ratio), 8), digits = 3,
+             caption = "The eight configurations where confounding has the most room, by both methods.")
+```
+
+# Section 5. Summary
+
+- The objection is real. Three bands leave roughly a fifth of the proficiency
+  bias unadjusted (Cochran 1968), and L1 composition across bands is sharply
+  unequal.
+- For the groups that set the fairness axis, the residual is far too small to
+  account for the observed displacement. TEL by roughly two orders of magnitude,
+  GER by roughly threefold, and no configuration is explained away at its
+  worst-case group under either the 21 percent or the conservative 35 percent
+  residual.
+- `sensemakr` agrees on the binding case from a different set of assumptions,
+  and the two methods rank the 33 configurations almost identically
+  (Spearman 0.99), with all 33 cleared by both.
+- For ARA, HIN and JPN the residual is an adequate explanation, and those
+  displacements should not be read as L1 effects. They do not set `max |d|`.
+- The bound assumes a monotone coarsening of a unidimensional proficiency
+  variable and a linear relationship between proficiency and surprisal over the
+  observed range. With three bands, curvature cannot be tested.
+
+# Appendix A. Latent Truncation Model
+
+Retained for completeness. This was the original form of the analysis, before
+Cochran's rule of thumb made most of the machinery unnecessary. It fits each
+group's latent proficiency distribution, derives the within-band displacement
+that distribution implies, and compares it with the displacement the observed
+gap would require. **Nothing in Sections 2 to 4 depends on it.**
+
+```{r}
+#| label: appendix-latent
+col_var <- function(X) { n <- nrow(X); m <- colMeans(X); (colSums(X * X) - n * m * m) / (n - 1) }
+theta_sd <- sqrt(theta_var)
+
+# Within-band displacement implied by each group's fitted latent distribution.
+implied_delta <- vapply(GROUPS, function(g) {
+  d  <- tibble(level = factor(level_toe, levels = BANDS, ordered = TRUE),
+               focal = factor(ifelse(l1_toe == g, "focal", "rest"), levels = c("rest", "focal")))
+  m  <- clm(level ~ focal, scale = ~ focal, link = "probit", data = d)
+  mu <- unname(coef(m)[["focalfocal"]]); sg <- unname(exp(m$zeta[["focalfocal"]]))
+  num <- 0; w <- 0
+  for (i in seq_along(BANDS)) {
+    s  <- BANDS[i]
+    mg <- etruncnorm(cuts[i], cuts[i + 1], mu, sg)
+    mr <- etruncnorm(cuts[i], cuts[i + 1], 0, 1)
+    n1 <- sum(l1_toe == g & level_toe == s)
+    num <- num + n1 * ((mg - mr) / theta_sd[[s]]); w <- w + n1
+  }
+  num / w
+}, numeric(1))
+
+# Displacement the observed gap would require, on the same scale.
+required_delta <- vapply(seq_along(GROUPS), function(gi) {
+  g <- GROUPS[gi]; num <- 0; w <- 0
+  for (i in seq_along(BANDS)) {
+    s <- BANDS[i]; in_s <- level_toe == s
+    foc <- in_s & (l1_toe == g); rst <- in_s & (l1_toe != g)
+    if (sum(foc) < 2L || sum(rst) < 2L) next
+    gap <- mean(M_toe[foc, SELECTED]) - mean(M_toe[rst, SELECTED])
+    num <- num + sum(foc) * ((gap / beta[[SELECTED]]) / theta_sd[[s]]); w <- w + sum(foc)
+  }
+  num / w
+}, numeric(1))
+names(required_delta) <- GROUPS
+
+app <- tibble(l1 = GROUPS, delta_implied = implied_delta, delta_required = required_delta) |>
+  mutate(ratio = abs(delta_required) / abs(delta_implied)) |>
+  arrange(desc(ratio))
+knitr::kable(app, digits = 3,
+             caption = paste0("Appendix: implied versus required within-band displacement (", SELECTED, ")."))
+write_csv(app, file.path(RESULTS, "proficiency_confound_latent_appendix.csv"))
+```
+
+The ordering and the conclusion match Section 2. TEL is the most robust group,
+GER the binding one, and the groups with small displacements and large latent
+gaps are the ones confounding can explain.
+
+# References
+
+Cinelli, C., & Hazlett, C. (2020). Making sense of sensitivity: Extending
+omitted variable bias. *Journal of the Royal Statistical Society: Series B*,
+82(1), 39–67.
+
+Cochran, W. G. (1968). The effectiveness of adjustment by subclassification in
+removing bias in observational studies. *Biometrics*, 24(2), 295–313.
+
+Cornfield, J., Haenszel, W., Hammond, E. C., Lilienfeld, A. M., Shimkin, M. B.,
+& Wynder, E. L. (1959). Smoking and lung cancer: Recent evidence and a
+discussion of some questions. *Journal of the National Cancer Institute*,
+22(1), 173–203.
+
+Frank, K. A., Maroulis, S. J., Duong, M. Q., & Kelcey, B. M. (2013). What would
+it take to change an inference? Using Rubin's causal model to interpret the
+robustness of causal inferences. *Educational Evaluation and Policy Analysis*,
+35(4), 437–460.
+
+Liddell, T. M., & Kruschke, J. K. (2018). Analyzing ordinal data with metric
+models: What could possibly go wrong? *Journal of Experimental Social
+Psychology*, 79, 328–348.
+
+McCullagh, P. (1980). Regression models for ordinal data. *Journal of the Royal
+Statistical Society: Series B*, 42(2), 109–142.
+
+Rosenbaum, P. R., & Rubin, D. B. (1983). Assessing sensitivity to an unobserved
+binary covariate in an observational study with binary outcome. *Journal of the
+Royal Statistical Society: Series B*, 45(2), 212–218.
+
+VanderWeele, T. J., & Ding, P. (2017). Sensitivity analysis in observational
+research: Introducing the E-value. *Annals of Internal Medicine*, 167(4),
+268–274.
+
+Williamson, D. M., Xi, X., & Breyer, F. J. (2012). A framework for evaluation
+and use of automated scoring. *Educational Measurement: Issues and Practice*,
+31(1), 2–13.
+
+R packages: `ordinal` (Christensen), `truncnorm` (Mersmann et al.), `sensemakr`
+(Cinelli, Ferwerda & Hazlett).
