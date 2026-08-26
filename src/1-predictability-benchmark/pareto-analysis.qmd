@@ -294,6 +294,149 @@ cat(sprintf(
   selected$worst_l1, selected$front_prob))
 ```
 
+## Cross-corpus validity check
+
+The Pareto plane draws its validity axis from ELLIPSE and its fairness axis from
+TOEFL 11. That split is forced by the data, since ELLIPSE carries no L1 labels,
+but it is only defensible if the validity ordering is a property of the
+configurations rather than of the corpus that supplied the criterion. Were the
+selected configuration not also near the top on TOEFL 11, the selection would be
+an artefact of which corpus provided the y-axis.
+
+TOEFL 11 proficiency is a three-level ordinal label, so validity there is a
+Spearman correlation against the band rank. Two versions are reported. The
+pooled estimate uses every essay. The within-L1 estimate computes the
+correlation inside each L1 group and averages by group size, which matters
+because band and L1 are strongly confounded in this corpus (see
+`proficiency-confound-sensitivity.qmd`).
+
+Magnitudes are **not** comparable across the two corpora. A three-category
+criterion with heavy ties attenuates the coefficient relative to ELLIPSE's
+continuous score, so only the ordering carries information.
+
+```{r}
+#| label: toefl-validity
+BANDS     <- c("low", "medium", "high")
+level_num <- as.integer(factor(level_toe, levels = BANDS))
+
+# Spearman is Pearson on ranks. Ranking the surprisal matrix once here also lets
+# the bootstrap below run on fixed rank scores instead of re-ranking every draw
+# (verified identical to cor(..., method = "spearman") on the full sample).
+R_toe  <- apply(M_toe, 2, rank)
+rl_toe <- rank(level_num)
+
+rho_pooled <- cor(R_toe, rl_toe)[, 1]
+
+# Within-L1, size-weighted. Band and L1 are confounded, so the pooled estimate
+# carries some L1 composition with it.
+rho_within <- local({
+  num <- rep(0, ncol(M_toe)); w <- 0
+  for (g in sort(unique(l1_toe))) {
+    ix  <- which(l1_toe == g)
+    num <- num + length(ix) * cor(M_toe[ix, ], level_num[ix], method = "spearman")[, 1]
+    w   <- w + length(ix)
+  }
+  num / w
+})
+
+validity_toefl <- tibble(config = colnames(M_toe),
+                         rho = rho_pooled, abs_rho = abs(rho_pooled),
+                         rho_within = rho_within, abs_rho_within = abs(rho_within))
+points <- left_join(points, validity_toefl, by = "config")
+
+xc <- points |> mutate(rank_ellipse = rank(-abs_r), rank_toefl = rank(-abs_rho))
+
+xc |>
+  arrange(rank_ellipse) |>
+  select(config, instruct, abs_r, rank_ellipse, abs_rho, abs_rho_within, rank_toefl) |>
+  head(12) |>
+  mutate(across(where(is.numeric), \(x) round(x, 3))) |>
+  knitr::kable(caption = "Top 12 configurations by ELLIPSE validity, with their TOEFL 11 ranks.")
+
+sel_cfg <- paste(selected$model, selected$window, sep = "/")
+sel_row <- xc |> filter(config == sel_cfg)
+cat(sprintf("Selected %s: ELLIPSE rank %.0f/%d (|r| = %.3f) | TOEFL rank %.0f/%d (|rho| = %.3f, within-L1 %.3f)\n",
+            sel_cfg, sel_row$rank_ellipse, nrow(xc), sel_row$abs_r,
+            sel_row$rank_toefl, nrow(xc), sel_row$abs_rho, sel_row$abs_rho_within))
+```
+
+```{r}
+#| label: cross-corpus-agreement
+#| fig-width: 6.5
+#| fig-height: 5
+# TOEFL is resampled UNstratified here. The stratified resample used for the
+# fairness axis holds band composition fixed, which would remove the very
+# variation this correlation measures.
+n_toe      <- nrow(M_toe)
+boot_agree <- numeric(N_BOOT)
+for (b in seq_len(N_BOOT)) {
+  ei <- sample.int(n_ell, n_ell, replace = TRUE)
+  ab <- abs(cor(S_ell[ei, ], y_ell[ei])[, 1])
+  ti <- sample.int(n_toe, n_toe, replace = TRUE)
+  at <- abs(cor(R_toe[ti, ], rl_toe[ti])[, 1])
+  boot_agree[b] <- cor(ab, at, method = "spearman")
+}
+
+agree_hat <- cor(points$abs_r, points$abs_rho, method = "spearman")
+# TEMPORARY(modernbert-base/full): known-broken configuration at the full
+# window, where its surprisal exceeds its own 8-token window, which a working
+# model cannot do. See "Known issues" in this directory's README. Drop this
+# second reported figure once the configuration is fixed or removed.
+keep      <- points$config != "modernbert-base/full"
+agree_ex  <- cor(points$abs_r[keep], points$abs_rho[keep], method = "spearman")
+
+cat(sprintf("rank agreement of the two validity orderings (%d configs): rho = %.3f, 95%% CI [%.3f, %.3f]\n",
+            nrow(points), agree_hat, q025(boot_agree), q975(boot_agree)))
+cat(sprintf("excluding modernbert-base/full (%d configs)              : rho = %.3f\n",
+            sum(keep), agree_ex))
+cat(sprintf("pooled vs within-L1 TOEFL ordering                       : rho = %.3f\n",
+            cor(points$abs_rho, points$abs_rho_within, method = "spearman")))
+
+# TEMPORARY(modernbert-base/full): excluded from this plot only, because at
+# (0.034, 0.362) it compresses every other configuration into one corner. It is
+# retained in every statistic above. See "Known issues" in this directory's
+# README. Remove this filter once the configuration is fixed or removed.
+pxc_df <- filter(points, config != "modernbert-base/full")
+
+p_xc <- ggplot(pxc_df, aes(abs_rho, abs_r)) +
+  geom_point(aes(colour = window, shape = instruct), size = 2.6) +
+  ggrepel::geom_text_repel(
+    data = filter(pxc_df, front | config == sel_cfg),
+    aes(label = config), size = 2.5, max.overlaps = Inf, box.padding = 0.5,
+    min.segment.length = 0, segment.colour = "grey55", seed = 42) +
+  geom_point(data = filter(pxc_df, config == sel_cfg),
+             shape = 21, size = 5, stroke = 1, colour = "black", fill = NA) +
+  labs(x = "TOEFL 11 validity (|Spearman rho| vs proficiency band)",
+       y = "ELLIPSE validity (|Pearson r| vs holistic score)",
+       colour = "Window", shape = "Instruct",
+       title = "Does the validity ordering survive changing the criterion corpus?",
+       subtitle = paste("Circled point is the selected default. Axes are not on a common scale.",
+                        "Broken config modernbert-base/full omitted from the plot only.",
+                        sep = "\n")) +
+  theme_minimal(base_size = 10)
+p_xc
+ggsave(file.path(RESULTS, "validity_cross_corpus.png"), p_xc, width = 6.5, height = 5, dpi = 200)
+write_csv(select(xc, config, abs_r, rank_ellipse, abs_rho, abs_rho_within, rank_toefl),
+          file.path(RESULTS, "validity_cross_corpus.csv"))
+```
+
+The ordering transfers. Rank agreement across the 33 configurations is 0.825
+with a 95% interval of [0.796, 0.849], and the selected default sits 6th of 33
+on ELLIPSE and 8th of 33 on TOEFL 11. The selection is therefore not an artefact
+of which corpus supplied the y-axis, which is the assumption the two-corpus
+design rests on.
+
+Three further readings. The pooled and within-L1 TOEFL orderings agree at 0.969,
+so the band-by-L1 confounding documented in
+`proficiency-confound-sensitivity.qmd` does not drive the validity ordering.
+The window effect replicates across corpora, with mean validity falling from
+window 8 to 64 to full on both (0.626, 0.574, 0.527 on ELLIPSE; 0.499, 0.462,
+0.394 on TOEFL), although it is architecture-dependent, since masked models are
+level or better at window 64 while causal models are clearly best at window 8.
+Finally, `modernbert-base/full` reaches |rho| = 0.034 on TOEFL 11, near zero,
+which is independent corroboration that the configuration is broken rather than
+merely weak.
+
 # Section 5 — Pareto Plot
 
 ```{r}
@@ -312,8 +455,11 @@ pa <- points |>
 win_labs <- c("8" = "window 8", "64" = "window 64", "full" = "window full")
 selected <- selected |> mutate(window = factor(window, levels = c("8", "64", "full")))
 
-# One config (modernbert-base/full) sits far below the zoomed range; annotate it
-# in the "full" panel rather than let it stretch every panel's y-axis.
+# TEMPORARY(modernbert-base/full): this configuration sits far below the zoomed
+# range, so it is annotated in the "full" panel rather than allowed to stretch
+# every panel's y-axis. The 0.50 threshold selects it and nothing else. See
+# "Known issues" in this directory's README. Once the configuration is fixed or
+# removed, this block and the geom_text layer that consumes `off` can go.
 off <- pa |> filter(abs_r < 0.50) |>
   mutate(lbl = paste0(lbl, " (|r|=", sprintf("%.2f", abs_r), ", off-scale)"),
          abs_r = 0.515)

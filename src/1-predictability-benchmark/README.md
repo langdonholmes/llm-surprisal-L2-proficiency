@@ -145,6 +145,30 @@ TOEFL: `l1`, `level`, prompt), plus `window`, `mean_surprisal_bits`,
 `truncated` (essay longer than the model's max context — expected for ~30% of
 ELLIPSE essays on BERT/GPT-2 at the full window; flagged for reporting).
 
+## Known issues
+
+**`modernbert-base` at the full window produces corrupt surprisal. Open.**
+Mean surprisal at the 8190-token window (5.364 bits on ELLIPSE) exceeds its own
+8-token window (4.736). A working model cannot do this, since the 8-token
+context is a subset of the full one. `modernbert-large` is correct on the
+identical code path, and windows 8 and 64 are correct for both models.
+Within-essay surprisal variance is 40.3 against 8.1 for `modernbert-large/full`,
+and a two-component fit implies roughly 28% of tokens scored near log2(vocab),
+i.e. near-uniform over the vocabulary. It reproduces on TOEFL 11, where the
+configuration reaches |rho| = 0.034 against proficiency band. Not truncation
+(`n_truncated: 0`) and not the windowing code. Suspected bf16 instability at
+long sequence lengths, upstream of this repo, but untested. **Studies 2 and 3
+are unaffected**, since the selected configuration is `llama3.1-8b/8`.
+
+Code that works around it is tagged `TEMPORARY(modernbert-base/full)`:
+
+```bash
+grep -rn "TEMPORARY(modernbert-base/full)" src/
+```
+
+Once the configuration is fixed or removed from the matrix, re-run
+`assemble_analysis_data.py` first, then all three reports, then clear those tags.
+
 ## Method notes (kept consistent across all models)
 
 - **Surprisal in bits** (log base 2); text-level index = mean token surprisal.
