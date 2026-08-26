@@ -55,6 +55,9 @@ library(sensemakr)    # Cinelli & Hazlett — omitted variable bias bounds
 BANDS    <- c("low", "medium", "high")
 WINDOWS  <- c("8", "64", "full")
 SELECTED <- "llama3.1-8b/8"   # the Study 2/3 default from pareto-analysis.qmd
+# Configurations dropped as instrument failures rather than data. See "Known
+# issues" in this directory's README for the diagnosis and the evidence.
+EXCLUDED_CONFIGS <- c("modernbert-base/full")
 
 # Cochran (1968): three strata on a normal confounder remove about 79% of its
 # bias, so about 21% survives. COCHRAN_CONSERVATIVE is carried alongside because
@@ -86,6 +89,7 @@ toe_wide <- toe |>
   left_join(distinct(toe, text_id, l1, level), by = "text_id")
 
 config_cols <- setdiff(names(toe_wide), c("text_id", "l1", "level"))
+config_cols <- setdiff(config_cols, EXCLUDED_CONFIGS)
 M_toe     <- as.matrix(toe_wide[, config_cols])
 l1_toe    <- toe_wide$l1
 level_toe <- factor(toe_wide$level, levels = BANDS)

@@ -52,6 +52,9 @@ set.seed(42)
 K_DRAWS <- 200        # balanced subsample repeats
 N_BOOT  <- 2000       # all-essays bootstrap iterations
 D_FLAG  <- 0.10       # Williamson et al. (2012) flag
+# Configurations dropped as instrument failures rather than data. See "Known
+# issues" in this directory's README for the diagnosis and the evidence.
+EXCLUDED_CONFIGS <- c("modernbert-base/full")
 LEVELS  <- c("low", "medium", "high")
 
 find_results <- function() {
@@ -95,13 +98,16 @@ ell_wide <- ell |>
   pivot_wider(names_from = config, values_from = mean_surprisal_bits) |>
   left_join(distinct(ell, text_id, overall), by = "text_id")
 cc <- setdiff(names(ell_wide), c("text_id", "overall"))
-S <- as.matrix(ell_wide[, cc]); y <- ell_wide$overall
 
 toe_wide <- toe |>
   select(text_id, config, mean_surprisal_bits) |>
   pivot_wider(names_from = config, values_from = mean_surprisal_bits) |>
   left_join(distinct(toe, text_id, l1, level), by = "text_id")
 stopifnot(identical(cc, setdiff(names(toe_wide), c("text_id", "l1", "level"))))
+# Alignment is verified on the full matrix, then excluded configurations drop.
+cc <- setdiff(cc, EXCLUDED_CONFIGS)
+
+S <- as.matrix(ell_wide[, cc]); y <- ell_wide$overall
 M <- as.matrix(toe_wide[, cc]); l1 <- toe_wide$l1; level <- toe_wide$level
 ```
 

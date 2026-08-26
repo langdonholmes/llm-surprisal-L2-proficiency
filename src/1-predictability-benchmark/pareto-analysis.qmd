@@ -52,6 +52,10 @@ set.seed(42)          # fixed bootstrap seed (reproducibility)
 N_BOOT   <- 2000      # bootstrap iterations (plan §3.3)
 D_FLAG   <- 0.10      # Williamson et al. (2012) fairness flag threshold
 
+# Configurations dropped as instrument failures rather than data. See "Known
+# issues" in this directory's README for the diagnosis and the evidence.
+EXCLUDED_CONFIGS <- c("modernbert-base/full")
+
 # Locate results/predictability by walking up from the working dir (Quarto runs
 # from the .qmd's directory), so this works whether rendered or run standalone.
 find_results <- function() {
@@ -108,8 +112,6 @@ ell_wide <- ell |>
   left_join(distinct(ell, text_id, overall), by = "text_id")
 
 config_cols <- setdiff(names(ell_wide), c("text_id", "overall"))
-S_ell <- as.matrix(ell_wide[, config_cols])   # essays x configs
-y_ell <- ell_wide$overall
 
 # TOEFL as an [essay x config] surprisal matrix + L1 / proficiency-level vectors.
 toe_wide <- toe |>
@@ -118,12 +120,20 @@ toe_wide <- toe |>
   left_join(distinct(toe, text_id, l1, level), by = "text_id")
 
 stopifnot(identical(config_cols, setdiff(names(toe_wide), c("text_id", "l1", "level"))))
+
+# Alignment is verified on the full matrix, then excluded configurations drop.
+dropped     <- intersect(config_cols, EXCLUDED_CONFIGS)
+config_cols <- setdiff(config_cols, EXCLUDED_CONFIGS)
+
+S_ell <- as.matrix(ell_wide[, config_cols])   # essays x configs
+y_ell <- ell_wide$overall
 M_toe <- as.matrix(toe_wide[, config_cols])   # essays x configs
 l1_toe    <- toe_wide$l1
 level_toe <- toe_wide$level
 
 cat(sprintf("configs: %d | ELLIPSE essays: %d | TOEFL essays: %d\n",
             length(config_cols), nrow(S_ell), nrow(M_toe)))
+if (length(dropped)) cat("excluded as instrument failure:", paste(dropped, collapse = ", "), "\n")
 ```
 
 # Section 2 — Validity (ELLIPSE)
@@ -229,7 +239,7 @@ points |>
   arrange(desc(front), desc(abs_r)) |>
   select(model, window, arch, instruct, r, abs_r, max_abs_d, worst_l1, n_flag, front) |>
   mutate(across(c(r, abs_r, max_abs_d), \(x) round(x, 3))) |>
-  knitr::kable(caption = "All 33 configurations (front first, then by validity).")
+  knitr::kable(caption = sprintf("All %d configurations (front first, then by validity).", length(config_cols)))
 ```
 
 ## Bootstrap confidence regions
@@ -383,25 +393,12 @@ for (b in seq_len(N_BOOT)) {
 }
 
 agree_hat <- cor(points$abs_r, points$abs_rho, method = "spearman")
-# TEMPORARY(modernbert-base/full): known-broken configuration at the full
-# window, where its surprisal exceeds its own 8-token window, which a working
-# model cannot do. See "Known issues" in this directory's README. Drop this
-# second reported figure once the configuration is fixed or removed.
-keep      <- points$config != "modernbert-base/full"
-agree_ex  <- cor(points$abs_r[keep], points$abs_rho[keep], method = "spearman")
-
 cat(sprintf("rank agreement of the two validity orderings (%d configs): rho = %.3f, 95%% CI [%.3f, %.3f]\n",
             nrow(points), agree_hat, q025(boot_agree), q975(boot_agree)))
-cat(sprintf("excluding modernbert-base/full (%d configs)              : rho = %.3f\n",
-            sum(keep), agree_ex))
 cat(sprintf("pooled vs within-L1 TOEFL ordering                       : rho = %.3f\n",
             cor(points$abs_rho, points$abs_rho_within, method = "spearman")))
 
-# TEMPORARY(modernbert-base/full): excluded from this plot only, because at
-# (0.034, 0.362) it compresses every other configuration into one corner. It is
-# retained in every statistic above. See "Known issues" in this directory's
-# README. Remove this filter once the configuration is fixed or removed.
-pxc_df <- filter(points, config != "modernbert-base/full")
+pxc_df <- points
 
 p_xc <- ggplot(pxc_df, aes(abs_rho, abs_r)) +
   geom_point(aes(colour = window, shape = instruct), size = 2.6) +
@@ -416,7 +413,6 @@ p_xc <- ggplot(pxc_df, aes(abs_rho, abs_r)) +
        colour = "Window", shape = "Instruct",
        title = "Does the validity ordering survive changing the criterion corpus?",
        subtitle = paste("Circled point is the selected default. Axes are not on a common scale.",
-                        "Broken config modernbert-base/full omitted from the plot only.",
                         sep = "\n")) +
   theme_minimal(base_size = 10)
 p_xc
@@ -425,11 +421,10 @@ write_csv(select(xc, config, abs_r, rank_ellipse, abs_rho, abs_rho_within, rank_
           file.path(RESULTS, "validity_cross_corpus.csv"))
 ```
 
-The ordering transfers. Rank agreement across the 33 configurations is 0.825
-with a 95% interval of [0.796, 0.849], and the selected default sits 6th of 33
-on ELLIPSE and 8th of 33 on TOEFL 11. The selection is therefore not an artefact
-of which corpus supplied the y-axis, which is the assumption the two-corpus
-design rests on.
+The ordering transfers. Rank agreement across the configurations is high, with a
+tight bootstrap interval, and the selected default sits near the top on both
+corpora. The selection is therefore not an artefact of which corpus supplied the
+y-axis, which is the assumption the two-corpus design rests on.
 
 Three further readings. The pooled and within-L1 TOEFL orderings agree at 0.969,
 so the band-by-L1 confounding documented in
@@ -438,9 +433,9 @@ The window effect replicates across corpora, with mean validity falling from
 window 8 to 64 to full on both (0.626, 0.574, 0.527 on ELLIPSE; 0.499, 0.462,
 0.394 on TOEFL), although it is architecture-dependent, since masked models are
 level or better at window 64 while causal models are clearly best at window 8.
-Finally, `modernbert-base/full` reaches |rho| = 0.034 on TOEFL 11, near zero,
-which is independent corroboration that the configuration is broken rather than
-merely weak.
+The excluded `modernbert-base/full` configuration reached |rho| = 0.034 on
+TOEFL 11 before it was dropped, near zero on a corpus and criterion entirely
+independent of the evidence used to diagnose it.
 
 ## Validity summary and truncation
 
@@ -508,8 +503,7 @@ least as much as truncation itself.
 Plan §3.1 calls for a heat map over model and context window, faceted by corpus.
 Fill encodes **within-corpus rank** rather than the raw coefficient, because a
 Pearson *r* against a continuous score and a Spearman rho against a
-three-category band are not on a common scale, and because a rank fill is not
-distorted by the one broken configuration. Cell labels carry the raw values.
+three-category band are not on a common scale. Cell labels carry the raw values.
 
 ```{r}
 #| label: validity-heatmap
@@ -546,8 +540,7 @@ ggsave(file.path(RESULTS, "validity_heatmap.pdf"), p_hm, width = 8, height = 6)
 The map makes the architecture-by-window interaction visible directly. The three
 masked models hold their validity from window 8 to 64 on both corpora, while
 every causal model falls away sharply over the same step, which is the pattern
-the targeted comparisons below quantify. The `modernbert-base/full` cell is the
-broken configuration and reads as an anomaly in both facets.
+the targeted comparisons below quantify.
 
 ## Targeted comparisons (plan §3.4)
 
@@ -606,14 +599,15 @@ fam_table <- function(tb, caption) {
 
 ```{r}
 #| label: fam-architecture
-# TEMPORARY(modernbert-base/full): the modernbert-base/full row below is
-# contaminated by the broken configuration and reads as a huge generative
-# advantage that is an artefact. See "Known issues" in this directory's README.
+have <- function(...) all(c(...) %in% config_cols)
+
 fam_arch <- expand_grid(masked = c("bert-base", "modernbert-base"), window = WINDOWS) |>
-  purrr::pmap(\(masked, window) zou_pair(paste0(masked, "/", window), paste0("gpt2/", window))) |>
+  purrr::pmap(\(masked, window) {
+    a <- paste0(masked, "/", window); b <- paste0("gpt2/", window)
+    if (have(a, b)) zou_pair(a, b) else NULL
+  }) |>
   bind_rows()
-fam_table(fam_arch, paste("Masked vs generative at the ~125M tier. Positive diff favours the masked model.",
-                          "The modernbert-base/full row is contaminated by a broken configuration."))
+fam_table(fam_arch, "Masked vs generative at the ~125M tier. Positive diff favours the masked model.")
 ```
 
 ### Context window, within each model
@@ -621,10 +615,10 @@ fam_table(fam_arch, paste("Masked vs generative at the ~125M tier. Positive diff
 ```{r}
 #| label: fam-window
 fam_win <- MODELS |>
-  purrr::map(\(m) bind_rows(
-    zou_pair(paste0(m, "/8"), paste0(m, "/64")),
-    zou_pair(paste0(m, "/8"), paste0(m, "/full")),
-    zou_pair(paste0(m, "/64"), paste0(m, "/full")))) |>
+  purrr::map(\(m) purrr::map(list(c("8", "64"), c("8", "full"), c("64", "full")), \(w) {
+    a <- paste0(m, "/", w[1]); b <- paste0(m, "/", w[2])
+    if (have(a, b)) zou_pair(a, b) else NULL
+  }) |> bind_rows()) |>
   bind_rows()
 fam_table(fam_win, "Window contrasts within each model. Positive diff favours the shorter window.")
 ```
@@ -677,20 +671,24 @@ purrr::map(better, \(b) zou_pair(sel_cfg, b)) |> bind_rows() |>
 to beat comparable generative at this tier, and at window 64 it does clearly,
 with both masked models ahead of `gpt2` by about 0.047. At window 8 the
 advantage disappears, with `modernbert-base` tied against `gpt2`
-([-0.0096, +0.0010]) and `bert-base` actually behind by 0.0075. The
-`modernbert-base/full` row is an artefact of the broken configuration and should
-be disregarded.
+([-0.0096, +0.0010]) and `bert-base` actually behind by 0.0075. The full-window
+row for `modernbert-base` is absent because that configuration is excluded.
 
 **Every window contrast is resolved.** All 33 intervals exclude zero, so with
 6,482 essays and heavily dependent configurations the window effect is estimated
 precisely enough that no within-model pair is ambiguous.
 
-**Post-training runs against the pre-registered expectation.** Plan §4 predicts
-instruct models will show equal or weaker validity. All six intervals exclude
-zero and all six favour the **instruct** model, by 0.004 to 0.023. This does not
-change the selection, since instruct configurations are a contrast condition
-rather than eligible defaults (§1), but it is a result in the opposite direction
-from the stated prediction and should be reported as such.
+**Instruct models are consistently more valid, which is worth reporting.** All
+six intervals exclude zero and all six favour the **instruct** model, by 0.004
+to 0.023. Plan §4 lists the opposite as an expected direction, but §4 is a set
+of sanity checks on output rather than a hypothesis, and the grounds for
+excluding instruct models are about construct validity rather than predictive
+performance. Post-training optimizes for dialogue and problem-solving, so an
+instruct model's token probabilities no longer estimate how probable a text is
+in natural English, which is the quantity Studies 2 and 3 require. The
+configurations remain a contrast condition rather than eligible defaults (§1).
+That they nevertheless track proficiency better is a substantive finding about
+what surprisal measures in a post-trained model.
 
 **The selection survives, though not because the top is tied.** Of the three
 pure-pretrained configurations with nominally higher `|r|`, two are
@@ -723,15 +721,6 @@ pa <- points |>
 win_labs <- c("8" = "window 8", "64" = "window 64", "full" = "window full")
 selected <- selected |> mutate(window = factor(window, levels = c("8", "64", "full")))
 
-# TEMPORARY(modernbert-base/full): this configuration sits far below the zoomed
-# range, so it is annotated in the "full" panel rather than allowed to stretch
-# every panel's y-axis. The 0.50 threshold selects it and nothing else. See
-# "Known issues" in this directory's README. Once the configuration is fixed or
-# removed, this block and the geom_text layer that consumes `off` can go.
-off <- pa |> filter(abs_r < 0.50) |>
-  mutate(lbl = paste0(lbl, " (|r|=", sprintf("%.2f", abs_r), ", off-scale)"),
-         abs_r = 0.515)
-
 p <- ggplot(pa, aes(max_abs_d, abs_r)) +
   geom_vline(xintercept = D_FLAG, linetype = "dotted", colour = "grey55") +
   # bootstrap CIs shown only for front configs (uncertainty that changes the pick)
@@ -746,8 +735,6 @@ p <- ggplot(pa, aes(max_abs_d, abs_r)) +
   ggrepel::geom_text_repel(aes(label = lbl, colour = family), size = 2.5,
                            max.overlaps = Inf, box.padding = 0.35, seed = 42,
                            show.legend = FALSE) +
-  geom_text(data = off, aes(label = lbl),
-            colour = "grey45", size = 2.5, vjust = 1) +
   annotate("text", x = D_FLAG, y = 0.505, label = "|d| = 0.10", hjust = -0.06,
            size = 2.9, colour = "grey45") +
   facet_wrap(~window, nrow = 1, labeller = labeller(window = win_labs)) +

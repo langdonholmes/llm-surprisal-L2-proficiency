@@ -151,27 +151,36 @@ ELLIPSE essays on BERT/GPT-2 at the full window; flagged for reporting).
 
 ## Known issues
 
-**`modernbert-base` at the full window produces corrupt surprisal. Open.**
-Mean surprisal at the 8190-token window (5.364 bits on ELLIPSE) exceeds its own
-8-token window (4.736). A working model cannot do this, since the 8-token
-context is a subset of the full one. `modernbert-large` is correct on the
-identical code path, and windows 8 and 64 are correct for both models.
-Within-essay surprisal variance is 40.3 against 8.1 for `modernbert-large/full`,
-and a two-component fit implies roughly 28% of tokens scored near log2(vocab),
-i.e. near-uniform over the vocabulary. It reproduces on TOEFL 11, where the
-configuration reaches |rho| = 0.034 against proficiency band. Not truncation
-(`n_truncated: 0`) and not the windowing code. Suspected bf16 instability at
-long sequence lengths, upstream of this repo, but untested. **Studies 2 and 3
-are unaffected**, since the selected configuration is `llama3.1-8b/8`.
+**`modernbert-base/full` is excluded from the matrix. Resolved 2026-08-26.**
 
-Code that works around it is tagged `TEMPORARY(modernbert-base/full)`:
+Mean surprisal at the full window (5.364 bits on ELLIPSE) exceeded its own
+8-token window (4.736), which a working configuration cannot do. The cause is an
+**interaction**, not a long-context failure: ModernBERT-base degrades only when
+it receives long real context *and* a masking rate far below its 30% training
+rate. This method masks one token per sequence, so the rate is `1/window`, about
+0.25% at the full window against 1.5% at window 64.
 
-```bash
-grep -rn "TEMPORARY(modernbert-base/full)" src/
-```
+Masking *more* tokens, which strictly removes information, makes the model 3.5x
+better at 512 tokens (5.05 to 1.43 bits at 5% masking). Information loss cannot
+improve prediction, so this is distribution shift. The equivalent penalty is
+negative for `bert-base` and `modernbert-large` at every length, i.e. single
+masking is better for them, as expected. Only `modernbert-base` at long context
+flips sign.
 
-Once the configuration is fixed or removed from the matrix, re-run
-`assemble_analysis_data.py` first, then all three reports, then clear those tags.
+Ruled out by experiment: precision (fp32 identical to bf16), attention
+implementation (`eager` identical to `sdpa`), configuration (base and large
+configs are identical apart from size; every override made it worse), this
+repo's code (`Predictor` reproduces a standalone implementation and the corpus
+numbers), and tensor length (padding 128 real tokens to 514 reproduces the
+128-token result exactly).
+
+Only the full window is affected. `modernbert-base/64` is normal at |r| = 0.620.
+Scoring the full window at a higher masking rate would change the construct and
+break comparability with the other 32 configurations, so there is no in-method
+fix and the configuration is dropped. **Studies 2 and 3 are unaffected**, since
+the selected configuration is `llama3.1-8b/8`.
+
+Excluded via `EXCLUDED_CONFIGS` in each report's setup chunk.
 
 ## Method notes (kept consistent across all models)
 
