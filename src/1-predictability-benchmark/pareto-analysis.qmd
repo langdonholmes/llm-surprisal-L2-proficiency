@@ -46,6 +46,7 @@ library(tidyr)
 library(tibble)
 library(ggplot2)
 library(ggrepel)
+library(cocor)     # Zou (2007) intervals for correlation differences
 
 set.seed(42)          # fixed bootstrap seed (reproducibility)
 N_BOOT   <- 2000      # bootstrap iterations (plan §3.3)
@@ -83,6 +84,10 @@ model_meta <- tribble(
   "llama3.1-8b-instruct",  "causal",  TRUE,
 )
 WINDOWS <- c("8", "64", "full")
+MODELS  <- model_meta$model
+# Base/instruct pairs for the post-training contrast (plan §3.4).
+INSTRUCT_PAIRS <- list(c("qwen2.5-7b", "qwen2.5-7b-instruct"),
+                       c("llama3.1-8b", "llama3.1-8b-instruct"))
 ```
 
 ```{r}
@@ -436,6 +441,269 @@ level or better at window 64 while causal models are clearly best at window 8.
 Finally, `modernbert-base/full` reaches |rho| = 0.034 on TOEFL 11, near zero,
 which is independent corroboration that the configuration is broken rather than
 merely weak.
+
+## Validity summary and truncation
+
+Plan §3.1 asks for a tidy table over model, window and corpus carrying *r*, its
+interval, *n*, and the truncation rate. Truncation affects only the models whose
+context is shorter than the longest essays, namely BERT at 512 and the GPT-2
+family at 1024. ModernBERT (8192) and every 4k-plus causal model truncate
+nothing.
+
+A truncation rate alone does not establish that truncation is harmless. The
+test is whether `|r|` differs between the truncated and the complete essays
+*within* an affected configuration. Those two subsets are disjoint samples, so
+the comparison uses `cocor`'s independent-groups Zou interval rather than the
+dependent-overlapping form used elsewhere in this document.
+
+```{r}
+#| label: validity-truncation
+trunc_rate <- ell |>
+  group_by(config) |>
+  summarise(n = n(), trunc_rate = mean(truncated), .groups = "drop")
+
+validity_table <- points |>
+  select(config, model, window, arch, instruct, abs_r, absr_lo, absr_hi, abs_rho) |>
+  left_join(trunc_rate, by = "config") |>
+  arrange(desc(abs_r))
+
+validity_table |>
+  mutate(across(c(abs_r, absr_lo, absr_hi, abs_rho), \(x) round(x, 3)),
+         trunc_rate = sprintf("%.1f%%", 100 * trunc_rate)) |>
+  knitr::kable(caption = "Per-configuration validity on both corpora, with ELLIPSE truncation rate.")
+write_csv(validity_table, file.path(RESULTS, "validity_table.csv"))
+
+# Truncated vs complete essays within each affected configuration.
+split_r <- ell |>
+  filter(config %in% (trunc_rate |> filter(trunc_rate > 0) |> pull(config))) |>
+  group_by(config) |>
+  group_modify(\(d, k) {
+    tr <- filter(d, truncated); co <- filter(d, !truncated)
+    r1 <- abs(cor(tr$mean_surprisal_bits, tr$overall))
+    r2 <- abs(cor(co$mean_surprisal_bits, co$overall))
+    ci <- cocor.indep.groups(r1.jk = r1, r2.hm = r2, n1 = nrow(tr), n2 = nrow(co),
+                             test = "zou2007")@zou2007$conf.int
+    tibble(n_truncated = nrow(tr), n_complete = nrow(co),
+           r_truncated = r1, r_complete = r2, diff = r1 - r2, lo = ci[1], hi = ci[2])
+  }) |>
+  ungroup() |>
+  mutate(excludes_0 = (lo > 0) | (hi < 0))
+
+split_r |>
+  mutate(across(c(r_truncated, r_complete, diff, lo, hi), \(x) round(x, 4))) |>
+  knitr::kable(caption = "Validity on truncated vs complete essays, within affected configurations (independent-groups Zou intervals).")
+```
+
+Truncation is a footnote rather than a confound, but for two different reasons.
+`bert-base` truncates 38.2% of ELLIPSE, yet the truncated and complete subsets
+give almost the same `|r|`, within 0.01 at every window. The GPT-2 family shows
+a larger split, with truncated essays correlating more strongly, but those
+essays are only 4.6% of the corpus, so the aggregate estimate moves by well
+under 0.01. The split is also confounded with length by construction, since the
+truncated subset is exactly the longest essays, so it indexes essay length at
+least as much as truncation itself.
+
+## Validity heat map
+
+Plan §3.1 calls for a heat map over model and context window, faceted by corpus.
+Fill encodes **within-corpus rank** rather than the raw coefficient, because a
+Pearson *r* against a continuous score and a Spearman rho against a
+three-category band are not on a common scale, and because a rank fill is not
+distorted by the one broken configuration. Cell labels carry the raw values.
+
+```{r}
+#| label: validity-heatmap
+#| fig-width: 8
+#| fig-height: 6
+hm <- points |>
+  select(config, model, window, abs_r, abs_rho) |>
+  pivot_longer(c(abs_r, abs_rho), names_to = "corpus", values_to = "value") |>
+  mutate(corpus = factor(corpus, levels = c("abs_r", "abs_rho"),
+                         labels = c("ELLIPSE (|Pearson r|)", "TOEFL 11 (|Spearman rho|)")),
+         model  = factor(model, levels = rev(MODELS)),
+         window = factor(window, levels = WINDOWS)) |>
+  group_by(corpus) |>
+  mutate(fill_rank = rank(value) / n()) |>
+  ungroup()
+
+p_hm <- ggplot(hm, aes(window, model, fill = fill_rank)) +
+  geom_tile(colour = "white", linewidth = 0.6) +
+  geom_text(aes(label = sprintf("%.3f", value), colour = fill_rank > 0.55), size = 2.7) +
+  scale_colour_manual(values = c("FALSE" = "grey15", "TRUE" = "white"), guide = "none") +
+  facet_wrap(~corpus) +
+  scale_fill_viridis_c(option = "mako", direction = -1, name = "Within-corpus\nrank",
+                       labels = scales::percent_format(accuracy = 1)) +
+  labs(x = "Context window", y = NULL,
+       title = "Concurrent validity by model and context window",
+       subtitle = "Fill is rank within corpus; the two corpora are not on a common scale. Labels are raw coefficients.") +
+  theme_minimal(base_size = 10) +
+  theme(panel.grid = element_blank(), plot.subtitle = element_text(size = 8, colour = "grey30"))
+p_hm
+ggsave(file.path(RESULTS, "validity_heatmap.png"), p_hm, width = 8, height = 6, dpi = 200)
+ggsave(file.path(RESULTS, "validity_heatmap.pdf"), p_hm, width = 8, height = 6)
+```
+
+The map makes the architecture-by-window interaction visible directly. The three
+masked models hold their validity from window 8 to 64 on both corpora, while
+every causal model falls away sharply over the same step, which is the pattern
+the targeted comparisons below quantify. The `modernbert-base/full` cell is the
+broken configuration and reads as an anomaly in both facets.
+
+## Targeted comparisons (plan §3.4)
+
+Every configuration is estimated on the same 6,482 ELLIPSE essays against the
+same criterion, so the correlations are dependent and overlapping and cannot be
+compared by checking whether their marginal intervals touch. Differences are
+therefore reported as **Zou (2007) intervals for dependent overlapping
+correlations** (plan §3.1), computed with `cocor`.
+
+The criterion is sign-flipped before each comparison so that intervals are on
+the difference in `|r|` directly. Every correlation here is negative, and Zou's
+method is invariant to flipping the shared variable.
+
+Three families are pre-specified in plan §3.4 (architecture at the ~125M tier,
+context window within each model, and base versus instruct). A fourth,
+selection-critical set is **post-hoc**, defined by the outcome, and is labelled
+as such. Intervals are reported throughout. Holm-adjusted *p*-values from
+`hittner2003` are included per family for readers who want them, but the
+intervals are the intended reading.
+
+```{r}
+#| label: targeted-setup
+# Zou interval on the difference in |r| for two configurations, plus a
+# Holm-adjustable p-value from an independent test in the same family.
+zou_pair <- function(a, b) {
+  r1 <- -cor(S_ell[, a], y_ell); r2 <- -cor(S_ell[, b], y_ell)
+  z <- cocor.dep.groups.overlap(r.jk = r1, r.jh = r2, r.kh = cor(S_ell[, a], S_ell[, b]),
+                                n = nrow(S_ell), test = c("zou2007", "hittner2003"))
+  tibble(pair = paste(a, "vs", b), abs_r_a = r1, abs_r_b = r2, diff = r1 - r2,
+         lo = z@zou2007$conf.int[1], hi = z@zou2007$conf.int[2],
+         p = z@hittner2003$p.value)
+}
+
+# Paired bootstrap difference, reusing the draws already computed above. Works
+# for max |d| too, where no Zou analogue exists.
+boot_pair <- function(M, a, b) {
+  d <- M[, a] - M[, b]
+  tibble(pair = paste(a, "vs", b), diff = mean(M[, a]) - mean(M[, b]),
+         lo = q025(d), hi = q975(d))
+}
+
+fam_table <- function(tb, caption) {
+  tb |>
+    mutate(p_holm = p.adjust(p, method = "holm"),
+           excludes_0 = (lo > 0) | (hi < 0)) |>
+    mutate(across(c(abs_r_a, abs_r_b, diff, lo, hi), \(x) round(x, 4)),
+           across(c(p, p_holm), \(x) signif(x, 3))) |>
+    knitr::kable(caption = caption)
+}
+```
+
+### Architecture at the ~125M tier
+
+`bert-base` (110M, masked) and `modernbert-base` (149M, masked) against `gpt2`
+(124M, generative), within each window.
+
+```{r}
+#| label: fam-architecture
+# TEMPORARY(modernbert-base/full): the modernbert-base/full row below is
+# contaminated by the broken configuration and reads as a huge generative
+# advantage that is an artefact. See "Known issues" in this directory's README.
+fam_arch <- expand_grid(masked = c("bert-base", "modernbert-base"), window = WINDOWS) |>
+  purrr::pmap(\(masked, window) zou_pair(paste0(masked, "/", window), paste0("gpt2/", window))) |>
+  bind_rows()
+fam_table(fam_arch, paste("Masked vs generative at the ~125M tier. Positive diff favours the masked model.",
+                          "The modernbert-base/full row is contaminated by a broken configuration."))
+```
+
+### Context window, within each model
+
+```{r}
+#| label: fam-window
+fam_win <- MODELS |>
+  purrr::map(\(m) bind_rows(
+    zou_pair(paste0(m, "/8"), paste0(m, "/64")),
+    zou_pair(paste0(m, "/8"), paste0(m, "/full")),
+    zou_pair(paste0(m, "/64"), paste0(m, "/full")))) |>
+  bind_rows()
+fam_table(fam_win, "Window contrasts within each model. Positive diff favours the shorter window.")
+```
+
+### Post-training, base vs instruct
+
+Compared on both axes, as plan §3.4 requires. Validity uses Zou; max |d| has no
+Zou analogue and uses the paired bootstrap draws.
+
+```{r}
+#| label: fam-instruct
+fam_inst <- purrr::map(INSTRUCT_PAIRS, \(pr)
+    purrr::map(WINDOWS, \(w) zou_pair(paste0(pr[1], "/", w), paste0(pr[2], "/", w))) |> bind_rows()) |>
+  bind_rows()
+fam_table(fam_inst, "Base vs instruct, validity. Positive diff favours the base model.")
+
+purrr::map(INSTRUCT_PAIRS, \(pr)
+    purrr::map(WINDOWS, \(w) boot_pair(boot_maxd, paste0(pr[1], "/", w), paste0(pr[2], "/", w))) |> bind_rows()) |>
+  bind_rows() |>
+  mutate(excludes_0 = (lo > 0) | (hi < 0), across(c(diff, lo, hi), \(x) round(x, 4))) |>
+  knitr::kable(caption = "Base vs instruct, max |d| (paired bootstrap). Positive diff means the base model is LESS fair.")
+```
+
+### Selection-critical set (post-hoc)
+
+Defined by the outcome rather than pre-specified, so these intervals are
+descriptive and carry no multiplicity adjustment. The comparison is the selected
+default against every pure-pretrained configuration that outranks it on validity.
+
+```{r}
+#| label: fam-selection
+better <- points |>
+  filter(!instruct, abs_r > points$abs_r[points$config == sel_cfg]) |>
+  arrange(desc(abs_r)) |> pull(config)
+
+purrr::map(better, \(b) zou_pair(sel_cfg, b)) |> bind_rows() |>
+  mutate(other = better,
+         other_on_front = points$front[match(better, points$config)],
+         other_max_d    = points$max_abs_d[match(better, points$config)],
+         excludes_0     = (lo > 0) | (hi < 0)) |>
+  select(pair, diff, lo, hi, excludes_0, other_on_front, other_max_d) |>
+  mutate(across(c(diff, lo, hi, other_max_d), \(x) round(x, 4))) |>
+  knitr::kable(caption = paste("Selected default vs higher-validity pure-pretrained configurations.",
+                               "Negative diff means the other configuration has higher |r|."))
+```
+
+### What the targeted comparisons show
+
+**Architecture is window-dependent, not uniform.** The plan (§4) expects masked
+to beat comparable generative at this tier, and at window 64 it does clearly,
+with both masked models ahead of `gpt2` by about 0.047. At window 8 the
+advantage disappears, with `modernbert-base` tied against `gpt2`
+([-0.0096, +0.0010]) and `bert-base` actually behind by 0.0075. The
+`modernbert-base/full` row is an artefact of the broken configuration and should
+be disregarded.
+
+**Every window contrast is resolved.** All 33 intervals exclude zero, so with
+6,482 essays and heavily dependent configurations the window effect is estimated
+precisely enough that no within-model pair is ambiguous.
+
+**Post-training runs against the pre-registered expectation.** Plan §4 predicts
+instruct models will show equal or weaker validity. All six intervals exclude
+zero and all six favour the **instruct** model, by 0.004 to 0.023. This does not
+change the selection, since instruct configurations are a contrast condition
+rather than eligible defaults (§1), but it is a result in the opposite direction
+from the stated prediction and should be reported as such.
+
+**The selection survives, though not because the top is tied.** Of the three
+pure-pretrained configurations with nominally higher `|r|`, two are
+statistically indistinguishable from the selected default
+(`olmo2-7b/8` at [-0.0044, +0.0001], `olmo2-1b/8` at [-0.0040, +0.0009]). The
+third, `qwen2.5-7b/8`, is reliably higher, by 0.0036 with interval
+[-0.0057, -0.0016]. It is nevertheless not the selection, because it is
+dominated on the other axis, carrying max |d| = 0.442 against 0.364 and flagging
+10 L1 groups against 6, with a bootstrap front-membership probability of 0.000.
+The defensible claim is therefore not that the top configurations are tied on
+validity. It is that the one configuration with a real validity advantage pays
+for it with a 0.078 increase in worst-case cross-L1 displacement, and the Pareto
+criterion trades that away deliberately.
 
 # Section 5 — Pareto Plot
 

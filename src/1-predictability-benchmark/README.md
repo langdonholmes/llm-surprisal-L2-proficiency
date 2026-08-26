@@ -21,6 +21,10 @@ plus the `pareto-*.qmd` reports, which run on the §2 outputs.
   long CSVs under `results/predictability/` for the R/Quarto analysis.
 - `pareto-analysis.qmd`, `pareto-by-proficiency.qmd` — validity/fairness Pareto
   reports (§3); `_viz_helpers.R` holds shared plotting helpers.
+  `pareto-analysis.qmd` also carries the §3.1 validity table, truncation check
+  and heat map, the §3.4 targeted comparisons (Zou 2007 intervals via `cocor`),
+  and a cross-corpus check that the validity ordering is not an artefact of
+  ELLIPSE supplying the criterion.
 - `proficiency-confound-sensitivity.qmd` — bounds how much of the cross-L1
   displacement could be within-band proficiency rather than L1. TOEFL 11's
   proficiency scale has only three levels, so stratifying on it (or residualizing
