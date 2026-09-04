@@ -1,8 +1,10 @@
 # Study 1 — Predictability Benchmark
 
 Compute mean token surprisal for every **model × context window × corpus**, then
-select the configuration that best balances validity and fairness. See
-[`plan.md`](plan.md) for the full design and statistical analysis.
+select the configuration that best balances validity and fairness. The design and
+the statistical analysis are documented here and in the reports themselves; the
+original handoff plan was removed once the reports superseded it, and is
+recoverable from git history if the pre-analysis wording is ever needed.
 
 **Result:** OLMo-2 1B (base) at the 8-token window was selected as the
 predictability configuration that feeds Studies 2–3.
@@ -48,8 +50,8 @@ plus the `pareto-*.qmd` reports, which run on the §2 outputs.
   Structure: a rule-of-thumb bound built on Cochran's (1968) result that three
   strata remove about 79% of a normal confounder's bias, corroborated by
   `sensemakr` (Cinelli & Hazlett 2020), with a latent-variable version kept in an
-  appendix. All three agree; the two main methods rank the 33 configurations at
-  Spearman 0.99 and clear all 33. Depends on `ordinal`, `truncnorm`, `sensemakr`.
+  appendix. All three agree; the two main methods rank the 32 configurations at
+  Spearman 0.99 and clear all 32. Depends on `ordinal`, `truncnorm`, `sensemakr`.
 
 ## Prerequisites
 

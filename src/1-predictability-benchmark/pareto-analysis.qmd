@@ -28,8 +28,8 @@ non-dominated (Pareto) set:
 
 A configuration is **Pareto-optimal** if no other configuration is simultaneously
 *more valid* (higher `|r|`) **and** *fairer* (lower max `|d|`). Post-trained
-(instruct) configurations are a contrast condition rather than eligible defaults
-(plan §1), so they are excluded from the **domination comparison** as well as
+(instruct) configurations are a contrast condition rather than eligible defaults,
+so they are excluded from the **domination comparison** as well as
 from selection. The front is computed over the 26 eligible configurations; the 6
 contrast configurations are plotted but are never allowed to dominate an
 eligible point, since a configuration that loses only to a model that cannot be
@@ -63,7 +63,7 @@ library(ggrepel)
 library(cocor)     # Zou (2007) intervals for correlation differences
 
 set.seed(42)          # fixed bootstrap seed (reproducibility)
-N_BOOT   <- 2000      # bootstrap iterations (plan §3.3)
+N_BOOT   <- 2000      # bootstrap iterations
 D_FLAG   <- 0.10      # Williamson et al. (2012) fairness flag threshold
 
 # Configurations dropped as instrument failures rather than data. See "Known
@@ -109,7 +109,7 @@ model_meta <- tribble(
 )
 WINDOWS <- c("8", "64", "full")
 MODELS  <- model_meta$model
-# Base/instruct pairs for the post-training contrast (plan §3.4).
+# Base/instruct pairs for the post-training contrast.
 INSTRUCT_PAIRS <- list(c("qwen2.5-7b", "qwen2.5-7b-instruct"),
                        c("llama3.1-8b", "llama3.1-8b-instruct"))
 ```
@@ -541,8 +541,8 @@ Three further readings. The pooled and within-L1 TOEFL orderings agree at 0.966,
 so the band-by-L1 confounding documented in
 `proficiency-confound-sensitivity.qmd` does not drive the validity ordering.
 The window effect replicates across corpora, with mean validity falling from
-window 8 to 64 to full on both (0.626, 0.574, 0.527 on ELLIPSE; 0.499, 0.462,
-0.394 on TOEFL), although it is architecture-dependent, since masked models are
+window 8 to 64 to full on both (0.626, 0.574, 0.543 on ELLIPSE; 0.499, 0.462,
+0.430 on TOEFL), although it is architecture-dependent, since masked models are
 level or better at window 64 while causal models are clearly best at window 8.
 The excluded `modernbert-base/full` configuration reached |rho| = 0.034 on
 TOEFL 11 before it was dropped, near zero on a corpus and criterion entirely
@@ -550,8 +550,8 @@ independent of the evidence used to diagnose it.
 
 ## Validity summary and truncation
 
-Plan §3.1 asks for a tidy table over model, window and corpus carrying *r*, its
-interval, *n*, and the truncation rate. Truncation affects only the models whose
+A tidy table over model, window and corpus carries *r*, its interval, *n*, and
+the truncation rate. Truncation affects only the models whose
 context is shorter than the longest essays, namely BERT at 512 and the GPT-2
 family at 1024. ModernBERT (8192) and every 4k-plus causal model truncate
 nothing.
@@ -620,8 +620,8 @@ least as much as truncation itself.
 
 ## Validity heat map
 
-Plan §3.1 calls for a heat map over model and context window, faceted by corpus.
-Fill encodes **within-corpus rank** rather than the raw coefficient, because a
+The same coefficients as a heat map over model and context window, faceted by
+corpus. Fill encodes **within-corpus rank** rather than the raw coefficient, because a
 Pearson *r* against a continuous score and a Spearman rho against a
 three-category band are not on a common scale. Cell labels carry the raw values.
 
@@ -661,20 +661,20 @@ masked models hold their validity from window 8 to 64 on both corpora, while
 every causal model falls away sharply over the same step, which is the pattern
 the targeted comparisons below quantify.
 
-## Targeted comparisons (plan §3.4)
+## Targeted comparisons
 
 Every configuration is estimated on the same 6,482 ELLIPSE essays against the
 same criterion, so the correlations are dependent and overlapping and cannot be
 compared by checking whether their marginal intervals touch. Differences are
 therefore reported as **Zou (2007) intervals for dependent overlapping
-correlations** (plan §3.1), computed with `cocor`.
+correlations**, computed with `cocor`.
 
 The criterion is sign-flipped before each comparison so that intervals are on
 the difference in `|r|` directly. Every correlation here is negative, and Zou's
 method is invariant to flipping the shared variable.
 
-Three families are pre-specified in plan §3.4 (architecture at the ~125M tier,
-context window within each model, and base versus instruct). A fourth,
+Three families were pre-specified before the results were seen (architecture at
+the ~125M tier, context window within each model, and base versus instruct). A fourth,
 selection-critical set is **post-hoc**, defined by the outcome, and is labelled
 as such. Intervals are reported throughout. Holm-adjusted *p*-values from
 `hittner2003` are included per family for readers who want them, but the
@@ -744,8 +744,8 @@ fam_table(fam_win, "Window contrasts within each model. Positive diff favours th
 
 ### Post-training, base vs instruct
 
-Compared on both axes, as plan §3.4 requires. Validity uses Zou; max |d| has no
-Zou analogue and uses the paired bootstrap draws.
+Compared on both axes, since post-training could move either one. Validity uses
+Zou; max |d| has no Zou analogue and uses the paired bootstrap draws.
 
 ```{r}
 #| label: fam-instruct
@@ -804,14 +804,14 @@ cannot separate the four leading configurations.
 
 **Instruct models are consistently more valid, which is worth reporting.** All
 six intervals exclude zero and all six favour the **instruct** model, by 0.004
-to 0.023. Plan §4 lists the opposite as an expected direction, but §4 is a set
-of sanity checks on output rather than a hypothesis, and the grounds for
+to 0.023. The benchmark's stated expectations had the opposite direction, but
+those were sanity checks on output rather than hypotheses, and the grounds for
 excluding instruct models are about construct validity rather than predictive
 performance. Post-training optimizes for dialogue and problem-solving, so an
 instruct model's token probabilities no longer estimate how probable a text is
 in natural English, which is the quantity Studies 2 and 3 require. The
-configurations remain a contrast condition rather than eligible defaults (§1).
-That they nevertheless track proficiency better is a substantive finding about
+configurations remain a contrast condition rather than eligible defaults. That
+they nevertheless track proficiency better is a substantive finding about
 what surprisal measures in a post-trained model.
 
 **Nothing in the selected class is distinguishable on validity.** Two eligible

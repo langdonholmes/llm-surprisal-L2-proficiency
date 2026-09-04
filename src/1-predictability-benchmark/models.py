@@ -1,9 +1,11 @@
 """Model matrix for Study 1 (optimal LLM-surprisal configurations).
 
 Eleven language models spanning two architectures, three capacity tiers, and a
-base-vs-instruct post-training contrast. See plan.md for the rationale. Each
-spec is keyed by a short slug used both on the command line and as the output
-directory name, so adding a model later is a one-line append here.
+base-vs-instruct post-training contrast. The tiers are chosen for their
+overlaps: the ~125M tier matches capacity across architectures, and the ~7-8B
+tier matches scale across training corpora and tokenizers. Each spec is keyed by
+a short slug used both on the command line and as the output directory name, so
+adding a model later is a one-line append here.
 """
 
 from dataclasses import dataclass

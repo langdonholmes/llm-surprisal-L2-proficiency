@@ -451,8 +451,8 @@ knitr::kable(head(arrange(agree, ratio), 8), digits = 3,
   worst-case group under either the 21 percent or the conservative 35 percent
   residual.
 - `sensemakr` agrees on the binding case from a different set of assumptions,
-  and the two methods rank the 33 configurations almost identically
-  (Spearman 0.99), with all 33 cleared by both.
+  and the two methods rank the 32 configurations almost identically
+  (Spearman 0.99), with all 32 cleared by both.
 - For ARA, HIN and JPN the residual is an adequate explanation, and those
   displacements should not be read as L1 effects. They do not set `max |d|`.
 - The bound assumes a monotone coarsening of a unidimensional proficiency

@@ -99,7 +99,7 @@ def main(corpus: str = "both"):
     df = pd.read_csv(ELLIPSE_DIR / "ELLIPSE_Final_github.csv")
     print(f"Loaded {len(df)} essays")
 
-    # Word predictability from the Study 1 benchmark (Llama-3.1-8B base, window 8)
+    # Word predictability from the Study 1 benchmark (OLMo-2 1B base, window 8)
     pred_df = load_predictability()
     print(f"Loaded predictability for {len(pred_df)} essays "
           f"({PRED_MODEL}, window {PRED_WINDOW})")

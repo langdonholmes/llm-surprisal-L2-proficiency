@@ -71,7 +71,10 @@ cat("Figures ->", fig_path("*.pdf"), "| bootstrap cores:", n_cores, "\n")
 
 # ellipse_metrics.csv carries the 16 linguistic features + ELLIPSE scores +
 # predictability (mean_loss, var_loss) from the Study 1 benchmark model
-# (Llama-3.1-8B base). All networks below use Spearman correlations.
+# (OLMo-2 1B base, window 8). All networks below use Spearman correlations.
+# NOTE: ellipse_metrics.csv predates the Study 1 reselection and still carries
+# Llama-3.1-8B surprisal. Re-run `python src/essays/metrics.py --corpus both`
+# before trusting the predictability nodes in this notebook.
 df_raw <- read.csv("data/ellipse/ellipse_metrics.csv")
 
 cat("Raw data:", nrow(df_raw), "rows x", ncol(df_raw), "columns\n")
