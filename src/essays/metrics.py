@@ -21,10 +21,13 @@ from util.paths import (
 CORPUS_CHOICES = {"a": ["a"], "b": ["b"], "both": ["a", "b"]}
 
 # Word predictability source: the Study 1 benchmark's selected configuration.
-# Llama-3.1-8B (base) at the 8-token window was the validity/fairness Pareto
-# selection for the base model (results/predictability/pareto_points.csv — the
-# only base-Llama config on the front); the instruct variant is not used.
-PRED_MODEL = "llama3.1-8b"
+# OLMo-2 1B at the 8-token window. Generative models at window 8 are the
+# highest-validity configuration class, and within it OLMo-2 is the only family
+# whose pretraining corpus is publicly released (Dolma / OLMo-mix-1124), so the
+# 1B model is the smallest reproducible option; the validity differences inside
+# that class are not resolved by the data. See pareto-analysis.qmd, "Selected
+# configuration", and results/predictability/pareto_points.csv.
+PRED_MODEL = "olmo2-1b"
 PRED_WINDOW = "8"
 
 

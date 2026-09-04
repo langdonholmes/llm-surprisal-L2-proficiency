@@ -36,6 +36,12 @@ Two estimators of per-level fairness, reported side by side:
 between mean surprisal and the continuous holistic score) and has no L1 or
 proficiency strata. Only the fairness (x-axis) is recomputed per level.
 
+As in `pareto-analysis.qmd`, domination runs over the **eligible set only**:
+post-trained configurations are a contrast condition and may not dominate a
+selectable point. The selection rule is the aggregate one applied band by band
+— the highest-validity class (generative at window 8), then the smallest model
+in it with a publicly released pretraining corpus.
+
 Inputs are the tidy tables from `assemble_analysis_data.py`.
 
 # Section 1 — Setup & Data
@@ -69,19 +75,22 @@ find_results <- function() {
 RESULTS <- find_results()
 
 model_meta <- tribble(
-  ~model,                  ~arch,     ~instruct,
-  "bert-base",             "masked",  FALSE,
-  "modernbert-base",       "masked",  FALSE,
-  "modernbert-large",      "masked",  FALSE,
-  "gpt2",                  "causal",  FALSE,
-  "gpt2-xl",               "causal",  FALSE,
-  "olmo2-1b",              "causal",  FALSE,
-  "olmo2-7b",              "causal",  FALSE,
-  "qwen2.5-7b",            "causal",  FALSE,
-  "qwen2.5-7b-instruct",   "causal",  TRUE,
-  "llama3.1-8b",           "causal",  FALSE,
-  "llama3.1-8b-instruct",  "causal",  TRUE,
+  ~model,                  ~arch,     ~instruct, ~params_b, ~open_data,
+  "bert-base",             "masked",  FALSE,     0.110,     FALSE,
+  "modernbert-base",       "masked",  FALSE,     0.149,     FALSE,
+  "modernbert-large",      "masked",  FALSE,     0.395,     FALSE,
+  "gpt2",                  "causal",  FALSE,     0.124,     FALSE,
+  "gpt2-xl",               "causal",  FALSE,     1.500,     FALSE,
+  "olmo2-1b",              "causal",  FALSE,     1.000,     TRUE,
+  "olmo2-7b",              "causal",  FALSE,     7.000,     TRUE,
+  "qwen2.5-7b",            "causal",  FALSE,     7.000,     FALSE,
+  "qwen2.5-7b-instruct",   "causal",  TRUE,      7.000,     FALSE,
+  "llama3.1-8b",           "causal",  FALSE,     8.000,     FALSE,
+  "llama3.1-8b-instruct",  "causal",  TRUE,      8.000,     FALSE,
 )
+
+# The aggregate report's selection rule, applied unchanged within each band.
+SEL_ARCH <- "causal"; SEL_WINDOW <- "8"
 ```
 
 ```{r}
@@ -194,17 +203,40 @@ points <- fairness |>
   mutate(window = factor(window, levels = c("8", "64", "full")),
          level  = factor(level, levels = LEVELS)) |>
   left_join(model_meta, by = "model") |>
-  group_by(level, method) |> group_modify(~front_of(.x)) |> ungroup()
+  mutate(eligible = !instruct) |>
+  # Domination runs over the eligible set only, as in pareto-analysis.qmd:
+  # post-trained configurations are a contrast condition and may not dominate a
+  # selectable point.
+  group_by(level, method) |>
+  group_modify(\(d, k) { d$front <- FALSE
+    d$front[d$eligible] <- front_of(d[d$eligible, ])$front
+    d }) |>
+  ungroup()
 
-# Selected pure-pretrained default per (level, method): highest |r| on the front.
-picks <- points |> filter(front, !instruct) |>
-  group_by(level, method) |> slice_max(abs_r, n = 1, with_ties = FALSE) |> ungroup()
+# The aggregate rule, applied within each band: take the highest-validity class
+# (generative at window 8), then the smallest model in it with a publicly
+# released pretraining corpus. The class is fixed across bands because validity
+# is measured on ELLIPSE and does not vary by TOEFL band; only fairness does.
+picks <- points |>
+  filter(eligible, arch == SEL_ARCH, window == SEL_WINDOW, open_data) |>
+  group_by(level, method) |> slice_min(params_b, n = 1, with_ties = FALSE) |> ungroup()
 
 picks |>
   arrange(level, method) |>
   transmute(level, method, pick = paste0(model, "/", window),
+            abs_r = round(abs_r, 3), maxd = round(maxd, 3), worst_l1, n_flag, front) |>
+  knitr::kable(caption = paste("Selected default per proficiency level, under the aggregate",
+                               "selection rule. `front` is membership in that band's",
+                               "eligible-set front."))
+
+# What the front-based rule would have picked instead, band by band, since the
+# bands are where the two rules can diverge.
+points |> filter(front) |>
+  group_by(level, method) |> slice_max(abs_r, n = 1, with_ties = FALSE) |> ungroup() |>
+  arrange(level, method) |>
+  transmute(level, method, front_leader = paste0(model, "/", window),
             abs_r = round(abs_r, 3), maxd = round(maxd, 3), worst_l1) |>
-  knitr::kable(caption = "Selected pure-pretrained default per proficiency level (highest |r| on that level's front).")
+  knitr::kable(caption = "For contrast: the highest-validity point on each band's eligible front.")
 
 write_csv(points, file.path(RESULTS, "pareto_by_level.csv"))
 ```
@@ -255,7 +287,7 @@ p <- ggplot(pc, aes(maxd, config, colour = level)) +
         panel.grid.major.y = element_line(colour = "grey93"))
 
 p
-save_fig(p, "pareto_by_level", width = 11, height = 9.5)
+save_fig(p, "pareto_by_level", width = 8.5, height = 10)
 ```
 
 # Section 6 — Notes
@@ -268,7 +300,8 @@ points |> filter(method == "all") |>
   summarise(median_maxd = round(median(maxd), 3),
             min_maxd = round(min(maxd), 3), max_maxd = round(max(maxd), 3),
             .groups = "drop") |>
-  knitr::kable(caption = "Distribution of max|d| across the 33 configs, by level (all-essays).")
+  knitr::kable(caption = sprintf("Distribution of max|d| across the %d configs, by level (all-essays).",
+                                 n_distinct(points$config)))
 ```
 
 **Takeaways for the write-up:**
@@ -278,9 +311,21 @@ points |> filter(method == "all") |>
 - **Balancing changes little at medium/high** (the aggregate was not a composition
   artifact) but inflates and destabilizes `low`, confirming that band is too thin
   to support a reliable per-L1 effect size.
-- **Configuration selection is proficiency-dependent.** Report the per-level picks
-  alongside the aggregate default rather than assuming one configuration is optimal
-  across the whole proficiency range.
+- **Configuration selection is not proficiency-dependent, once the front is
+  computed over the eligible set.** The earlier version of this report picked a
+  different configuration at `low` than at `medium`/`high`, but that instability
+  was an artefact: the band-wise front was computed over the full matrix and then
+  filtered to pure-pretrained configurations, so at `low` the eligible leader was
+  displaced by an instruct model it could not be compared against. With the
+  contrast configurations excluded from the domination comparison, the band
+  fronts have the same eligible leader in every band, and the class-based
+  selection rule — which reads only ELLIPSE validity, and so cannot vary by TOEFL
+  band — returns `olmo2-1b/8` throughout. What varies across the proficiency
+  range is the *magnitude* of displacement, not the choice.
+- **The selected default is on no band's front**, as in the aggregate analysis,
+  and its displacement is roughly twice as large at `low` and `medium` (max |d| ≈
+  .58, worst group GER) as at `high` (.32, SPA). The band-wise numbers are the
+  ones to report as the fairness cost of the selection, not the aggregate .422.
 - Every configuration still flags multiple L1 groups at |d| ≥ 0.10 in every band;
   the front remains a *least-bad* set, not an absolutely fair one.
 

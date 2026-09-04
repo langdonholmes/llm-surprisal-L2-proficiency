@@ -27,12 +27,14 @@ Linguistic features are computed from spaCy parses and a Dolma reference corpus:
 | advmod MI | Phraseological | Dolma reference |
 | Content word overlap | Cohesion | spaCy |
 | Connective density | Cohesion | spaCy + word list |
-| Mean surprisal (`mean_loss`) | Predictability | Study 1 benchmark (Llama-3.1-8B) |
-| Loss variance (`var_loss`) | Predictability | Study 1 benchmark (Llama-3.1-8B) |
+| Mean surprisal (`mean_loss`) | Predictability | Study 1 benchmark (OLMo-2 1B) |
+| Loss variance (`var_loss`) | Predictability | Study 1 benchmark (OLMo-2 1B) |
 
 Word predictability is produced by the Study 1 benchmark
-(`src/1-predictability-benchmark/`); Llama-3.1-8B (base) was selected as the
-model that feeds Studies 2–3. `mean_entropy` is computed but excluded from
+(`src/1-predictability-benchmark/`); OLMo-2 1B (base) at the 8-token window was
+selected as the configuration that feeds Studies 2–3 — the smallest model with a
+publicly released pretraining corpus in the highest-validity configuration
+class. `mean_entropy` is computed but excluded from
 network analysis due to near-perfect correlation with `mean_loss` (r = 0.97).
 
 ## Pipeline
@@ -54,13 +56,13 @@ python src/reference_corpus/4_collate.py --corpus a   # then --corpus b
 python src/essays/ingest.py --ellipse        # or --toefl / --all
 
 # Essays — word predictability comes from the Study 1 benchmark; the selected
-# config is Llama-3.1-8B (base) at the 8-token window. See
+# config is OLMo-2 1B (base) at the 8-token window. See
 # src/1-predictability-benchmark/.
-#   Source: data/predictability/ellipse/llama3.1-8b/surprisal.parquet
+#   Source: data/predictability/ellipse/olmo2-1b/surprisal.parquet
 
 # Essays — linguistic features merged with scores + predictability.
 #   Reference norms come from the Dolma frequency tables (--corpus a|b|both,
-#   default both). metrics.py joins the Llama-8B (base, window 8) surprisal
+#   default both). metrics.py joins the OLMo-2 1B (base, window 8) surprisal
 #   above as mean_loss / var_loss. Output: data/ellipse/ellipse_metrics.csv
 python src/essays/metrics.py --corpus both
 

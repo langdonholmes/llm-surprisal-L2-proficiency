@@ -4,8 +4,8 @@ Compute mean token surprisal for every **model × context window × corpus**, th
 select the configuration that best balances validity and fairness. See
 [`plan.md`](plan.md) for the full design and statistical analysis.
 
-**Result:** Llama-3.1-8B (base) was selected as the predictability model that
-feeds Studies 2–3.
+**Result:** OLMo-2 1B (base) at the 8-token window was selected as the
+predictability configuration that feeds Studies 2–3.
 
 This directory implements both **§2 (surprisal computation)** — `run_surprisal.py`
 — and **§3 (validity / fairness / Pareto analysis)** — `assemble_analysis_data.py`
@@ -20,7 +20,23 @@ plus the `pareto-*.qmd` reports, which run on the §2 outputs.
 - `assemble_analysis_data.py` — exports the per-model surprisal parquets to tidy
   long CSVs under `results/predictability/` for the R/Quarto analysis.
 - `pareto-analysis.qmd`, `pareto-by-proficiency.qmd` — validity/fairness Pareto
-  reports (§3); `_viz_helpers.R` holds shared plotting helpers.
+  reports (§3); `_viz_helpers.R` holds shared plotting helpers and the figure
+  save helper (vector PDF plus a 400 dpi PNG).
+
+  **Eligibility.** Post-trained configurations are a contrast condition (plan
+  §1), so they are excluded from the *domination comparison* as well as from
+  selection: the front is computed over the 26 eligible configurations, and the
+  6 contrast configurations are plotted but never allowed to dominate an
+  eligible point. **Selection** then runs on the highest-validity configuration
+  class rather than on the front, because no configuration is fair in absolute
+  terms — every one flags multiple L1 groups at |d| ≥ 0.10 — so the front orders
+  a trade-off without identifying an acceptable point on it. Within that class
+  (generative models at window 8, mean |r| = .627) the default is the smallest
+  model with a publicly released pretraining corpus, `olmo2-1b/8`. It is
+  *dominated* by `olmo2-7b/8`, which is reported rather than smoothed over: the
+  validity difference is 0.0007 with a Zou interval spanning zero, the max |d|
+  cost is +0.013 [+0.003, +0.024], and the gain is the same pretraining corpus
+  at a seventh of the parameters.
   `pareto-analysis.qmd` also carries the §3.1 validity table, truncation check
   and heat map, the §3.4 targeted comparisons (Zou 2007 intervals via `cocor`),
   and a cross-corpus check that the validity ordering is not an artefact of
@@ -178,7 +194,7 @@ Only the full window is affected. `modernbert-base/64` is normal at |r| = 0.620.
 Scoring the full window at a higher masking rate would change the construct and
 break comparability with the other 32 configurations, so there is no in-method
 fix and the configuration is dropped. **Studies 2 and 3 are unaffected**, since
-the selected configuration is `llama3.1-8b/8`.
+the selected configuration is `olmo2-1b/8`.
 
 Excluded via `EXCLUDED_CONFIGS` in each report's setup chunk.
 

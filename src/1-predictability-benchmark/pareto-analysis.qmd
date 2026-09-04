@@ -27,9 +27,23 @@ non-dominated (Pareto) set:
   proficiency strata (DIF logic). Lower is better.
 
 A configuration is **Pareto-optimal** if no other configuration is simultaneously
-*more valid* (higher `|r|`) **and** *fairer* (lower max `|d|`). The default for
-Studies 2–3 is the **highest-`|r|` point on the front among the pure-pretrained
-models** (instruct models are a contrast condition, not eligible defaults).
+*more valid* (higher `|r|`) **and** *fairer* (lower max `|d|`). Post-trained
+(instruct) configurations are a contrast condition rather than eligible defaults
+(plan §1), so they are excluded from the **domination comparison** as well as
+from selection. The front is computed over the 26 eligible configurations; the 6
+contrast configurations are plotted but are never allowed to dominate an
+eligible point, since a configuration that loses only to a model that cannot be
+selected is not dominated for the purpose at hand.
+
+**Selection does not follow from the front alone.** No configuration is fair in
+absolute terms — every one flags multiple L1 groups at `|d| ≥ 0.10` — so the
+front orders a trade-off rather than identifying an acceptable point on it. The
+default for Studies 2–3 is therefore taken from the **highest-validity
+configuration class** (generative models at the 8-token window), as the
+**smallest model in that class with a publicly released pretraining corpus**.
+Reproducibility of the pretraining data and the cost of running the model are
+weighted above differences in `|r|` of a few thousandths, which is the scale
+that separates configurations within the class.
 
 Inputs are the two long tables written by `assemble_analysis_data.py`
 (`results/predictability/{ellipse,toefl}_long.csv.gz`).
@@ -72,20 +86,26 @@ RESULTS <- find_results()
 
 ```{r}
 #| label: model-meta
-# Architecture / post-training status per model (from models.py registry).
+# Architecture / post-training status per model (from models.py registry), plus
+# the two attributes the selection rule reads: parameter count and whether the
+# pretraining corpus is publicly released as a downloadable dataset.
+#   open_data TRUE  — OLMo-2 (Dolma / OLMo-mix-1124, released by AI2).
+#   open_data FALSE — GPT-2 (WebText never released), Qwen2.5 and Llama-3.1
+#                     (undisclosed), ModernBERT (mix undisclosed), and BERT,
+#                     whose BooksCorpus half was withdrawn from distribution.
 model_meta <- tribble(
-  ~model,                  ~arch,     ~instruct,
-  "bert-base",             "masked",  FALSE,
-  "modernbert-base",       "masked",  FALSE,
-  "modernbert-large",      "masked",  FALSE,
-  "gpt2",                  "causal",  FALSE,
-  "gpt2-xl",               "causal",  FALSE,
-  "olmo2-1b",              "causal",  FALSE,
-  "olmo2-7b",              "causal",  FALSE,
-  "qwen2.5-7b",            "causal",  FALSE,
-  "qwen2.5-7b-instruct",   "causal",  TRUE,
-  "llama3.1-8b",           "causal",  FALSE,
-  "llama3.1-8b-instruct",  "causal",  TRUE,
+  ~model,                  ~arch,     ~instruct, ~params_b, ~open_data,
+  "bert-base",             "masked",  FALSE,     0.110,     FALSE,
+  "modernbert-base",       "masked",  FALSE,     0.149,     FALSE,
+  "modernbert-large",      "masked",  FALSE,     0.395,     FALSE,
+  "gpt2",                  "causal",  FALSE,     0.124,     FALSE,
+  "gpt2-xl",               "causal",  FALSE,     1.500,     FALSE,
+  "olmo2-1b",              "causal",  FALSE,     1.000,     TRUE,
+  "olmo2-7b",              "causal",  FALSE,     7.000,     TRUE,
+  "qwen2.5-7b",            "causal",  FALSE,     7.000,     FALSE,
+  "qwen2.5-7b-instruct",   "causal",  TRUE,      7.000,     FALSE,
+  "llama3.1-8b",           "causal",  FALSE,     8.000,     FALSE,
+  "llama3.1-8b-instruct",  "causal",  TRUE,      8.000,     FALSE,
 )
 WINDOWS <- c("8", "64", "full")
 MODELS  <- model_meta$model
@@ -233,13 +253,29 @@ points <- validity |>
   separate(config, into = c("model", "window"), sep = "/", remove = FALSE) |>
   mutate(window = factor(window, levels = WINDOWS)) |>
   left_join(model_meta, by = "model") |>
-  mutate(front = is_front(abs_r, max_abs_d))
+  mutate(eligible = !instruct, front = FALSE)
+
+# Domination runs over the eligible set only (see Overview). Contrast
+# configurations keep front = FALSE and take no part in the comparison.
+points$front[points$eligible] <- is_front(points$abs_r[points$eligible],
+                                          points$max_abs_d[points$eligible])
+
+# Column mask over S_ell / M_toe, so the bootstrap can apply the same restriction.
+stopifnot(identical(points$config, config_cols))
+ELIGIBLE <- points$eligible
+
+cat(sprintf("eligible: %d | contrast (excluded from domination): %d | on front: %d\n",
+            sum(points$eligible), sum(!points$eligible), sum(points$front)))
 
 points |>
   arrange(desc(front), desc(abs_r)) |>
   select(model, window, arch, instruct, r, abs_r, max_abs_d, worst_l1, n_flag, front) |>
-  mutate(across(c(r, abs_r, max_abs_d), \(x) round(x, 3))) |>
-  knitr::kable(caption = sprintf("All %d configurations (front first, then by validity).", length(config_cols)))
+  mutate(across(c(r, abs_r, max_abs_d), \(x) round(x, 3)),
+         front = ifelse(instruct, NA, front)) |>
+  knitr::kable(caption = sprintf(
+    paste("All %d configurations (front first, then by validity). Front is computed over the",
+          "%d eligible configurations; the %d contrast configurations show NA."),
+    length(config_cols), sum(points$eligible), sum(!points$eligible)))
 ```
 
 ## Bootstrap confidence regions
@@ -247,8 +283,11 @@ points |>
 2,000 iterations. ELLIPSE essays are resampled with replacement for `|r|`; TOEFL
 essays are resampled **stratified by proficiency level** for max `|d|` (the two
 corpora are independent samples, so they are resampled independently). We report
-per-axis 95% percentile intervals and, for each configuration, its **bootstrap
-front-membership probability** (share of iterations in which it is non-dominated).
+per-axis 95% percentile intervals and, for each eligible configuration, its
+**bootstrap front-membership probability** (share of iterations in which it is
+non-dominated). Front membership is evaluated **within the eligible set on every
+iteration**, matching the point-estimate front; contrast configurations are
+resampled and get intervals on both axes, but no front probability.
 
 ```{r}
 #| label: bootstrap
@@ -257,7 +296,7 @@ lvl_idx <- split(seq_len(nrow(M_toe)), level_toe)   # row indices per stratum
 
 boot_absr <- matrix(NA_real_, N_BOOT, ncol(S_ell), dimnames = list(NULL, colnames(S_ell)))
 boot_maxd <- matrix(NA_real_, N_BOOT, ncol(M_toe), dimnames = list(NULL, colnames(M_toe)))
-boot_front <- matrix(FALSE,   N_BOOT, ncol(S_ell), dimnames = list(NULL, colnames(S_ell)))
+boot_front <- matrix(NA,      N_BOOT, ncol(S_ell), dimnames = list(NULL, colnames(S_ell)))
 
 for (b in seq_len(N_BOOT)) {
   # validity: essay-level resample shared across configs
@@ -272,7 +311,7 @@ for (b in seq_len(N_BOOT)) {
 
   boot_absr[b, ] <- ab
   boot_maxd[b, ] <- md
-  boot_front[b, ] <- is_front(ab, md)
+  boot_front[b, ELIGIBLE] <- is_front(ab[ELIGIBLE], md[ELIGIBLE])
 }
 
 q025 <- \(x) quantile(x, 0.025, names = FALSE)
@@ -290,23 +329,83 @@ boot_ci <- tibble(
 points <- left_join(points, boot_ci, by = "config")
 ```
 
+## The front
+
+Every configuration on the front is eligible by construction, so the table
+carries no instruct column.
+
+```{r}
+#| label: front-table
+front_tbl <- points |> filter(front) |> arrange(desc(abs_r))
+
+front_tbl |>
+  select(model, window, arch, abs_r, max_abs_d, worst_l1, n_flag, front_prob) |>
+  mutate(across(c(abs_r, max_abs_d, front_prob), \(x) round(x, 3))) |>
+  knitr::kable(caption = sprintf(
+    "Non-dominated eligible configurations (%d of %d). Contrast configurations take no part in the domination comparison.",
+    nrow(front_tbl), sum(points$eligible)))
+```
+
 ## Selected configuration
+
+The front is a trade-off curve, not a shortlist of acceptable configurations.
+Every point on it flags at least five L1 groups at `|d| ≥ 0.10`, so choosing the
+front's validity endpoint would buy a worst-case displacement of 0.442 for a
+validity gain measured in thousandths. Selection therefore runs on the
+**configuration class** instead.
+
+The class is identified empirically, as the architecture-by-window cell with the
+highest mean eligible validity, and the choice within it is made on grounds the
+Pareto plane does not encode: whether the pretraining corpus is publicly
+released, and how expensive the model is to run.
 
 ```{r}
 #| label: selection
-front_tbl <- points |> filter(front) |> arrange(desc(abs_r))
+class_rank <- points |> filter(eligible) |>
+  group_by(arch, window) |>
+  summarise(n = n(), mean_abs_r = mean(abs_r), max_abs_r = max(abs_r), .groups = "drop") |>
+  arrange(desc(mean_abs_r))
 
-selected <- front_tbl |> filter(!instruct) |> slice(1)
+class_rank |>
+  mutate(across(c(mean_abs_r, max_abs_r), \(x) round(x, 3))) |>
+  knitr::kable(caption = "Eligible configuration classes, by mean ELLIPSE validity.")
 
-front_tbl |>
-  select(model, window, arch, instruct, abs_r, max_abs_d, worst_l1, n_flag, front_prob) |>
+top_class <- slice(class_rank, 1)
+
+# Within the top class: publicly released pretraining corpus, then smallest model.
+selected <- points |>
+  filter(eligible, arch == top_class$arch, window == top_class$window, open_data) |>
+  arrange(params_b) |>
+  slice(1)
+
+points |>
+  filter(eligible, arch == top_class$arch, window == top_class$window) |>
+  arrange(desc(abs_r)) |>
+  select(model, params_b, open_data, abs_r, max_abs_d, worst_l1, n_flag, front, front_prob) |>
   mutate(across(c(abs_r, max_abs_d, front_prob), \(x) round(x, 3))) |>
-  knitr::kable(caption = "Pareto front (non-dominated configurations).")
+  knitr::kable(caption = sprintf("The %s / window %s class, from which the default is drawn.",
+                                 top_class$arch, top_class$window))
 
 cat(sprintf(
-  "\nSelected default (highest |r| pure-pretrained on the front):\n  %s / window %s  |  |r| = %.3f  |  max|d| = %.3f  |  worst L1 = %s  |  front prob = %.2f\n",
-  selected$model, selected$window, selected$abs_r, selected$max_abs_d,
-  selected$worst_l1, selected$front_prob))
+  "\nHighest-validity class: %s models at window %s (%d configurations, mean |r| = %.3f).\n",
+  top_class$arch, top_class$window, top_class$n, top_class$mean_abs_r))
+cat(sprintf(
+  "Selected default (smallest open-pretraining-data model in that class):\n  %s / window %s  |  %.0fB params  |  |r| = %.3f  |  max|d| = %.3f  |  worst L1 = %s  |  flagged = %d  |  front prob = %.2f\n",
+  selected$model, selected$window, selected$params_b, selected$abs_r,
+  selected$max_abs_d, selected$worst_l1, selected$n_flag, selected$front_prob))
+
+# The selection is not required to land on the front; say so explicitly when it
+# does not, and name what dominates it, rather than leaving it to the figure.
+if (!selected$front) {
+  dom <- points |>
+    filter(eligible, config != selected$config,
+           abs_r >= selected$abs_r, max_abs_d <= selected$max_abs_d) |>
+    arrange(desc(abs_r))
+  cat(sprintf(
+    "Not on the front. Dominated by %s (|r| = %.3f vs %.3f, max|d| = %.3f vs %.3f) — the same pretraining corpus at %.0fx the parameter count.\n",
+    paste(dom$config, collapse = ", "), dom$abs_r[1], selected$abs_r,
+    dom$max_abs_d[1], selected$max_abs_d, dom$params_b[1] / selected$params_b))
+}
 ```
 
 ## Cross-corpus validity check
@@ -416,17 +515,29 @@ p_xc <- ggplot(pxc_df, aes(abs_rho, abs_r)) +
                         sep = "\n")) +
   theme_minimal(base_size = 10)
 p_xc
-ggsave(file.path(RESULTS, "validity_cross_corpus.png"), p_xc, width = 6.5, height = 5, dpi = 200)
+for (hp in c("_viz_helpers.R", "src/1-predictability-benchmark/_viz_helpers.R")) {
+  if (file.exists(hp)) { source(hp); break }
+}
+save_fig(p_xc, "validity_cross_corpus", width = 6.5, height = 5)
 write_csv(select(xc, config, abs_r, rank_ellipse, abs_rho, abs_rho_within, rank_toefl),
           file.path(RESULTS, "validity_cross_corpus.csv"))
 ```
 
 The ordering transfers. Rank agreement across the configurations is high, with a
-tight bootstrap interval, and the selected default sits near the top on both
-corpora. The selection is therefore not an artefact of which corpus supplied the
-y-axis, which is the assumption the two-corpus design rests on.
+tight bootstrap interval, so the ELLIPSE ranking is a property of the
+configurations rather than of the corpus that supplied the criterion — the
+assumption the two-corpus design rests on.
 
-Three further readings. The pooled and within-L1 TOEFL orderings agree at 0.969,
+The selected default is not near the top on both, and the reason is the
+architecture-by-window interaction rather than anything about the selection.
+`olmo2-1b/8` is 5th of 32 on ELLIPSE and 12th on TOEFL 11, because the masked
+models at window 64 lead the TOEFL ordering while the causal window-8 class
+leads on ELLIPSE. Within its own class it is 2nd of 6 on TOEFL, behind
+`llama3.1-8b/8` and ahead of both `olmo2-7b/8` (14th) and `qwen2.5-7b/8`
+(16th) — so the cross-corpus check does not favour any of the alternatives the
+class rule had to choose between.
+
+Three further readings. The pooled and within-L1 TOEFL orderings agree at 0.966,
 so the band-by-L1 confounding documented in
 `proficiency-confound-sensitivity.qmd` does not drive the validity ordering.
 The window effect replicates across corpora, with mean validity falling from
@@ -457,15 +568,24 @@ trunc_rate <- ell |>
   group_by(config) |>
   summarise(n = n(), trunc_rate = mean(truncated), .groups = "drop")
 
+# Carries the fairness columns and the eligible-set front flag as well, so the
+# manuscript's summary table is a straight read of one file.
 validity_table <- points |>
-  select(config, model, window, arch, instruct, abs_r, absr_lo, absr_hi, abs_rho) |>
+  select(config, model, window, arch, instruct, abs_r, absr_lo, absr_hi, abs_rho,
+         max_abs_d, worst_l1, n_flag, eligible, front) |>
+  # NA rather than FALSE for the contrast rows, matching front_prob: those
+  # configurations were not evaluated for domination, they did not fail it.
+  mutate(front = ifelse(eligible, front, NA)) |>
   left_join(trunc_rate, by = "config") |>
   arrange(desc(abs_r))
 
 validity_table |>
-  mutate(across(c(abs_r, absr_lo, absr_hi, abs_rho), \(x) round(x, 3)),
+  mutate(across(c(abs_r, absr_lo, absr_hi, abs_rho, max_abs_d), \(x) round(x, 3)),
+         front = ifelse(instruct, NA, front),
          trunc_rate = sprintf("%.1f%%", 100 * trunc_rate)) |>
-  knitr::kable(caption = "Per-configuration validity on both corpora, with ELLIPSE truncation rate.")
+  knitr::kable(caption = paste(
+    "Per-configuration validity and fairness on both corpora, with ELLIPSE truncation rate.",
+    "Front is the eligible-set flag; contrast configurations show NA."))
 write_csv(validity_table, file.path(RESULTS, "validity_table.csv"))
 
 # Truncated vs complete essays within each affected configuration.
@@ -533,8 +653,7 @@ p_hm <- ggplot(hm, aes(window, model, fill = fill_rank)) +
   theme_minimal(base_size = 10) +
   theme(panel.grid = element_blank(), plot.subtitle = element_text(size = 8, colour = "grey30"))
 p_hm
-ggsave(file.path(RESULTS, "validity_heatmap.png"), p_hm, width = 8, height = 6, dpi = 200)
-ggsave(file.path(RESULTS, "validity_heatmap.pdf"), p_hm, width = 8, height = 6)
+save_fig(p_hm, "validity_heatmap", width = 8, height = 6)
 ```
 
 The map makes the architecture-by-window interaction visible directly. The three
@@ -646,12 +765,13 @@ purrr::map(INSTRUCT_PAIRS, \(pr)
 
 Defined by the outcome rather than pre-specified, so these intervals are
 descriptive and carry no multiplicity adjustment. The comparison is the selected
-default against every pure-pretrained configuration that outranks it on validity.
+default against every eligible configuration that outranks it on validity, which
+under the class-based rule is the set the selection has to answer for.
 
 ```{r}
 #| label: fam-selection
 better <- points |>
-  filter(!instruct, abs_r > points$abs_r[points$config == sel_cfg]) |>
+  filter(eligible, abs_r > points$abs_r[points$config == sel_cfg]) |>
   arrange(desc(abs_r)) |> pull(config)
 
 purrr::map(better, \(b) zou_pair(sel_cfg, b)) |> bind_rows() |>
@@ -661,7 +781,7 @@ purrr::map(better, \(b) zou_pair(sel_cfg, b)) |> bind_rows() |>
          excludes_0     = (lo > 0) | (hi < 0)) |>
   select(pair, diff, lo, hi, excludes_0, other_on_front, other_max_d) |>
   mutate(across(c(diff, lo, hi, other_max_d), \(x) round(x, 4))) |>
-  knitr::kable(caption = paste("Selected default vs higher-validity pure-pretrained configurations.",
+  knitr::kable(caption = paste("Selected default vs higher-validity eligible configurations.",
                                "Negative diff means the other configuration has higher |r|."))
 ```
 
@@ -674,9 +794,13 @@ advantage disappears, with `modernbert-base` tied against `gpt2`
 ([-0.0096, +0.0010]) and `bert-base` actually behind by 0.0075. The full-window
 row for `modernbert-base` is absent because that configuration is excluded.
 
-**Every window contrast is resolved.** All 33 intervals exclude zero, so with
+**Every window contrast is resolved.** All 31 intervals exclude zero — 33 within-
+model pairs less the two that `modernbert-base/full` would have entered — so with
 6,482 essays and heavily dependent configurations the window effect is estimated
-precisely enough that no within-model pair is ambiguous.
+precisely enough that no within-model pair is ambiguous. This is the contrast
+that makes the flatness of the top of the validity ranking informative rather
+than merely underpowered: the same design that resolves every window contrast
+cannot separate the four leading configurations.
 
 **Instruct models are consistently more valid, which is worth reporting.** All
 six intervals exclude zero and all six favour the **instruct** model, by 0.004
@@ -690,25 +814,39 @@ configurations remain a contrast condition rather than eligible defaults (§1).
 That they nevertheless track proficiency better is a substantive finding about
 what surprisal measures in a post-trained model.
 
-**The selection survives, though not because the top is tied.** Of the three
-pure-pretrained configurations with nominally higher `|r|`, two are
-statistically indistinguishable from the selected default
-(`olmo2-7b/8` at [-0.0044, +0.0001], `olmo2-1b/8` at [-0.0040, +0.0009]). The
-third, `qwen2.5-7b/8`, is reliably higher, by 0.0036 with interval
-[-0.0057, -0.0016]. It is nevertheless not the selection, because it is
-dominated on the other axis, carrying max |d| = 0.442 against 0.364 and flagging
-10 L1 groups against 6, with a bootstrap front-membership probability of 0.000.
-The defensible claim is therefore not that the top configurations are tied on
-validity. It is that the one configuration with a real validity advantage pays
-for it with a 0.078 increase in worst-case cross-L1 displacement, and the Pareto
-criterion trades that away deliberately.
+**Nothing in the selected class is distinguishable on validity.** Two eligible
+configurations carry nominally higher `|r|` than the selected default, and
+neither difference is resolved: `qwen2.5-7b/8` at -0.0021 [-0.0044, +0.0001] and
+`olmo2-7b/8` at -0.0007 [-0.0025, +0.0012]. Both intervals include zero, on
+6,482 essays with heavily dependent correlations, which is the regime in which
+this design resolves every one of the window contrasts. The top of the eligible
+ranking is a flat 0.004 of `|r|` spread across four configurations from four
+different pretraining corpora, and the data do not order them.
+
+This is what makes the class-based rule the honest one. Were the validity
+differences real, the front's validity endpoint would have a claim; they are
+not, so the choice falls to criteria the plane does not encode. The cost is on
+the fairness axis and is stated rather than argued away: the selected default
+carries max |d| = 0.422 against `olmo2-7b/8`'s 0.409, a paired-bootstrap
+difference of +0.013 [+0.003, +0.024] that does exclude zero. It is dominated by
+that configuration, and the reason for preferring it anyway is that OLMo-2 1B
+shares OLMo-2 7B's publicly released pretraining corpus at a seventh of the
+parameter count. A 0.013 increase in worst-case displacement, on an axis where
+every configuration is already flagging six or more L1 groups, is a smaller
+practical cost than an order of magnitude in compute for a validity difference
+of 0.0007.
 
 # Section 5 — Pareto Plot
 
+Windows are stacked rather than placed side by side. The figure is reproduced at
+roughly a single text column in the dissertation, and three panels across that
+width leaves the point labels below legible size; one panel per row keeps the
+full width for each.
+
 ```{r}
 #| label: pareto-plot
-#| fig-width: 13
-#| fig-height: 5
+#| fig-width: 6.5
+#| fig-height: 9.4
 # Shared visual language (palette keyed to model family, theme, save helper).
 for (hp in c("_viz_helpers.R", "src/1-predictability-benchmark/_viz_helpers.R")) {
   if (file.exists(hp)) { source(hp); break }
@@ -728,31 +866,57 @@ p <- ggplot(pa, aes(max_abs_d, abs_r)) +
                 width = 0, alpha = 0.35, colour = "grey55") +
   geom_errorbar(data = filter(pa, front), aes(xmin = maxd_lo, xmax = maxd_hi),
                 orientation = "y", width = 0, alpha = 0.35, colour = "grey55") +
-  geom_point(aes(colour = family, shape = instruct), size = 2.7) +
-  geom_point(data = filter(pa, front), shape = 21, size = 4.6, stroke = 1,
+  # Contrast configurations are drawn (triangles, lighter) but took no part in
+  # the domination comparison, so they are never circled.
+  geom_point(aes(colour = family, shape = instruct, alpha = instruct), size = 3.1) +
+  geom_point(data = filter(pa, front), shape = 21, size = 5.6, stroke = 1,
              colour = "black", fill = NA) +
-  geom_point(data = selected, shape = 8, size = 4.6, colour = "black") +
-  ggrepel::geom_text_repel(aes(label = lbl, colour = family), size = 2.5,
-                           max.overlaps = Inf, box.padding = 0.35, seed = 42,
-                           show.legend = FALSE) +
-  annotate("text", x = D_FLAG, y = 0.505, label = "|d| = 0.10", hjust = -0.06,
-           size = 2.9, colour = "grey45") +
-  facet_wrap(~window, nrow = 1, labeller = labeller(window = win_labs)) +
+  # The selection is not a front member, so it needs a marker the eye separates
+  # from the circles rather than one drawn on top of them: a filled black
+  # diamond, called out by name.
+  geom_point(data = selected, shape = 23, size = 3.4, stroke = 0.9,
+             colour = "black", fill = "black") +
+  ggrepel::geom_text_repel(aes(label = lbl, colour = family, alpha = instruct),
+                           size = 3.1, max.overlaps = Inf, box.padding = 0.4,
+                           min.segment.length = 0, segment.colour = "grey65",
+                           seed = 42, show.legend = FALSE) +
+  ggrepel::geom_label_repel(
+    data = mutate(selected, tag = "selected default"), aes(label = tag),
+    size = 3.0, fontface = "bold", colour = "black", fill = "white",
+    label.size = 0.3, label.padding = grid::unit(0.14, "lines"),
+    box.padding = 0.3, point.padding = 0.4, nudge_y = -0.072, nudge_x = 0.02,
+    direction = "y", min.segment.length = 0, segment.colour = "black",
+    segment.size = 0.4, seed = 42) +
+  annotate("text", x = D_FLAG, y = 0.503, label = "|d| = 0.10", hjust = -0.06,
+           size = 3.1, colour = "grey45") +
+  facet_wrap(~window, ncol = 1, labeller = labeller(window = win_labs)) +
   scale_colour_manual(values = FAMILY_COLORS, drop = FALSE) +
   scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 17),
-                     labels = c("pretrained", "instruct")) +
+                     labels = c("pretrained (eligible)", "instruct (contrast)")) +
+  scale_alpha_manual(values = c(`FALSE` = 1, `TRUE` = 0.55), guide = "none") +
   coord_cartesian(xlim = c(D_FLAG, 0.66), ylim = c(0.50, 0.66)) +
   labs(
-    x = "Unfairness — max |Cohen's d| across L1 groups (TOEFL 11)   → worse",
-    y = "Validity — |Pearson r| with holistic score (ELLIPSE)   → better",
-    colour = "Model family", shape = "Post-training",
-    title = "Fairness–Validity Pareto Front, faceted by context window",
-    subtitle = paste("Circled = globally non-dominated · star = selected pure-pretrained",
-                     "default · CIs (front only) = 95% bootstrap · dotted = |d|=0.10 flag")) +
-  theme_study1(12)
+    x = "Unfairness — max |Cohen's d| across L1 groups, TOEFL 11 (worse →)",
+    y = "Validity — |Pearson r| with holistic score, ELLIPSE (better ↑)",
+    colour = "Model family", shape = NULL,
+    title = "Fairness–validity plane, by context window",
+    subtitle = paste("Circled = non-dominated within the eligible set. Contrast models are plotted",
+                     "but excluded from the domination comparison. CIs (front only) = 95%",
+                     "bootstrap; dotted = |d| = 0.10 flag.",
+                     sep = "\n")) +
+  theme_study1(12) +
+  theme(legend.position = "bottom", legend.box = "vertical",
+        legend.margin = margin(t = 0, b = 0), legend.spacing.y = grid::unit(0, "pt"),
+        legend.key.spacing.x = grid::unit(4, "pt"),
+        plot.subtitle = element_text(size = 9),
+        plot.margin = margin(5.5, 11, 5.5, 5.5)) +
+  guides(colour = guide_legend(nrow = 2, order = 1, title.position = "top",
+                               override.aes = list(size = 2.6, alpha = 1)),
+         shape  = guide_legend(nrow = 1, order = 2,
+                               override.aes = list(size = 2.6, alpha = 1)))
 
 p
-save_fig(p, "pareto_front", width = 13, height = 5)
+save_fig(p, "pareto_front", width = 6.5, height = 9.4)
 ```
 
 # Section 6 — Outputs & Notes
@@ -760,9 +924,11 @@ save_fig(p, "pareto_front", width = 13, height = 5)
 ```{r}
 #| label: write-table
 out <- points |>
+  mutate(selected = config == sel_cfg) |>
   arrange(desc(front), desc(abs_r)) |>
-  select(model, window, arch, instruct, r, abs_r, max_abs_d, worst_l1,
-         n_flag, front, front_prob, absr_lo, absr_hi, maxd_lo, maxd_hi)
+  mutate(front = ifelse(eligible, front, NA)) |>
+  select(model, window, arch, instruct, eligible, r, abs_r, max_abs_d, worst_l1,
+         n_flag, front, front_prob, selected, absr_lo, absr_hi, maxd_lo, maxd_hi)
 write_csv(out, file.path(RESULTS, "pareto_points.csv"))
 cat("wrote", file.path(RESULTS, "pareto_points.csv"), "and pareto_front.png\n")
 ```
@@ -776,8 +942,13 @@ cat("wrote", file.path(RESULTS, "pareto_points.csv"), "and pareto_front.png\n")
   Report the selected configuration's max |d| and flagged-group count explicitly.
 - **Thin low-proficiency strata for some L1s** (e.g. GER-low n≈14, HIN-low n≈25)
   make those stratum-level *d*'s noisy; the bootstrap envelopes capture this.
-- **Instruct models are a contrast condition**, excluded from default selection
-  even when Pareto-optimal.
+- **Instruct models are a contrast condition**, excluded from the domination
+  comparison as well as from selection. `front` and `front_prob` are defined
+  over the eligible set only and are NA for those six configurations.
+- **The selected default is not on the front.** The class-based rule prefers the
+  smallest open-pretraining-data model in the highest-validity class, and that
+  configuration is dominated by its 7B sibling on a validity difference the data
+  cannot resolve. Report it as a deliberate departure, with the max |d| cost.
 - **Truncation:** BERT (512) and GPT-2 (1024) truncate some long essays at the
   full window (flagged per-row upstream); relevant only for those specific points.
 

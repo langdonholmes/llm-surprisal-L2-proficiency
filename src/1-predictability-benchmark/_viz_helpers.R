@@ -48,10 +48,15 @@ theme_study1 <- function(base_size = 12) {
     )
 }
 
-# Save PNG (review) + PDF (vector, for the dissertation) to results/predictability.
-save_fig <- function(p, name, width, height, dir = RESULTS) {
+# Save a vector PDF (the dissertation's preferred form) plus a high-resolution
+# PNG for contexts that cannot place vector art. 400 dpi is above the 300 dpi
+# floor most print submissions ask for, so the PNG is usable as a fallback
+# rather than as a review-only proof.
+FIG_DPI <- 400
+
+save_fig <- function(p, name, width, height, dir = RESULTS, dpi = FIG_DPI) {
   ggplot2::ggsave(file.path(dir, paste0(name, ".png")), p,
-                  width = width, height = height, dpi = 200)
+                  width = width, height = height, dpi = dpi)
   ggplot2::ggsave(file.path(dir, paste0(name, ".pdf")), p,
                   width = width, height = height)
   invisible(p)
