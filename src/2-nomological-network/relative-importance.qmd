@@ -394,11 +394,12 @@ residualization disturbs the ordering. If predictability were distinctively
 phraseological as raters perceive it, this is where it would show, and it
 doesn't.
 
-**Phraseology vs. Conventions** Phraseology versus conventions is the only
-pair of the fifteen whose interval covers zero. A criterion about spelling and
-punctuation is holding its own against a criterion about formulaic language. The
-reading is that conventions is picking up mechanical accuracy that the
-language model also finds predictable.
+**Phraseology vs. Conventions** Conventions carries the larger point estimate
+of the two, .091 against .083, and their difference is one of three among the
+fifteen whose interval covers zero. A criterion about spelling and punctuation
+is holding its own against a criterion about formulaic language, and on the
+point estimate it is slightly ahead. The reading is that conventions is picking
+up mechanical accuracy that the language model also finds predictable.
 
 **None of this adjudicates the network analysis.** The network placed
 `mean_loss` in a community with the dependency-MI indices (`amod_mi`,

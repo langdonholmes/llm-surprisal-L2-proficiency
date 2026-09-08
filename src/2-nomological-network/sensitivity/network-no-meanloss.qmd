@@ -33,7 +33,7 @@ nodes instead of 15. Community *numbering* is arbitrary and will not match the
 main notebook or the companion run, so compare membership rather than labels.
 
 Note that `var_loss` is the weaker of the two indicators in the main network
-(loading −.534 on its community against −.858 for `mean_loss`), so a messier
+(loading −.548 on its community against −.865 for `mean_loss`), so a messier
 result here is not by itself evidence against the main finding. What would
 matter is `var_loss` joining a *different* community rather than joining the
 same one less strongly.

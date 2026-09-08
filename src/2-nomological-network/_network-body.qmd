@@ -72,9 +72,6 @@ cat("Figures ->", fig_path("*.pdf"), "| bootstrap cores:", n_cores, "\n")
 # ellipse_metrics.csv carries the 16 linguistic features + ELLIPSE scores +
 # predictability (mean_loss, var_loss) from the Study 1 benchmark model
 # (OLMo-2 1B base, window 8). All networks below use Spearman correlations.
-# NOTE: ellipse_metrics.csv predates the Study 1 reselection and still carries
-# Llama-3.1-8B surprisal. Re-run `python src/essays/metrics.py --corpus both`
-# before trusting the predictability nodes in this notebook.
 df_raw <- read.csv("data/ellipse/ellipse_metrics.csv")
 
 cat("Raw data:", nrow(df_raw), "rows x", ncol(df_raw), "columns\n")
@@ -1025,7 +1022,7 @@ for (nm in names(nc_list)) {
 # With structure = NULL, invariance() runs its own bootEGA on the pooled data
 # and silently drops every node whose item stability falls below
 # configural.threshold = 0.7. Here that removed the three cohesion nodes, whose
-# stability sits near .65, so the cohesion community never entered the test.
+# stability sits near .63, so the cohesion community never entered the test.
 # Supplying the structure skips the configural step, keeps the full
 # battery, and tests loadings against the same partition used everywhere else in
 # this notebook. The tradeoff is that configural invariance is now assumed

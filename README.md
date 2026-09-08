@@ -35,7 +35,8 @@ Word predictability is produced by the Study 1 benchmark
 selected as the configuration that feeds Studies 2–3 — the smallest model with a
 publicly released pretraining corpus in the highest-validity configuration
 class. `mean_entropy` is computed but excluded from
-network analysis due to near-perfect correlation with `mean_loss` (r = 0.97).
+network analysis because it largely duplicates `mean_loss` (r = 0.85 in the
+selected configuration).
 
 ## Pipeline
 
@@ -81,7 +82,7 @@ dissertation chapter (`1-…`, `2-…`, `3-…`).
 ```
 src/
   features/                 # Linguistic feature calculators (shared lib)
-    predictability.py       # Word predictability (ModernBERT surprisal + variance)
+    predictability.py       # Word predictability (masked or causal LM surprisal + variance)
     lexical.py              # MTLD, lexical density, token frequency, word length
     syntactic.py            # L2SCA battery (Lu 2010/11): MLC, CN/C, CP/C
                             #   (C/T + K&C 2018 deps/clause, deps/nominal are
