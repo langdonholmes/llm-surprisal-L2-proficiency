@@ -63,9 +63,12 @@ plus the `pareto-*.qmd` reports, which run on the §2 outputs.
   while also using the standard form three times, so both can be scored inside
   one text. At window 8 the measure charges the non-standard form 10.4 bits more
   than the standard one; with the full essay as context it charges 0.9 bits. The
-  figure pairs a two-panel text heat map (`src/util/text_heatmap.R`) with the
-  per-occurrence trend. This is an illustration of a mechanism rather than an
-  estimate of its size, and the report says so.
+  report writes two figures. `self_conditioning_heatmap` renders the opening
+  third of the response twice, once per window, as flowing text tinted by
+  surprisal (`src/util/text_heatmap.R`); `self_conditioning_occurrences` plots
+  every occurrence of the non-standard form against its position in reading
+  order, one line per window. This is an illustration of a mechanism rather than
+  an estimate of its size, and the report says so.
 - `proficiency-confound-sensitivity.qmd` — bounds how much of the cross-L1
   displacement could be within-band proficiency rather than L1. TOEFL 11's
   proficiency scale has only three levels, so stratifying on it (or residualizing

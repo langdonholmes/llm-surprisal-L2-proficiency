@@ -12,8 +12,44 @@
 # apart as the line grows. Monospace also reads as an instrument display rather
 # than as a quotation, which is the right register for a figure whose subject is
 # what a model charged for each word.
+#
+# Fills are lightened and the text stays dark throughout, so the tint reads as a
+# highlighter laid over prose rather than as a grid of coloured cells. That keeps
+# every word legible at the top of the scale, which an opaque fill does not, and
+# it is why there is no light-text-on-dark-fill switch here.
+#
+# The lightening is baked into the colour ramp rather than applied as an `alpha`
+# aesthetic on the rectangles. Drawing the tiles translucent leaves the legend's
+# colourbar opaque, so the key stops describing the tiles it is a key for; and
+# compositing mako's near-black top end against white turns it grey, which loses
+# the deep blue the rest of the project's figures are keyed to. Blending the ramp
+# up front fixes both, since the scale and the tiles then carry the same values.
 
 suppressMessages(library(ggplot2))
+
+# Advance width of DejaVu Sans Mono, in em (1233/2048 units). Every width
+# calculation below depends on this, so a different monospace face needs its own
+# value or the tiles stop matching the glyphs they sit behind.
+MONO_ADVANCE <- 0.60205
+MONO_FAMILY <- "DejaVu Sans Mono"
+
+# Composite a colour over a background at opacity `alpha`, returning opaque hex.
+blend_over <- function(hex, alpha, bg = "#FFFFFF") {
+  fg <- grDevices::col2rgb(hex) / 255
+  back <- as.vector(grDevices::col2rgb(bg)) / 255
+  grDevices::rgb(t(alpha * fg + (1 - alpha) * back))
+}
+
+# The project's sequential ramp, lightened and with the near-black top end
+# trimmed off. `begin` stops mako short of pure black, which stays blue after
+# blending where the true extreme goes neutral grey.
+heatmap_ramp <- function(alpha = 0.75, n = 256, option = "mako",
+                         begin = 0.28, end = 1, direction = -1,
+                         bg = "#FFFFFF") {
+  cols <- viridisLite::viridis(n, option = option, begin = begin, end = end,
+                               direction = direction)
+  blend_over(cols, alpha, bg)
+}
 
 # --------------------------------------------------------------------------- #
 # Layout
@@ -46,20 +82,26 @@ layout_text_tokens <- function(token, space_after = TRUE, width = 72) {
   data.frame(line = line, x0 = x0, x1 = x0 + w, xmid = x0 + w / 2)
 }
 
-# Suggested device size, in inches, for a heatmap of this shape.
+# Device size, in inches, that makes one character of `label_size` text exactly
+# one x-unit wide. Getting this right is the whole of the alignment problem: the
+# tiles are laid out in character units, so the panel has to be
+# `width * MONO_ADVANCE * label_size` mm across or the tiles and the glyphs
+# disagree. `side_in` is everything outside the panel (legend, margins); measure
+# it once for a given legend and reuse.
 #
-# ggplot's `size` aesthetic is a font height in mm; a monospace face advances
-# roughly 0.6 of its height per character, so `width` columns need
-# `width * 0.6 * label_size` mm of panel. Height allows 1.9 line-heights per
-# rendered line, which leaves the tiles visually separated rather than abutting.
-# Both are estimates -- they put the figure in the right neighbourhood so the
-# text neither overflows its tiles nor floats inside them, and the caller can
-# nudge from there.
-text_heatmap_size <- function(width, n_lines, n_panels = 1, label_size = 2.6,
-                              legend_in = 1.35, title_in = 0.75) {
-  w_in <- width * 0.6 * label_size / 25.4 + legend_in
-  h_in <- n_panels * (n_lines * 1.9 * label_size / 25.4 + title_in)
-  c(width = round(w_in, 2), height = round(h_in, 2))
+# Height allows 1.9 line-heights per rendered line, which leaves the rows
+# visually separated rather than abutting.
+text_heatmap_size <- function(width, n_lines, n_panels = 1, label_size = 3.2,
+                              side_in = 1.35, title_in = 0.75) {
+  panel_in <- width * MONO_ADVANCE * label_size / 25.4
+  c(width = round(panel_in + side_in, 2),
+    height = round(n_panels * (n_lines * 1.9 * label_size / 25.4 + title_in), 2),
+    panel = round(panel_in, 2))
+}
+
+# Lines the layout will use, so a caller can size the device before plotting.
+text_heatmap_lines <- function(token, space_after = TRUE, width = 72) {
+  max(layout_text_tokens(token, space_after, width)$line)
 }
 
 # --------------------------------------------------------------------------- #
@@ -75,11 +117,17 @@ text_heatmap_size <- function(width, n_lines, n_panels = 1, label_size = 2.6,
 #'                   (spaCy's `whitespace_`); NULL treats every token as spaced.
 #' @param highlight  regex matched case-insensitively against the token, or a
 #'                   character vector of exact token strings. Matching tokens
-#'                   get an outline so the eye finds them in both panels.
-#' @param limits     fill scale limits. Leave NULL to span the data -- but pass
-#'                   an explicit range whenever panels are meant to be compared,
-#'                   so a token's colour means the same thing in each.
-#' @param label_dark fill quantile above which label text switches to white.
+#'                   are marked so the eye finds them in every panel.
+#' @param highlight_style "underline" (a rule beneath the word, which leaves the
+#'                   fill undisturbed) or "box".
+#' @param limits     fill scale limits. Leave NULL to span the data, but pass an
+#'                   explicit range whenever panels are meant to be compared, so
+#'                   a token's colour means the same thing in each.
+#' @param alpha      how strongly the ramp is tinted, from 0 (white) to 1 (the
+#'                   full palette). Lower values keep the text readable at the
+#'                   top of the scale at the cost of some dynamic range. Applied
+#'                   to the scale, not to the rectangles, so the legend matches.
+#' @param pad        horizontal padding added to each tile, in characters.
 #' @return a ggplot object.
 text_heatmap <- function(data,
                          token = "token",
@@ -87,19 +135,25 @@ text_heatmap <- function(data,
                          panel = NULL,
                          space_after = NULL,
                          highlight = NULL,
+                         highlight_style = c("underline", "box"),
                          width = 72,
                          limits = NULL,
                          palette = "mako",
                          direction = -1,
+                         alpha = 0.75,
+                         ramp_begin = 0.28,
                          legend_title = "Surprisal\n(bits)",
-                         label_size = 2.6,
+                         label_size = 3.2,
+                         label_colour = "grey10",
+                         family = MONO_FAMILY,
                          na_colour = "grey92",
-                         highlight_colour = "#D55E00",
-                         highlight_linewidth = 0.45,
-                         label_dark = 0.55,
+                         highlight_colour = "#B2182B",
+                         highlight_linewidth = 0.9,
+                         pad = 0.12,
                          panel_levels = NULL,
                          base_size = 10) {
 
+  highlight_style <- match.arg(highlight_style)
   stopifnot(is.data.frame(data), token %in% names(data), value %in% names(data))
 
   # One canonical token order, taken from the first panel. Every panel must
@@ -134,11 +188,6 @@ text_heatmap <- function(data,
   data$.label <- as.character(data[[token]])
   if (is.null(limits)) limits <- range(data$.value, na.rm = TRUE)
 
-  # Label contrast follows the fill, not the raw value, so a clipped scale still
-  # gets readable text at both ends.
-  scaled <- (data$.value - limits[1]) / diff(limits)
-  data$.light_text <- !is.na(scaled) & scaled > label_dark
-
   if (is.null(highlight)) {
     data$.hit <- FALSE
   } else if (length(highlight) == 1 && !highlight %in% data$.label) {
@@ -147,16 +196,18 @@ text_heatmap <- function(data,
     data$.hit <- tolower(data$.label) %in% tolower(highlight)
   }
 
-  p <- ggplot(data, aes(xmin = x0, xmax = x1, ymin = -line - 0.42, ymax = -line + 0.42)) +
-    geom_rect(aes(fill = .value), colour = NA) +
-    geom_text(aes(x = xmid, y = -line, label = .label, colour = .light_text),
-              size = label_size, family = "mono", show.legend = FALSE) +
-    scale_fill_viridis_c(option = palette, direction = direction,
-                         limits = limits, oob = scales::squish,
-                         na.value = na_colour, name = legend_title) +
-    scale_colour_manual(values = c("FALSE" = "grey12", "TRUE" = "white"),
-                        guide = "none") +
-    scale_x_continuous(expand = expansion(add = 0.5)) +
+  p <- ggplot(data) +
+    geom_rect(aes(xmin = x0 - pad, xmax = x1 + pad,
+                  ymin = -line - 0.42, ymax = -line + 0.42, fill = .value),
+              colour = NA) +
+    geom_text(aes(x = xmid, y = -line, label = .label),
+              size = label_size, family = family, colour = label_colour) +
+    scale_fill_gradientn(
+      colours = heatmap_ramp(alpha, option = palette, begin = ramp_begin,
+                             direction = direction),
+      limits = limits, oob = scales::squish,
+      na.value = na_colour, name = legend_title) +
+    scale_x_continuous(expand = expansion(add = 0.6)) +
     scale_y_continuous(expand = expansion(add = 0.5)) +
     labs(x = NULL, y = NULL) +
     theme_minimal(base_size = base_size) +
@@ -170,9 +221,20 @@ text_heatmap <- function(data,
     )
 
   if (any(data$.hit)) {
-    p <- p + geom_rect(data = data[data$.hit, , drop = FALSE],
-                       fill = NA, colour = highlight_colour,
-                       linewidth = highlight_linewidth)
+    hits <- data[data$.hit, , drop = FALSE]
+    p <- p + if (highlight_style == "underline") {
+      geom_segment(data = hits,
+                   aes(x = x0 - pad, xend = x1 + pad,
+                       y = -line - 0.46, yend = -line - 0.46),
+                   colour = highlight_colour, linewidth = highlight_linewidth,
+                   lineend = "round")
+    } else {
+      geom_rect(data = hits,
+                aes(xmin = x0 - pad, xmax = x1 + pad,
+                    ymin = -line - 0.42, ymax = -line + 0.42),
+                fill = NA, colour = highlight_colour,
+                linewidth = highlight_linewidth)
+    }
   }
   if (!is.null(panel)) {
     p <- p + facet_wrap(~.panel, ncol = 1, scales = "free_y")
