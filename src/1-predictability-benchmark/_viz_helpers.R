@@ -52,12 +52,16 @@ theme_study1 <- function(base_size = 12) {
 # PNG for contexts that cannot place vector art. 400 dpi is above the 300 dpi
 # floor most print submissions ask for, so the PNG is usable as a fallback
 # rather than as a review-only proof.
+#
+# The PDF goes through cairo_pdf rather than the default pdf() device, which is
+# Latin-1 only and silently rewrites the em dashes and arrows in the axis labels
+# as hyphens (and drops a Greek delta outright).
 FIG_DPI <- 400
 
 save_fig <- function(p, name, width, height, dir = RESULTS, dpi = FIG_DPI) {
   ggplot2::ggsave(file.path(dir, paste0(name, ".png")), p,
                   width = width, height = height, dpi = dpi)
   ggplot2::ggsave(file.path(dir, paste0(name, ".pdf")), p,
-                  width = width, height = height)
+                  width = width, height = height, device = grDevices::cairo_pdf)
   invisible(p)
 }

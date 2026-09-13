@@ -42,7 +42,14 @@ plus the `pareto-*.qmd` reports, which run on the §2 outputs.
   `pareto-analysis.qmd` also carries the §3.1 validity table, truncation check
   and heat map, the §3.4 targeted comparisons (Zou 2007 intervals via `cocor`),
   and a cross-corpus check that the validity ordering is not an artefact of
-  ELLIPSE supplying the criterion.
+  ELLIPSE supplying the criterion. Three line figures draw the same coefficients
+  as series: `validity_by_window_{ellipse,toefl}` (one line per model over the
+  three windows, one panel per corpus) and `validity_by_size_ellipse` (parameter
+  count within the three families that have two pretrained checkpoints, at
+  window 8, with the Zou interval on each contrast). The ELLIPSE panels share a
+  truncated `|r|` range so the window effect and the size effect are directly
+  comparable by eye; TOEFL 11 gets its own range, since a three-category
+  criterion attenuates the coefficient.
 - `proficiency-confound-sensitivity.qmd` — bounds how much of the cross-L1
   displacement could be within-band proficiency rather than L1. TOEFL 11's
   proficiency scale has only three levels, so stratifying on it (or residualizing

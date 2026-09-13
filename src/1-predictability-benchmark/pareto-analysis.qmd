@@ -836,6 +836,194 @@ every configuration is already flagging six or more L1 groups, is a smaller
 practical cost than an order of magnitude in compute for a validity difference
 of 0.0007.
 
+## Validity as lines: window, and parameter count within family
+
+The same coefficients as the heat map, drawn as series rather than tiles,
+because the write-up reads the window effect as a slope and the size effect as
+the absence of one. Every panel truncates `|r|` to the range the matrix actually
+occupies, so a flat series reads as flat rather than as a compressed axis, and
+the ELLIPSE panels share one range so the two effects can be compared by eye.
+
+```{r}
+#| label: validity-window-lines
+#| fig-width: 6.5
+#| fig-height: 6
+for (hp in c("_viz_helpers.R", "src/1-predictability-benchmark/_viz_helpers.R")) {
+  if (file.exists(hp)) { source(hp); break }
+}
+
+WIN_LAB <- c("8" = "8", "64" = "64", "full" = "full document")
+vfig <- points |>
+  mutate(family   = factor(model_family(model), levels = FAMILY_LEVELS),
+         arch_lab = factor(arch, levels = c("causal", "masked"),
+                           labels = c("generative", "masked")),
+         win      = factor(WIN_LAB[as.character(window)], levels = unname(WIN_LAB)),
+         lbl      = short_model(model))
+
+# Eleven series cannot be told apart from a six-colour family legend, so each
+# line is labelled at its own end. The label goes at the last window the model
+# actually has; modernbert-base is excluded at the full window, so its label is
+# pushed out into the empty gap rather than left sitting on whichever line is
+# still passing through that point.
+ends <- vfig |> group_by(model) |> slice_max(as.integer(win), n = 1) |> ungroup() |>
+  mutate(nx = ifelse(win == tail(levels(win), 1), 0.10, 0.45))
+
+window_panel <- function(yvar, ylim, ylab, title, subtitle) {
+  ggplot(vfig, aes(win, .data[[yvar]], group = model, colour = family)) +
+    geom_line(aes(linetype = arch_lab, alpha = instruct), linewidth = 0.75) +
+    geom_point(aes(shape = instruct, alpha = instruct), size = 2.1) +
+    geom_text_repel(data = ends, aes(label = lbl, alpha = instruct), size = 2.9,
+                    hjust = 0, direction = "y", nudge_x = ends$nx, box.padding = 0.10,
+                    min.segment.length = 0, segment.colour = "grey70",
+                    segment.size = 0.3, seed = 42, show.legend = FALSE) +
+    scale_colour_manual(values = FAMILY_COLORS, drop = FALSE) +
+    scale_linetype_manual(values = c(generative = "solid", masked = "42")) +
+    scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 17),
+                       labels = c("pretrained", "instruct (contrast)")) +
+    scale_alpha_manual(values = c(`FALSE` = 1, `TRUE` = 0.5), guide = "none") +
+    scale_x_discrete(expand = expansion(add = c(0.12, 1.35))) +
+    coord_cartesian(ylim = ylim, clip = "off") +
+    labs(x = "Context window", y = ylab, colour = "Model family",
+         linetype = "Architecture", shape = NULL,
+         title = title, subtitle = subtitle) +
+    theme_study1(11) +
+    theme(legend.position = "bottom", legend.box = "vertical",
+          legend.margin = margin(t = 0, b = 0),
+          legend.spacing.y = grid::unit(1, "pt"),
+          legend.key.spacing.x = grid::unit(3, "pt"),
+          plot.title.position = "plot",
+          plot.title = element_text(size = 11.5),
+          plot.subtitle = element_text(size = 8.5),
+          axis.title.y = element_text(size = 9.5)) +
+    guides(colour   = guide_legend(nrow = 2, order = 1,
+                                   override.aes = list(size = 2.2, alpha = 1)),
+           linetype = guide_legend(nrow = 1, order = 2,
+                                   override.aes = list(colour = "grey25", alpha = 1)),
+           shape    = guide_legend(nrow = 1, order = 3,
+                                   override.aes = list(size = 2.2, alpha = 1)))
+}
+
+p_win_ell <- window_panel(
+  "abs_r", c(0.525, 0.641),
+  "Validity — |Pearson r| with holistic score",
+  "Concurrent validity by model and context window (ELLIPSE)",
+  paste("Generative models give up .04 to .09 of |r| between the 8- and 64-token windows; the",
+        "masked models hold or gain over the same step. modernbert-base is excluded at the full",
+        "window as a diagnosed instrument failure, so its line stops at 64.", sep = "\n"))
+p_win_ell
+save_fig(p_win_ell, "validity_by_window_ellipse", width = 6.5, height = 6)
+
+# TOEFL gets its own scale. A three-category criterion with heavy ties
+# attenuates the coefficient, so the two panels share a layout but not a range.
+p_win_toe <- window_panel(
+  "abs_rho", c(0.33, 0.55),
+  "Validity — |Spearman rho| with proficiency band",
+  "Concurrent validity by model and context window (TOEFL 11)",
+  paste("The same layout and model set as the ELLIPSE figure, on its own scale; rho is pooled",
+        "over all essays. The window effect holds under the second criterion. The two",
+        "coefficients are not on a common scale, so only the shape of each series is comparable.",
+        sep = "\n"))
+p_win_toe
+save_fig(p_win_toe, "validity_by_window_toefl", width = 6.5, height = 6)
+```
+
+The window effect is the one finding in this section that does not depend on
+which corpus supplied the criterion. Both panels have the same shape: the
+generative models lose most of their validity over the first step, from 8 tokens
+to 64, and the masked models do not, which is the architecture-by-window
+interaction the targeted comparisons above put intervals on. The TOEFL panel
+places `olmo2-1b/full` well below the rest, on a coefficient that is attenuated
+by the three-category criterion to begin with.
+
+```{r}
+#| label: validity-size-lines
+#| fig-width: 6.5
+#| fig-height: 5.2
+# Families carrying two pretrained checkpoints at different sizes: the only
+# within-family size contrasts this matrix supports. Qwen and Llama pair a base
+# with an instruct model at the same parameter count, which is a post-training
+# contrast rather than a size one, and BERT has a single checkpoint.
+size_fams <- vfig |> filter(!instruct) |> distinct(family, params_b) |>
+  count(family) |> filter(n >= 2) |> pull(family)
+# Six points, three of which sit within a fifth of a decade of a neighbour on x
+# and within .005 on y, so label sides are assigned rather than left to repel:
+# each one is placed on the side of its point that its own family's line and the
+# neighbouring family's line both leave free.
+SIZE_NUDGE <- c("gpt2" = 0.006, "gpt2-xl" = -0.007,
+                "modernbert-base" = -0.008, "modernbert-large" = 0.007,
+                "olmo2-1b" = 0.006, "olmo2-7b" = 0.006)
+vsize <- vfig |> filter(!instruct, window == "8", family %in% size_fams) |>
+  mutate(ny = SIZE_NUDGE[model])
+stopifnot(!any(is.na(vsize$ny)))
+
+size_zou <- vsize |> arrange(family, params_b) |> group_by(family) |>
+  group_modify(\(d, k) zou_pair(d$config[2], d$config[1])) |> ungroup() |>
+  mutate(txt = sprintf("%s  Δ|r| = %+.3f  [%+.3f, %+.3f]", family, diff, lo, hi))
+
+# The intervals sit in the empty lower half of the panel rather than beside the
+# lines: two of the three families are within a fifth of a decade of each other
+# on x and within .005 on y, so in-place labels would collide.
+annot <- size_zou |> mutate(y = 0.560 - 0.0105 * (row_number() - 1))
+
+p_size <- ggplot(vsize, aes(params_b, abs_r, colour = family)) +
+  geom_line(aes(group = family, linetype = arch_lab), linewidth = 0.75) +
+  geom_point(size = 2.4) +
+  geom_text_repel(aes(label = lbl), size = 2.9, direction = "y", nudge_y = vsize$ny,
+                  box.padding = 0.25, point.padding = 0.2, max.overlaps = Inf,
+                  min.segment.length = 0, segment.colour = "grey70",
+                  segment.size = 0.3, seed = 7, show.legend = FALSE) +
+  geom_text(data = annot, aes(x = 0.098, y = y, label = txt), hjust = 0,
+            size = 2.9, show.legend = FALSE) +
+  annotate("text", x = 0.098, y = 0.5735, hjust = 0, size = 2.9, colour = "grey35",
+           label = "Larger minus smaller, Zou (2007) 95% interval:") +
+  scale_colour_manual(values = FAMILY_COLORS, limits = as.character(size_fams)) +
+  scale_linetype_manual(values = c(generative = "solid", masked = "42")) +
+  scale_x_log10(breaks = c(0.1, 0.3, 1, 3, 10),
+                labels = c("0.1B", "0.3B", "1B", "3B", "10B")) +
+  coord_cartesian(xlim = c(0.095, 11), ylim = c(0.525, 0.641)) +
+  labs(x = "Parameter count (log scale)",
+       y = "Validity — |Pearson r| with holistic score",
+       colour = "Model family", linetype = "Architecture",
+       title = "Concurrent validity by parameter count within family (ELLIPSE)",
+       subtitle = paste("At the 8-token window, on the same y-axis as the window figure. A 3x to 10x",
+                        "parameter increase within a family moves |r| by at most .012, against the .04",
+                        "to .09 the context window costs on the same axis.", sep = "\n")) +
+  theme_study1(11) +
+  theme(legend.position = "bottom", legend.box = "vertical",
+        legend.margin = margin(t = 0, b = 0),
+        legend.spacing.y = grid::unit(1, "pt"),
+        legend.key.spacing.x = grid::unit(3, "pt"),
+        plot.title.position = "plot",
+        plot.title = element_text(size = 11.5),
+        plot.subtitle = element_text(size = 8.5),
+        axis.title.y = element_text(size = 9.5)) +
+  guides(colour   = guide_legend(nrow = 1, order = 1,
+                                 override.aes = list(size = 2.2)),
+         linetype = guide_legend(nrow = 1, order = 2,
+                                 override.aes = list(colour = "grey25")))
+p_size
+save_fig(p_size, "validity_by_size_ellipse", width = 6.5, height = 5.2)
+
+size_zou |>
+  select(pair, abs_r_a, abs_r_b, diff, lo, hi, p) |>
+  mutate(across(where(is.numeric), \(x) round(x, 4))) |>
+  knitr::kable(caption = "Within-family parameter-count contrasts at window 8 (Zou 2007 intervals on the difference in |r|).")
+```
+
+Only one of the three within-family contrasts is null. ModernBERT gains 0.012
+[0.010, 0.014] of `|r|` from base to large and GPT-2 gains 0.006 [0.003, 0.008]
+from 124M to 1.5B, and on 6,482 essays neither interval reaches zero. The
+OLMo-2 contrast, the one the selection rule turns on, is 0.0007 [-0.0012,
++0.0025] for a sevenfold increase in parameters, and does.
+
+The reading the figure is drawn to support is therefore comparative rather than
+null. Against the .04 to .09 of `|r|` the context window costs the generative
+models on the same axis, an order of magnitude in parameters is worth about a
+tenth as much, and within the class the selection actually chooses from it is
+worth nothing the design can resolve. That is what licenses treating parameter
+count as a cost to be minimized rather than as a validity lever, which is the
+step the class-based rule takes.
+
 # Section 5 — Pareto Plot
 
 Windows are stacked rather than placed side by side. The figure is reproduced at
