@@ -94,6 +94,7 @@ src/
     paths.py                # Canonical path constants (DATA_DIR, DOLMA_DIR, ELLIPSE_DIR, …)
     process_docs.py         # Batch spaCy DocBin processing utilities
     collation.py            # N-gram / depgram counting and parquet writers
+    text_heatmap.R          # Token-level text heat map for the R/Quarto reports
   reference_corpus/         # Dolma reference-corpus pipeline (run in order)
     dolma_config.py         # Dolma sources and per-corpus sampling targets
     dolma_stream.py         # Streaming Dolma reader/sampler

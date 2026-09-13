@@ -21,6 +21,10 @@ plus the `pareto-*.qmd` reports, which run on the §2 outputs.
   over the matrix and writes idempotent, resumable per-model tables.
 - `assemble_analysis_data.py` — exports the per-model surprisal parquets to tidy
   long CSVs under `results/predictability/` for the R/Quarto analysis.
+- `self_conditioning_example.py` — per-token surprisal for the worked example
+  behind the H2 discussion. Scores three TOEFL 11 responses that each repeat one
+  non-standard form, at all three windows with the selected configuration, and
+  writes `results/predictability/self_conditioning_tokens.csv`.
 - `pareto-analysis.qmd`, `pareto-by-proficiency.qmd` — validity/fairness Pareto
   reports (§3); `_viz_helpers.R` holds shared plotting helpers and the figure
   save helper (vector PDF plus a 400 dpi PNG).
@@ -50,6 +54,18 @@ plus the `pareto-*.qmd` reports, which run on the §2 outputs.
   truncated `|r|` range so the window effect and the size effect are directly
   comparable by eye; TOEFL 11 gets its own range, since a three-category
   criterion attenuates the coefficient.
+- `window-self-conditioning.qmd` — the worked example for the H2 reversal. H2
+  predicted validity would rise with the context window and it falls, and the
+  explanation offered is that a long window conditions the model on the writer's
+  own earlier production, so a non-standard form the writer has already used
+  becomes cheap on its next appearance. The report shows this at the token level
+  in response `704896.txt`, which pluralises *people* as *peoples* twelve times
+  while also using the standard form three times, so both can be scored inside
+  one text. At window 8 the measure charges the non-standard form 10.4 bits more
+  than the standard one; with the full essay as context it charges 0.9 bits. The
+  figure pairs a two-panel text heat map (`src/util/text_heatmap.R`) with the
+  per-occurrence trend. This is an illustration of a mechanism rather than an
+  estimate of its size, and the report says so.
 - `proficiency-confound-sensitivity.qmd` — bounds how much of the cross-L1
   displacement could be within-band proficiency rather than L1. TOEFL 11's
   proficiency scale has only three levels, so stratifying on it (or residualizing
@@ -118,7 +134,8 @@ rendered output until this is run. They read only the tidy CSVs from
 
 ```bash
 python src/1-predictability-benchmark/assemble_analysis_data.py   # if not already done
-quarto render src/1-predictability-benchmark                      # all three reports
+python src/1-predictability-benchmark/self_conditioning_example.py  # for window-self-conditioning.qmd
+quarto render src/1-predictability-benchmark                      # all four reports
 ```
 
 Render one at a time with `quarto render src/1-predictability-benchmark/<file>.qmd`.

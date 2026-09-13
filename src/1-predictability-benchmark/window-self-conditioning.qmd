@@ -1,0 +1,236 @@
+---
+title: "Study 1 — Why Validity Falls as the Context Window Grows"
+subtitle: "A worked example of self-conditioning on a writer's own non-standard forms"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Overview
+
+Hypothesis 2 predicted that a wider context window would raise concurrent
+validity, on the reasoning that a wider window adds sensitivity to
+discourse-level coherence. The benchmark finds the opposite. Validity declines
+monotonically from the 8-token window to the full essay, and the decline is
+steepest for the generative models, which condition only on the writer's
+preceding text.
+
+The conjecture offered for that reversal is that conditioning on a long span of
+a writer's own production yields a partly writer-specific estimate. As the
+window grows it comes to include more of what the writer has already written,
+including any non-standard forms that production contains, and a form that has
+already appeared becomes cheaper when it appears again. On this account a
+writer who is consistently unusual becomes progressively more predictable, so
+what the measure indexes shifts from conventionality with respect to the target
+language toward internal self-consistency.
+
+This notebook is not a test of that conjecture across the corpus. It is a
+worked example that shows the mechanism operating in one TOEFL 11 response, at
+the token level, with the selected Study 1 configuration. Its purpose is to
+make the proposed mechanism concrete and to put a number on how much of the
+measure's discriminating power the wide window gives up.
+
+Input is `results/predictability/self_conditioning_tokens.csv`, written by
+`self_conditioning_example.py`.
+
+# Section 1. Setup
+
+```{r}
+#| label: setup
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+for (hp in c("_viz_helpers.R", "src/1-predictability-benchmark/_viz_helpers.R")) {
+  if (file.exists(hp)) { source(hp); break }
+}
+for (th in c("../util/text_heatmap.R", "src/util/text_heatmap.R")) {
+  if (file.exists(th)) { source(th); break }
+}
+
+find_results <- function() {
+  d <- normalizePath(getwd())
+  for (i in 1:6) {
+    cand <- file.path(d, "results", "predictability")
+    if (dir.exists(cand)) return(cand)
+    d <- dirname(d)
+  }
+  stop("results/predictability not found — run self_conditioning_example.py first")
+}
+RESULTS <- find_results()
+
+# The essay carrying the figure. It is the one response in the scan that uses
+# both the non-standard form and its conventional counterpart, which is what
+# lets the two be compared inside a single text with prompt, topic, and writer
+# all held constant.
+EXAMPLE <- "704896.txt"
+
+# Last token of the excerpt the heatmap renders. Chosen at a sentence boundary
+# that closes the opening third of the essay, by which point the writer has used
+# the standard form three times and the non-standard form three times. The
+# occurrence trend below is computed over the whole essay, not the excerpt.
+EXCERPT_END <- 111
+
+WIN_LABELS <- c("8" = "8-token window", "64" = "64-token window",
+                "full" = "Full essay as context")
+WIN_COLORS <- c("8-token window" = "#0072B2", "64-token window" = "#999999",
+                "Full essay as context" = "#CC79A7")
+
+tok <- read_csv(file.path(RESULTS, "self_conditioning_tokens.csv"),
+                show_col_types = FALSE) |>
+  mutate(window_lab = factor(WIN_LABELS[window], levels = unname(WIN_LABELS)))
+
+ex <- filter(tok, text_id == EXAMPLE)
+TARGET   <- "peoples"
+STANDARD <- "people"
+
+ex |>
+  distinct(text_id, l1, level, prompt) |>
+  knitr::kable(caption = "The example response")
+```
+
+# Section 2. What the model charges for the error
+
+The essay pluralises *people* as *peoples* twelve times, and also uses the
+standard form three times. Both forms can therefore be scored under identical
+conditions, and the difference between them is what the measure is charging for
+the error.
+
+```{r}
+#| label: gap-table
+gap <- ex |>
+  filter(form != "other") |>
+  # The first occurrence of the target has no prior instance to condition on, so
+  # it measures something different from the later ones and is held out here.
+  filter(!(form == "target" & occurrence == 1)) |>
+  group_by(window_lab, form) |>
+  summarise(mean_bits = mean(surprisal_bits), n = n(), .groups = "drop") |>
+  pivot_wider(names_from = form, values_from = c(mean_bits, n)) |>
+  mutate(gap_bits = mean_bits_target - mean_bits_standard)
+
+gap |>
+  select(`Context window` = window_lab,
+         `"peoples" (later occurrences)` = mean_bits_target,
+         `"people" (standard)` = mean_bits_standard,
+         `Gap` = gap_bits) |>
+  knitr::kable(digits = 2,
+               caption = "Mean surprisal in bits, OLMo-2 1B. The gap is what the measure charges for the non-standard form.")
+```
+
+```{r}
+#| label: baseline-table
+# The comparison that rules out the trivial reading. Every token gets cheaper
+# with more context, so the question is whether the repeated non-standard form
+# gets cheaper faster than the essay's own baseline.
+ex |>
+  mutate(grp = case_when(
+    form == "target" & occurrence == 1 ~ "Target, first occurrence",
+    form == "target"                   ~ "Target, later occurrences",
+    TRUE                               ~ "All other tokens")) |>
+  group_by(grp, window) |>
+  summarise(bits = mean(surprisal_bits), .groups = "drop") |>
+  pivot_wider(names_from = window, values_from = bits) |>
+  mutate(`Drop, 8 to full` = `8` - full) |>
+  select(Tokens = grp, `Window 8` = `8`, `Window 64` = `64`,
+         `Full essay` = full, `Drop, 8 to full`) |>
+  arrange(Tokens) |>
+  knitr::kable(digits = 2,
+               caption = "Mean surprisal in bits by token group.")
+```
+
+# Section 3. Figure
+
+```{r}
+#| label: fig-self-conditioning
+#| fig-width: 9
+#| fig-height: 8.6
+heat_dat <- ex |>
+  filter(spacy_idx <= EXCERPT_END, window %in% c("8", "full")) |>
+  arrange(window_lab, spacy_idx)
+
+# One fill scale for both panels, since the comparison the figure asks the
+# reader to make is between the same word in two panels. The top of the range is
+# squished rather than extended so the ordinary variation stays legible.
+LIMITS <- c(0, 16)
+
+p_heat <- text_heatmap(
+  heat_dat, token = "token", value = "surprisal_bits",
+  panel = "window_lab", space_after = "space_after",
+  highlight = c(TARGET, STANDARD),
+  width = 95, limits = LIMITS, label_size = 3.3,
+  legend_title = "Surprisal\n(bits)"
+) +
+  labs(title = "The same words, scored twice",
+       subtitle = paste0(
+         "Opening third of TOEFL 11 response ", EXAMPLE, ". Outlined tokens are\n",
+         "“peoples” (non-standard) and “people” (standard). The first “peoples” is\n",
+         "costly under both windows, since nothing earlier in the essay predicts it.\n",
+         "The next two are costly only under the 8-token window."))
+
+occ <- ex |>
+  filter(form == "target") |>
+  select(occurrence, window_lab, surprisal_bits)
+
+p_occ <- ggplot(occ, aes(occurrence, surprisal_bits,
+                         colour = window_lab, group = window_lab)) +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 1.9) +
+  scale_colour_manual(values = WIN_COLORS, name = NULL) +
+  scale_x_continuous(breaks = seq(1, max(occ$occurrence), 1)) +
+  labs(x = paste0("Occurrence of “", TARGET, "” in reading order"),
+       y = "Surprisal (bits)",
+       title = "Each time the form reappears",
+       subtitle = paste(
+         "All twelve occurrences, whole essay. The 8-token window never reaches back far enough to\n",
+         "include an earlier use, so it charges close to full price every time. Occurrence 1 has no\n",
+         "earlier use for any window, so the gap there is ordinary context benefit rather than repetition.")) +
+  theme_study1(base_size = 10) +
+  theme(legend.position = "bottom",
+        plot.subtitle = element_text(size = 8, colour = "grey30"))
+
+p <- p_heat / p_occ + plot_layout(heights = c(2.4, 1)) +
+  plot_annotation(tag_levels = "A")
+p
+save_fig(p, "self_conditioning_example", width = 9, height = 8.6)
+```
+
+# Section 4. Reading the figure
+
+Panel A shows the opening third of the response twice, once scored with an
+8-token window and once with the whole essay as context. Outlined tokens are the
+non-standard *peoples* and the standard *people*. The excerpt holds the first
+three uses of *peoples*. The first stays dark in both panels, since no earlier
+use predicts it under either window. The second and third are dark under the
+8-token window and take the same pale value as the standard *people* beside them
+once the whole essay is available, which is the shift the figure is about.
+
+Panel B follows every occurrence of *peoples* through the essay. Under the
+8-token window the twelve occurrences stay between 9.9 and 21.8 bits with no
+trend, because the window never reaches back far enough to include an earlier
+use. Under the full essay the first occurrence costs 12.9 bits and the later
+ones fall towards the floor, reaching 0.6 bits at three separate points.
+
+Two features of the example are worth stating rather than leaving to the reader.
+
+First, the repeated form is also a lexical repetition, and repetition makes any
+unpredictable word cheaper. Topic words in this essay fall by comparable
+amounts. The claim the example supports is therefore not that errors are treated
+specially. It is that standard forms begin cheap and have little room to fall,
+while non-standard forms begin expensive and fall furthest, so what erodes as
+the window widens is specifically the price of being unconventional.
+
+Second, the three standard *people* tokens sit early in the response while the
+*peoples* tokens run to the end, so the two sets are not matched on position.
+The gap closes because the non-standard form becomes cheap, not because the
+standard form becomes expensive, and the table in Section 2 shows the standard
+form barely moving across windows. The asymmetry does not produce the effect,
+though it does mean the example is an illustration of a mechanism rather than an
+estimate of its size.
