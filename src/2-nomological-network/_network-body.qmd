@@ -254,28 +254,23 @@ short_labels <- c(
 
 net_labels <- short_labels[node_order]
 
-# --- Visual encoding: COLOUR = theoretical construct ------------------------
-# Shape is reserved for the empirically derived EGA communities (Section 3)
-# Colors for theoretical/predicted constructs
-
-construct_colors <- setNames(
-  hcl(h = c(70, 250, 140, 320, 20), c = 20, l = c(94, 85, 76, 67, 58)),
-  names(construct_members)
-)
-
+# Which a priori construct each node belongs to. Shape encodes this (see the
+# `define-shapes` chunk); colour is reserved for the empirically derived EGA
+# communities, which are not known until Section 3.
 node_construct <- rep(NA_character_, length(node_order))
 names(node_construct) <- node_order
 for (g in names(construct_members)) {
   node_construct[construct_members[[g]]] <- g
 }
 node_construct <- node_construct[node_order]
-node_colors <- unname(construct_colors[node_construct])
 ```
 
 ```{r}
 #| label: define-shapes
 
-# --- Visual encoding: SHAPE = empirical EGA community -----------------------
+# --- Visual encoding: SHAPE = a priori theoretical construct ----------------
+# Colour goes to the empirical EGA communities (Section 3) because readers go to
+# colour first and will take whatever it encodes to be the discovered grouping.
 # qgraph ships a few poor quality shapes. Both the rhombus and the 5-pointed
 # star are supplied as custom polygons
 
@@ -295,6 +290,15 @@ shape_scale <- c(circle = 1, square = 1, triangle = 1.3, rhombus = 1.15, star = 
 
 # Plotting-character equivalents, for the shape half of the legend
 shape_pch <- c(circle = 21, square = 22, triangle = 24, rhombus = 23, star = 8)
+
+# One shape per theoretical construct, in the order the constructs are declared.
+stopifnot(length(construct_members) <= length(shape_pool))
+construct_shapes <- setNames(shape_pool[seq_along(construct_members)],
+                             names(construct_members))
+node_shapes <- unname(construct_shapes[node_construct])
+
+# Node sizes follow the shape, so they are fixed here rather than per-figure.
+node_vsize <- unname(7.5 * shape_scale[node_shapes])
 ```
 
 # Section 2. Descriptive Statistics and Correlation Matrix
@@ -397,20 +401,31 @@ cat("Number of communities detected:", ega_result$n.dim, "\n")
 ```{r}
 #| label: community-aesthetics
 
+# --- Visual encoding: COLOUR = empirical EGA community ----------------------
 # The full-sample community assignment is reused for every network plot,
 # including the proficiency-group panels in Section 9.
+#
+# Hues are the Okabe-Ito qualitative set, lightened toward white so that the
+# dark node labels stay legible on the fill. Lightening preserves the hue
+# separation that makes the set colour-vision-deficiency safe.
+lighten <- function(hex, toward_white = 0.40) {
+  v <- col2rgb(hex)[, 1]
+  v <- round(v + toward_white * (255 - v))
+  rgb(v[["red"]], v[["green"]], v[["blue"]], maxColorValue = 255)
+}
+color_pool <- vapply(c("#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2"),
+                     lighten, character(1), USE.NAMES = FALSE)
+
 comm_ids <- sort(unique(ega_result$wc))
 comm_n <- as.integer(table(factor(ega_result$wc, levels = comm_ids)))
-community_shapes <- setNames(
-  shape_pool[seq_along(comm_ids)],
+stopifnot(length(comm_ids) <= length(color_pool))
+community_colors <- setNames(
+  color_pool[seq_along(comm_ids)],
   paste0("Community ", comm_ids, " (", comm_n, ")")
 )
-node_shapes <- unname(community_shapes[match(ega_result$wc[node_order], comm_ids)])
+node_colors <- unname(community_colors[match(ega_result$wc[node_order], comm_ids)])
 
-# Node sizes are fixed here (not per-figure)
-node_vsize <- unname(7.5 * shape_scale[node_shapes])
-
-cat("Construct (colour) x EGA community (shape):\n")
+cat("Construct (shape) x EGA community (colour):\n")
 print(table(Construct = factor(node_construct, levels = names(construct_members)),
             Community = ega_result$wc[node_order]))
 cat("\nPer-node assignment:\n")
@@ -471,20 +486,20 @@ spring_coords <- function(graph, seed = 42) {
 }
 
 # Legend in its own panel so it doesn't overlap the graph. Three blocks:
-# shape (the primary reading), colour (secondary), edge style (sign).
-draw_network_legend <- function(cex = 0.82, swatches = construct_colors) {
+# colour (the primary reading), shape (secondary), edge style (sign).
+draw_network_legend <- function(cex = 0.82, swatches = community_colors) {
   op <- par(mar = c(0, 0, 0, 0))
   on.exit(par(op))
   plot.new()
   plot.window(xlim = c(0, 1), ylim = c(0, 1))
-  legend(0, 0.98, legend = names(community_shapes),
-         pch = unname(shape_pch[community_shapes]), pt.bg = "grey92",
-         col = "grey10", pt.lwd = 1.6, pt.cex = 1.8, cex = cex, bty = "n",
-         title = "EGA community (shape)", title.adj = 0, y.intersp = 1.3)
-  legend(0, 0.70, legend = names(construct_colors), pch = 22,
+  legend(0, 0.98, legend = names(community_colors), pch = 22,
          pt.bg = unname(swatches), col = "grey45", pt.cex = 1.8,
-         cex = cex, bty = "n", title = "Construct (colour)",
+         cex = cex, bty = "n", title = "EGA community (colour)",
          title.adj = 0, y.intersp = 1.3)
+  legend(0, 0.70, legend = names(construct_shapes),
+         pch = unname(shape_pch[construct_shapes]), pt.bg = "grey92",
+         col = "grey10", pt.lwd = 1.6, pt.cex = 1.8, cex = cex, bty = "n",
+         title = "Construct (shape)", title.adj = 0, y.intersp = 1.3)
   legend(0, 0.34, legend = c("positive", "negative"), lty = c(1, 2),
          lwd = 2.4, col = "grey25", cex = cex, bty = "n",
          title = "Partial correlation", title.adj = 0, y.intersp = 1.3)
@@ -499,7 +514,7 @@ draw_network_legend <- function(cex = 0.82, swatches = construct_colors) {
 plot_network <- function(graph, coords, title = "", legend = TRUE,
                          minimum = 0.05, cut = 0.10, color = node_colors,
                          posCol = "#2166AC", negCol = "#B2182B",
-                         swatches = construct_colors, ...) {
+                         swatches = community_colors, ...) {
   if (legend) graphics::layout(matrix(1:2, nrow = 1), widths = c(1, 0.32))
   qg <- qgraph(graph,
                layout = coords,
@@ -537,18 +552,19 @@ plot_network <- function(graph, coords, title = "", legend = TRUE,
 
 # Section 4. Network Visualization
 
-Node **shape** encodes the empirically derived EGA community. That is the
-primary reading, and the one channel that survives black-and-white printing.
-Node **colour** is the a priori theoretical construct, deliberately desaturated
-so it sits behind the shapes. Nodes whose colour disagrees with the shapes
-around them are the cases where the data depart from the a priori grouping.
-Solid edges are positive partial correlations, dashed edges negative.
+Node **colour** encodes the empirically derived EGA community. That is the
+primary reading. Colour is the channel readers go to first, so it carries the
+grouping that the data produced rather than the one assumed going in. Node
+**shape** is the a priori theoretical construct. Nodes whose shape disagrees
+with the colours around them are the cases where the data depart from the a
+priori grouping. Solid edges are positive partial correlations, dashed edges
+negative.
 
 ```{r}
 #| label: network-spring
 #| fig-cap: >-
-#|   GGM network (spring layout, Fruchterman-Reingold). Shape = EGA community,
-#|   colour = theoretical construct; edges below |.05| omitted.
+#|   GGM network (spring layout, Fruchterman-Reingold). Colour = EGA community,
+#|   shape = theoretical construct; edges below |.05| omitted.
 #| fig-width: 13
 #| fig-height: 8.5
 
@@ -572,7 +588,7 @@ cat("Saved to", fig_path("network_spring.pdf"), "\n")
 ```{r}
 #| label: network-circle
 #| fig-cap: >-
-#|   GGM network (circle layout). Shape = EGA community, colour = theoretical
+#|   GGM network (circle layout). Colour = EGA community, shape = theoretical
 #|   construct; edges below |.05| omitted.
 #| fig-width: 12
 #| fig-height: 10
@@ -589,22 +605,24 @@ plot_network(network$graph, circle_layout,
 ```{r}
 #| label: network-spring-greyscale
 #| fig-cap: >-
-#|   Greyscale proof of the spring-layout network: community (shape) and edge
-#|   sign (dash) remain readable without colour.
+#|   Greyscale proof of the spring-layout network. Communities are re-encoded on
+#|   an even grey ramp; construct (shape) and edge sign (dash) are unaffected.
 #| fig-width: 13
 #| fig-height: 8.5
 
-# Print check. Constructs collapse onto the grey ramp reported in Section 1;
-# communities and edge sign are unaffected because neither is carried by hue.
-grey_construct <- sapply(construct_colors, function(x) {
-  rgb <- col2rgb(x) / 255
-  grey(0.2126 * rgb[1] + 0.7152 * rgb[2] + 0.0722 * rgb[3])
-})
+# Print check. Luminance-converting the Okabe-Ito tints collapses them onto
+# nearly the same grey, so for black-and-white output the communities are
+# re-encoded on an evenly spaced ramp instead. Construct and edge sign carry
+# over untouched, since neither is a hue.
+grey_community <- setNames(
+  grey(seq(0.93, 0.55, length.out = length(community_colors))),
+  names(community_colors)
+)
 
 plot_network(network$graph, spring_layout,
              title = "GGM Network, Greyscale Proof",
-             color = unname(grey_construct[node_construct]),
-             swatches = grey_construct,
+             color = unname(grey_community[match(ega_result$wc[node_order], comm_ids)]),
+             swatches = grey_community,
              posCol = "grey20", negCol = "grey20")
 ```
 
@@ -745,6 +763,100 @@ cat("\nItem stability (proportion of bootstraps in which each node is",
 item_stab <- dim_stab$item.stability$item.stability$empirical.dimensions
 names(item_stab) <- short_labels[names(item_stab)]
 print(round(sort(item_stab), 3))
+```
+
+## Which communities merge when a bootstrap returns fewer
+
+Structural consistency says *how often* a community is recovered but not *what
+happens to it* when it is not. `bootEGA` keeps every bootstrap's membership
+vector, so the merge pattern is recoverable without re-resampling.
+
+```{r}
+#| label: boot-merge-pattern
+
+# `boot.wc` is iterations x nodes, but its columns are named V01..Vnn in the
+# original column order rather than by variable, so the names are restored
+# positionally. Asserted rather than assumed.
+boot_wc <- boot_ega$boot.wc
+stopifnot(ncol(boot_wc) == length(ega_result$wc))
+colnames(boot_wc) <- names(ega_result$wc)
+
+emp_ids <- sort(unique(ega_result$wc))
+fewer <- which(boot_ega$boot.ndim < ega_result$n.dim)
+
+# Each empirical community is mapped to the bootstrap community that most of its
+# members landed in. Empirical communities sharing one bootstrap community are
+# the ones that merged, so the signature "1+4 | 2 | 3" reads as community 4
+# absorbed into community 1 with 2 and 3 intact.
+merge_pattern <- vapply(fewer, function(i) {
+  bw <- setNames(as.integer(boot_wc[i, ]), colnames(boot_wc))
+  landed <- vapply(emp_ids, function(k) {
+    v <- bw[names(ega_result$wc)[ega_result$wc == k]]
+    v <- v[!is.na(v)]
+    if (!length(v)) NA_integer_
+    else as.integer(names(sort(table(v), decreasing = TRUE))[1])
+  }, integer(1))
+  if (anyNA(landed)) return(NA_character_)
+  paste(vapply(split(emp_ids, landed), paste, character(1), collapse = "+"),
+        collapse = " | ")
+}, character(1))
+merge_pattern <- merge_pattern[!is.na(merge_pattern)]
+
+cat("Bootstraps returning fewer than", ega_result$n.dim, "communities:",
+    length(fewer), "of", boot_ega$iter, "\n\n")
+if (length(merge_pattern)) {
+  cat("Which empirical communities merged (a '+' joins the merged pair):\n")
+  print(sort(table(merge_pattern), decreasing = TRUE))
+} else {
+  cat("No sub-dimensional bootstraps to summarize.\n")
+}
+```
+
+```{r}
+#| label: boot-drop-bridge
+
+# The merge above is carried by a single node. MTLD is the only variable in the
+# battery with a substantial loading on two communities, positive on the lexical
+# one and negative on the cohesion one, and its overlap with content word
+# overlap is the strongest cross-community pair in the UVA screen. Holding it
+# out tests whether it is what holds the two communities together.
+#
+# A second bootEGA, so this costs about as much as the one above.
+bridge <- "mtld"
+stopifnot(bridge %in% names(df_net))
+df_nobridge <- df_net[, setdiff(names(df_net), bridge)]
+
+# Holding a node out can move the empirical solution itself, so the reduced
+# battery gets its own EGA. Without it there is nothing to read the reduced
+# bootstrap against, and P(k) taken from the FULL battery's community count
+# would be scoring two different targets with one number.
+ega_nobridge <- EGA(df_nobridge, corr = "spearman", model = "glasso",
+                    algorithm = "walktrap", na.data = "pairwise",
+                    plot.EGA = FALSE)
+
+set.seed(42)
+boot_ega_nobridge <- bootEGA(df_nobridge, iter = 500, corr = "spearman",
+                             model = "glasso", algorithm = "walktrap",
+                             na.data = "pairwise", type = "parametric",
+                             verbose = FALSE)
+
+# $frequency is a two-column data frame of (# of Factors, Frequency).
+prop_dim <- function(b, k) {
+  f <- b$frequency
+  hit <- which(f[[1]] == k)
+  if (length(hit)) f[[2]][hit[1]] else 0
+}
+
+cat("Full battery, empirical n.dim =", ega_result$n.dim, "\n")
+print(round(boot_ega$frequency, 3))
+cat("\nHolding out ", bridge, ", empirical n.dim = ", ega_nobridge$n.dim, "\n", sep = "")
+print(round(boot_ega_nobridge$frequency, 3))
+
+# Each battery scored against its own empirical solution.
+cat(sprintf("\nStability of each battery's own solution:\n  full battery      P(%d) = %.3f\n  without %-8s  P(%d) = %.3f\n",
+            ega_result$n.dim, prop_dim(boot_ega, ega_result$n.dim),
+            bridge, ega_nobridge$n.dim,
+            prop_dim(boot_ega_nobridge, ega_nobridge$n.dim)))
 ```
 
 # Section 7. Network Stability (bootnet)
@@ -912,8 +1024,8 @@ print(sapply(nets_prof, function(n) sum(n$graph[upper.tri(n$graph)] != 0)))
 ```{r}
 #| label: group-network-plots
 #| fig-cap: >-
-#|   Network comparison across three equal-bin proficiency groups. Shape =
-#|   full-sample EGA community, colour = theoretical construct; layout, edge
+#|   Network comparison across three equal-bin proficiency groups. Colour =
+#|   full-sample EGA community, shape = theoretical construct; layout, edge
 #|   scaling and the |.05| display threshold are shared across panels.
 #| fig-width: 18
 #| fig-height: 6
@@ -1059,6 +1171,52 @@ print(inv$results)   # per-node loading differences + permutation p-values
 ```
 
 ```{r}
+#| label: gradation-note
+#| echo: false
+#| output: asis
+
+# The monotone Low > Mid > High pattern in the table above is the natural thing
+# for a reader to attribute to predictability as a whole. It belongs to one of
+# the two predictability nodes, so the callout below says which, and is written
+# only for the full-battery run where both are present to compare.
+if (length(pred_vars) > 1) {
+  diffs <- function(v) vapply(inv$results, function(d) d[v, "Difference"], numeric(1))
+  # A true minus sign, so the computed numbers match the typography of the rest
+  # of the notebook rather than showing an ASCII hyphen.
+  fmt <- function(v) gsub("-", "\u2212",
+                          paste(sprintf("%+.2f", diffs(v)), collapse = ", "))
+  bh <- function(v) vapply(inv$results, function(d) d[v, "p_BH"], numeric(1))
+
+  # The claim about BH significance is read off the table rather than asserted,
+  # since invariance() is a permutation test and the p-values move a little.
+  graded <- c("log_mean_token_freq", "var_loss")
+  n_sig <- sum(vapply(graded, function(v) sum(bh(v) < 0.05), integer(1)))
+  flat_sig <- sum(bh("mean_loss") < 0.05)
+
+  cat(sprintf(
+"::: {.callout-important}
+## The proficiency gradation belongs to `var_loss`, not to predictability at large
+
+Reading the three contrasts in order (Low−Mid, Low−High, Mid−High),
+`log_mean_token_freq` (%s) and `var_loss` (%s) both fall monotonically, and %d
+of those six differences survive BH correction. `mean_loss` (%s) is flat, with
+%d of three significant.
+
+Holding `var_loss` out does not hand the gradation to `mean_loss`. In
+`sensitivity/network-no-varloss.qmd` its three differences are −0.03, −0.08 and
+−0.05, so the sign reverses to Low < High and nothing survives BH correction.
+
+The two predictability nodes are redundant in level (wTO = .52, Spearman .81)
+but they are not interchangeable across proficiency. Whatever weakens the
+loading of `var_loss` on this community as proficiency rises leaves `mean_loss`
+invariant. That is an empirical reason to keep both, separate from the
+theoretical one.
+:::\n\n",
+    fmt("log_mean_token_freq"), fmt("var_loss"), n_sig, fmt("mean_loss"), flat_sig))
+}
+```
+
+```{r}
 #| label: compare-predictability
 
 # Predictability-focused edge comparison: partial correlation in each of the
@@ -1107,6 +1265,11 @@ cent_sorted    <- cent %>% arrange(desc(Strength))
 loss_rank      <- which(cent_sorted$Variable == focal_label)
 n_nodes        <- nrow(cent_sorted)
 mi_same_comm   <- unname(pred_comm == ega_result$wc["amod_mi"])
+
+# The strength rank is redundancy-sensitive whenever both predictability nodes
+# are in (see the caveat under Node importance), so the table cell points there.
+mod2_cell <- sprintf("`%s` strength rank = %d of %d%s", focal, loss_rank, n_nodes,
+                     if (length(pred_vars) > 1) ", see the caveat in section 2" else "")
 ```
 
 ## 1. Community structure (EGA)
@@ -1135,6 +1298,27 @@ for (v in pred_vars) {
 cross-community loading of `r loss_max_cross`. As a secondary check, its raw
 strength rank is `r loss_rank` of `r n_nodes`.
 
+```{r}
+#| label: summary-importance-caveat
+#| echo: false
+#| output: asis
+
+# Only the full battery has a redundancy to caveat. The cross-notebook ranks are
+# quoted rather than computed, since neither sensitivity run is in scope here.
+if (length(pred_vars) > 1) {
+  cat(
+"**That rank is inflated by redundancy.** `mean_loss` and `var_loss` overlap at
+wTO = .52, so each raises the other's strength. Holding `var_loss` out moves
+`mean_loss` from rank 1 of 15 to rank 2 of 14, into a near-tie with lexical
+density and token frequency, and holding `mean_loss` out leaves `var_loss` at
+rank 11 of 14 (`sensitivity/network-no-varloss.qmd`,
+`sensitivity/network-no-meanloss.qmd`). The community membership and the
+dominant loading survive both tests; the top strength rank does not. Network
+loadings are the confound-adjusted importance metric here, and they are what the
+interpretation rests on.\n\n")
+}
+```
+
 ## 3. Bridge behavior (cross-loadings)
 
 Bridge behavior is read from between-community cross-loadings (Section 8). High
@@ -1146,7 +1330,7 @@ single dominant loading means the node belongs to one community.
   | CFA Model                | Supporting Evidence                                      |
   | ------------------------ | -------------------------------------------------------- |
   | Model 1 (Phraseological) | Predictability shares the MI community: `r mi_same_comm` |
-  | Model 2 (General factor) | `r focal` strength rank = `r loss_rank` of `r n_nodes`   |
+  | Model 2 (General factor) | `r mod2_cell`                                            |
   | Novel finding            | See community membership in Section 6                    |
 
 ## 5. Stability
