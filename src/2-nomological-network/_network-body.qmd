@@ -2,13 +2,19 @@
 The network analysis itself. This file is the single source for three
 notebooks, which differ only in which predictability nodes they keep:
 
-  network-analysis.qmd                     drop_var <- NULL         (15 nodes)
-  sensitivity/network-no-varloss.qmd       drop_var <- "var_loss"   (14 nodes)
-  sensitivity/network-no-meanloss.qmd      drop_var <- "mean_loss"  (14 nodes)
+  network-analysis.qmd                        drop_var <- NULL        (15 nodes)
+  sensitivity/network-no-varloss.qmd          drop_var <- "var_loss"  (14 nodes)
+  sensitivity/network-no-meanloss.qmd         drop_var <- "mean_loss" (14 nodes)
+  sensitivity/network-no-predictability.qmd   drop_var <- both        (13 nodes)
 
 Each parent sets `drop_var` and then includes this file. Nothing below names
 mean_loss or var_loss directly; the code works from `pred_vars` (retained) and
 `focal` (the first retained node). See the `resolve-drop` chunk.
+
+The both-held-out run retains NO predictability node, so `pred_vars` is empty
+and `focal` is NA. Every section that reads a focal node guards on
+`has_focal` and reports the dependency-MI community instead, which is the
+comparison that run exists to make.
 
 The leading underscore keeps Quarto's project render from treating this as a
 document in its own right, and include paths are relative to the parent, so the
@@ -35,18 +41,24 @@ library(lavaan)
 ```{r}
 #| label: resolve-drop
 
-# `drop_var` is set by the parent notebook before this body is included. 
-# NULL keeps the full battery (the main analysis); a variable name holds that one
-# predictability node out (a sensitivity run). Everything downstream works from
-# `pred_vars` (what is retained) and `focal` (the first retained node) instead
-# of naming mean_loss or var_loss, so the three notebooks differ only here.
+# `drop_var` is set by the parent notebook before this body is included.
+# NULL keeps the full battery (the main analysis); one or both predictability
+# node names hold those out (a sensitivity run). Everything downstream works
+# from `pred_vars` (what is retained) and `focal` (the first retained node)
+# instead of naming mean_loss or var_loss, so the notebooks differ only here.
 stopifnot(exists("drop_var"))
 pred_all <- c("mean_loss", "var_loss")
 stopifnot(is.null(drop_var) ||
-          (length(drop_var) == 1 && drop_var %in% pred_all))
+          (length(drop_var) %in% 1:2 && !anyDuplicated(drop_var) &&
+           all(drop_var %in% pred_all)))
 
 pred_vars <- setdiff(pred_all, drop_var)
-focal <- pred_vars[1]
+
+# With both held out there is no focal node. `has_focal` gates every section
+# that reads one; those sections fall back to the dependency-MI community,
+# which is what the both-held-out run is for.
+has_focal <- length(pred_vars) > 0
+focal <- if (has_focal) pred_vars[1] else NA_character_
 
 # Sensitivity runs write to their own directory under a run-specific prefix.
 if (is.null(drop_var)) {
@@ -54,7 +66,11 @@ if (is.null(drop_var)) {
   fig_prefix <- ""
 } else {
   fig_dir <- "fig/sensitivity"
-  fig_prefix <- paste0("no-", gsub("_", "", drop_var), "_")
+  fig_prefix <- if (length(drop_var) == length(pred_all)) {
+    "no-predictability_"
+  } else {
+    paste0("no-", gsub("_", "", drop_var), "_")
+  }
 }
 dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
 fig_path <- function(stem) file.path(fig_dir, paste0(fig_prefix, stem))
@@ -96,8 +112,10 @@ save_base_fig <- function(stem, width, height, draw) {
 
 n_cores <- parallel::detectCores() - 1
 
-cat("Held out:", if (is.null(drop_var)) "nothing (full battery)" else drop_var, "\n")
-cat("Predictability nodes retained:", paste(pred_vars, collapse = ", "), "\n")
+cat("Held out:", if (is.null(drop_var)) "nothing (full battery)" else
+                     paste(drop_var, collapse = ", "), "\n")
+cat("Predictability nodes retained:",
+    if (has_focal) paste(pred_vars, collapse = ", ") else "none", "\n")
 cat("Figures ->", fig_path("*.pdf"), "| bootstrap cores:", n_cores, "\n")
 ```
 
@@ -263,6 +281,9 @@ construct_members <- list(
   Cohesion       = c("content_word_overlap", "connective_density", "sentence_similarity"),
   Predictability = pred_vars
 )
+# The both-held-out run has no predictability nodes, and an empty construct
+# would still take a shape and a legend row.
+construct_members <- construct_members[lengths(construct_members) > 0]
 
 # Canonical node order, shared by the full-sample and proficiency-group networks.
 node_order <- feature_vars
@@ -451,18 +472,33 @@ lighten <- function(hex, toward_white = 0.40) {
 color_pool <- vapply(c("#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2"),
                      lighten, character(1), USE.NAMES = FALSE)
 
-comm_ids <- sort(unique(ega_result$wc))
+# EGA returns NA for a node it places in no community, which happens when the
+# glasso zeroes every edge that would have tied it to one. That is a result,
+# not a gap, so such nodes are reported and drawn in neutral grey rather than
+# silently dropped by the table() and match() calls below.
+unassigned <- names(ega_result$wc)[is.na(ega_result$wc)]
+
+comm_ids <- sort(unique(ega_result$wc))   # sort() drops NA
 comm_n <- as.integer(table(factor(ega_result$wc, levels = comm_ids)))
 stopifnot(length(comm_ids) <= length(color_pool))
 community_colors <- setNames(
   color_pool[seq_along(comm_ids)],
   paste0("Community ", comm_ids, " (", comm_n, ")")
 )
+UNASSIGNED_COLOR <- "grey88"
 node_colors <- unname(community_colors[match(ega_result$wc[node_order], comm_ids)])
+node_colors[is.na(node_colors)] <- UNASSIGNED_COLOR
+if (length(unassigned)) {
+  community_colors <- c(community_colors,
+                        setNames(UNASSIGNED_COLOR,
+                                 paste0("Unassigned (", length(unassigned), ")")))
+  cat("Nodes EGA placed in no community:",
+      paste(unname(short_labels[unassigned]), collapse = ", "), "\n\n")
+}
 
 cat("Construct (shape) x EGA community (colour):\n")
 print(table(Construct = factor(node_construct, levels = names(construct_members)),
-            Community = ega_result$wc[node_order]))
+            Community = addNA(ega_result$wc[node_order], ifany = TRUE)))
 cat("\nPer-node assignment:\n")
 print(data.frame(
   Variable  = unname(net_labels),
@@ -652,10 +688,13 @@ grey_community <- setNames(
   grey(seq(0.93, 0.55, length.out = length(community_colors))),
   names(community_colors)
 )
+grey_nodes <- unname(grey_community[match(ega_result$wc[node_order], comm_ids)])
+# Same fallback as the colour version: an unassigned node still needs a fill.
+grey_nodes[is.na(grey_nodes)] <- unname(grey_community[length(grey_community)])
 
 plot_network(network$graph, spring_layout,
              title = "ELLIPSE feature network, greyscale",
-             color = unname(grey_community[match(ega_result$wc[node_order], comm_ids)]),
+             color = grey_nodes,
              swatches = grey_community,
              posCol = "grey20", negCol = "grey20")
 ```
@@ -693,17 +732,22 @@ print(cent %>% arrange(desc(Strength)), digits = 3)
 
 # One column per retained predictability node, ordered by the focal node's
 # edge magnitude so the columns stay comparable across runs.
-adj <- network$graph
-partners <- setdiff(colnames(adj), pred_vars)
+if (!has_focal) {
+  cat("No predictability node is retained in this run, so there are no",
+      "predictability edges to report.\n")
+} else {
+  adj <- network$graph
+  partners <- setdiff(colnames(adj), pred_vars)
 
-pred_edges <- data.frame(Partner = unname(short_labels[partners]))
-for (v in pred_vars) {
-  pred_edges[[unname(short_labels[[v]])]] <- round(adj[v, partners], 3)
+  pred_edges <- data.frame(Partner = unname(short_labels[partners]))
+  for (v in pred_vars) {
+    pred_edges[[unname(short_labels[[v]])]] <- round(adj[v, partners], 3)
+  }
+  pred_edges <- pred_edges[order(-abs(adj[focal, partners])), ]
+
+  cat("Strongest connections of the predictability node(s):\n")
+  print(pred_edges, row.names = FALSE)
 }
-pred_edges <- pred_edges[order(-abs(adj[focal, partners])), ]
-
-cat("Strongest connections of the predictability node(s):\n")
-print(pred_edges, row.names = FALSE)
 ```
 
 # Section 6. Community Structure (EGA)
@@ -732,6 +776,10 @@ print(assignments %>% arrange(Community))
 # Where each retained predictability node ended up. This is the whole point of
 # the sensitivity runs, so it is pulled out rather than left buried in the full
 # assignment table above.
+if (!has_focal) {
+  cat("Both predictability nodes are held out in this run.",
+      "See the dependency-MI readout below.\n")
+}
 for (v in pred_vars) {
   comm <- unname(ega_result$wc[v])
   members <- names(ega_result$wc)[ega_result$wc == comm]
@@ -753,14 +801,86 @@ for (v in pred_vars) {
 
 nl <- net.loads(ega_result, loading.method = "revised")$std
 
+# With an unassigned node, net.loads adds an "NA" column carrying Inf/NaN. It is
+# not a community, and leaving it in propagates Inf into every max() and mean()
+# over the cross-loadings below.
+phantom <- colnames(nl) %in% c(NA, "NA", "<NA>")
+if (any(phantom)) {
+  cat("Dropping", sum(phantom), "non-community column(s) from the loadings",
+      "(an artefact of the unassigned node).\n\n")
+  nl <- nl[, !phantom, drop = FALSE]
+}
+stopifnot(all(is.finite(nl)))
+
 nl_df <- as.data.frame(round(nl, 3))
 nl_df$Variable <- short_labels[rownames(nl)]
 nl_df <- nl_df %>% select(Variable, everything())
 cat("Standardized network loadings (nodes x communities):\n")
 print(nl_df, row.names = FALSE)
 
-cat("\nPredictability network loadings:\n")
-print(nl_df %>% filter(Variable %in% short_labels[pred_vars]), row.names = FALSE)
+if (has_focal) {
+  cat("\nPredictability network loadings:\n")
+  print(nl_df %>% filter(Variable %in% short_labels[pred_vars]), row.names = FALSE)
+}
+```
+
+## Do the dependency-MI indices hold together on their own?
+
+In the main analysis predictability joins the community the three dependency-MI
+indices form. Whether that community survives without it, and how strongly the
+MI indices load on it once they are the only members, is what the both-held-out
+run is for. Reported in every run so the four are directly comparable.
+
+```{r}
+#| label: mi-community
+
+mi_vars <- c("amod_mi", "dobj_mi", "advmod_mi")
+mi_comm <- ega_result$wc[mi_vars]
+mi_together <- !anyNA(mi_comm) && length(unique(mi_comm)) == 1
+
+mi_unassigned <- mi_vars[is.na(mi_comm)]
+
+cat("Dependency-MI indices:", paste(unname(short_labels[mi_vars]), collapse = ", "), "\n")
+cat("Communities:", paste(ifelse(is.na(mi_comm), "unassigned", mi_comm),
+                          collapse = ", "), "\n")
+cat("All three in one community:", mi_together, "\n")
+if (length(mi_unassigned)) {
+  cat("Placed in no community at all:",
+      paste(unname(short_labels[mi_unassigned]), collapse = ", "), "\n")
+}
+cat("\n")
+
+if (mi_together) {
+  k <- as.character(mi_comm[[1]])
+  members <- names(ega_result$wc)[ega_result$wc == mi_comm[[1]]]
+  others <- setdiff(members, mi_vars)
+  cat("Community", k, "also contains:",
+      if (length(others)) paste(unname(short_labels[others]), collapse = ", ")
+      else "nothing else (the MI indices alone)", "\n\n")
+  cat("Loadings on community", k, ":\n")
+  print(data.frame(
+    Variable = unname(short_labels[mi_vars]),
+    Loading  = round(nl[mi_vars, k], 3)
+  ), row.names = FALSE)
+  cat("\nMean |loading|:", round(mean(abs(nl[mi_vars, k])), 3),
+      "  (effect-size guides: ~0.20 small, ~0.35 moderate, ~0.50 large)\n")
+} else if (length(mi_unassigned)) {
+  held <- setdiff(mi_vars, mi_unassigned)
+  cat(paste(unname(short_labels[mi_unassigned]), collapse = ", "),
+      "is in no community, so the MI battery does not hold together here.\n")
+  if (length(held) && length(unique(ega_result$wc[held])) == 1) {
+    k <- as.character(ega_result$wc[held][[1]])
+    cat("The remaining", length(held), "sit in community", k, "with loadings:\n")
+    print(data.frame(
+      Variable = unname(short_labels[held]),
+      Loading  = round(nl[held, k], 3)
+    ), row.names = FALSE)
+  }
+} else {
+  cat("The MI indices split across communities in this run, so there is no",
+      "single community to read loadings from. Per-node assignments are in the",
+      "table above.\n")
+}
 ```
 
 ```{r}
@@ -970,6 +1090,18 @@ assigned <- ega_result$wc  # community per node
 cross_load_summary <- function(node) {
   row <- nl[node, ]
   own <- as.character(assigned[node])
+  # An unassigned node has no own community, so every loading it carries is a
+  # cross-loading. Reported rather than skipped: that a node loads on nothing
+  # in particular is the informative part.
+  if (is.na(own)) {
+    return(data.frame(
+      Variable = short_labels[node],
+      Own_community = "unassigned",
+      Own_loading = NA_real_,
+      Max_cross = round(max(row), 3),
+      Mean_abs_cross = round(mean(abs(row)), 3)
+    ))
+  }
   others <- setdiff(names(row), own)
   data.frame(
     Variable = short_labels[node],
@@ -983,8 +1115,15 @@ cross_load_summary <- function(node) {
 cat("Standardized loadings (nodes x communities):\n")
 print(round(nl, 3))
 
-cat("\nPredictability nodes, in-community vs cross-community loading:\n")
-print(do.call(rbind, lapply(pred_vars, cross_load_summary)), row.names = FALSE)
+if (has_focal) {
+  cat("\nPredictability nodes, in-community vs cross-community loading:\n")
+  print(do.call(rbind, lapply(pred_vars, cross_load_summary)), row.names = FALSE)
+}
+
+# The MI indices get the same in- vs cross-community read, since with both
+# predictability nodes out they are what that community is made of.
+cat("\nDependency-MI indices, in-community vs cross-community loading:\n")
+print(do.call(rbind, lapply(mi_vars, cross_load_summary)), row.names = FALSE)
 ```
 
 # Section 9. Network Comparison by Proficiency Level
@@ -1177,6 +1316,17 @@ for (nm in names(nc_list)) {
 
 inv_data <- do.call(rbind, df_prof)
 inv_structure <- ega_result$wc[colnames(inv_data)]
+
+# A node EGA placed in no community has no loading to test, and invariance()
+# requires a complete structure. Drop it and name it, rather than tripping the
+# assertion below or silently passing NA into the permutation.
+if (anyNA(inv_structure)) {
+  drop_nodes <- names(inv_structure)[is.na(inv_structure)]
+  cat("Held out of the invariance test (no community assignment):",
+      paste(unname(short_labels[drop_nodes]), collapse = ", "), "\n\n")
+  inv_data <- inv_data[, setdiff(colnames(inv_data), drop_nodes), drop = FALSE]
+  inv_structure <- ega_result$wc[colnames(inv_data)]
+}
 stopifnot(!anyNA(inv_structure))
 
 inv <- invariance(
@@ -1272,6 +1422,10 @@ pred_edge_table <- function(node) {
     arrange(desc(abs(Diff_HL)))
 }
 
+if (!has_focal) {
+  cat("No predictability node is retained in this run, so there is no",
+      "predictability edge table for the proficiency groups.\n")
+}
 for (v in pred_vars) {
   cat(v, "edge weight by proficiency group + Low-vs-High test:\n")
   print(pred_edge_table(v), row.names = FALSE)
@@ -1286,22 +1440,33 @@ for (v in pred_vars) {
 #| echo: false
 
 # Derived quantities for the narrative below (names stripped so inline R prints
-# clean scalars).
-focal_label    <- unname(short_labels[[focal]])
-pred_comm      <- unname(ega_result$wc[focal])
-same_comm      <- names(ega_result$wc)[ega_result$wc == pred_comm]
-loss_own       <- as.character(ega_result$wc[focal])
-loss_own_load  <- round(nl[focal, loss_own], 3)
-loss_max_cross <- round(max(nl[focal, setdiff(colnames(nl), loss_own)]), 3)
-cent_sorted    <- cent %>% arrange(desc(Strength))
-loss_rank      <- which(cent_sorted$Variable == focal_label)
-n_nodes        <- nrow(cent_sorted)
-mi_same_comm   <- unname(pred_comm == ega_result$wc["amod_mi"])
+# clean scalars). Everything focal-dependent is computed only when a
+# predictability node is retained; the both-held-out run reads the
+# dependency-MI community instead.
+cent_sorted <- cent %>% arrange(desc(Strength))
+n_nodes     <- nrow(cent_sorted)
 
-# The strength rank is redundancy-sensitive whenever both predictability nodes
-# are in (see the caveat under Node importance), so the table cell points there.
-mod2_cell <- sprintf("`%s` strength rank = %d of %d%s", focal, loss_rank, n_nodes,
-                     if (length(pred_vars) > 1) ", see the caveat in section 2" else "")
+if (has_focal) {
+  focal_label    <- unname(short_labels[[focal]])
+  pred_comm      <- unname(ega_result$wc[focal])
+  same_comm      <- names(ega_result$wc)[ega_result$wc == pred_comm]
+  loss_own       <- as.character(ega_result$wc[focal])
+  loss_own_load  <- round(nl[focal, loss_own], 3)
+  loss_max_cross <- round(max(nl[focal, setdiff(colnames(nl), loss_own)]), 3)
+  loss_rank      <- which(cent_sorted$Variable == focal_label)
+  mi_same_comm   <- unname(pred_comm == ega_result$wc["amod_mi"])
+
+  # The strength rank is redundancy-sensitive whenever both predictability nodes
+  # are in (see the caveat under Node importance), so the cell points there.
+  mod2_cell <- sprintf("`%s` strength rank = %d of %d%s", focal, loss_rank, n_nodes,
+                       if (length(pred_vars) > 1) ", see the caveat in section 2" else "")
+}
+
+# The MI community, reported in every run so the four are comparable.
+mi_k        <- if (mi_together) as.character(mi_comm[[1]]) else NA_character_
+mi_alone    <- mi_together &&
+  setequal(names(ega_result$wc)[ega_result$wc == mi_comm[[1]]], mi_vars)
+mi_mean_load <- if (mi_together) round(mean(abs(nl[mi_vars, mi_k])), 3) else NA_real_
 ```
 
 ## 1. Community structure (EGA)
@@ -1314,7 +1479,15 @@ EGA detected `r ega_result$n.dim` communities.
 #| output: asis
 
 if (!is.null(drop_var)) {
-  cat("This run holds `", drop_var, "` out of the battery.\n\n", sep = "")
+  cat("This run holds ",
+      paste0("`", drop_var, "`", collapse = " and "),
+      " out of the battery.\n\n", sep = "")
+}
+if (!has_focal) {
+  cat(sprintf("- the dependency-MI indices %s\n\n",
+              if (mi_alone) "form a community of their own"
+              else if (mi_together) "share one community with other nodes"
+              else "split across communities"))
 }
 for (v in pred_vars) {
   cm <- unname(ega_result$wc[v])
@@ -1326,9 +1499,27 @@ for (v in pred_vars) {
 
 ## 2. Node importance
 
-`r focal` loads `r loss_own_load` on its own community, with a maximum
-cross-community loading of `r loss_max_cross`. As a secondary check, its raw
-strength rank is `r loss_rank` of `r n_nodes`.
+```{r}
+#| label: summary-importance
+#| echo: false
+#| output: asis
+
+if (has_focal) {
+  cat(sprintf(
+    "`%s` loads %.3f on its own community, with a maximum cross-community
+loading of %.3f. As a secondary check, its raw strength rank is %d of %d.\n\n",
+    focal, loss_own_load, loss_max_cross, loss_rank, n_nodes))
+} else {
+  cat(sprintf(
+    "No predictability node is retained in this run, so there is no focal node
+to rank. The dependency-MI indices %s, and their mean absolute loading on it is
+%s (Section 6).\n\n",
+    if (mi_alone) "hold a community of their own"
+    else if (mi_together) "share one community with other nodes"
+    else "do not form a single community",
+    if (mi_together) sprintf("%.3f", mi_mean_load) else "not defined"))
+}
+```
 
 ```{r}
 #| label: summary-importance-caveat
@@ -1359,11 +1550,28 @@ single dominant loading means the node belongs to one community.
 
 ## 4. Interpretation relative to CFA hypotheses
 
-  | CFA Model                | Supporting Evidence                                      |
-  | ------------------------ | -------------------------------------------------------- |
-  | Model 1 (Phraseological) | Predictability shares the MI community: `r mi_same_comm` |
-  | Model 2 (General factor) | `r mod2_cell`                                            |
-  | Novel finding            | See community membership in Section 6                    |
+```{r}
+#| label: summary-cfa-table
+#| echo: false
+#| output: asis
+
+rows <- if (has_focal) {
+  c(sprintf("| Model 1 (Phraseological) | Predictability shares the MI community: %s |",
+            mi_same_comm),
+    sprintf("| Model 2 (General factor) | %s |", mod2_cell))
+} else {
+  # Nothing here is about predictability any more. The row that carries
+  # information is whether the MI community stands on its own.
+  c(sprintf("| Model 1 (Phraseological) | MI indices form a community of their own: %s |",
+            mi_alone),
+    sprintf("| Model 2 (General factor) | No predictability node retained; %d nodes ranked |",
+            n_nodes))
+}
+cat("| CFA Model | Supporting Evidence |\n")
+cat("| --- | --- |\n")
+cat(paste(rows, collapse = "\n"), "\n")
+cat("| Novel finding | See community membership in Section 6 |\n\n")
+```
 
 ## 5. Stability
 

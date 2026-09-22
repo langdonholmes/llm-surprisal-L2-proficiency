@@ -1,0 +1,41 @@
+---
+title: "Sensitivity Analysis: Network Without Either Predictability Node"
+subtitle: "Do the dependency-MI indices hold a community on their own?"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Overview
+
+The main analysis places `mean_loss` and `var_loss` in the community the three
+dependency-MI indices form. That community is therefore defined partly by the
+nodes whose membership is the finding, which makes the finding hard to read on
+its own terms.
+
+This run holds **both** predictability nodes out and asks what is left. If
+`amod_mi`, `dobj_mi` and `advmod_mi` still group together, the community is a
+property of the MI battery that predictability joins. If they scatter, the
+community was held together by predictability, and the main result should be
+described as predictability organising the MI indices rather than joining them.
+
+The other two sensitivity runs hold out one node each:
+`network-no-varloss.qmd` and `network-no-meanloss.qmd`.
+
+```{r}
+#| label: drop-parameter
+#| code-fold: false
+
+# Both predictability nodes held out: a 13-node battery with no focal node.
+# The shared body switches every focal-dependent section over to the
+# dependency-MI readout when `pred_vars` comes back empty.
+drop_var <- c("mean_loss", "var_loss")
+```
+
+{{< include ../_network-body.qmd >}}
