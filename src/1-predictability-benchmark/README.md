@@ -78,6 +78,16 @@ plus the `pareto-*.qmd` reports, which run on the §2 outputs.
   `sensemakr` (Cinelli & Hazlett 2020), with a latent-variable version kept in an
   appendix. All three agree; the two main methods rank the 32 configurations at
   Spearman 0.99 and clear all 32. Depends on `ordinal`, `truncnorm`, `sensemakr`.
+- `sensitivity/` — checks on the measure itself rather than on the analysis.
+  `fertility.py` + `fertility.qmd` ask how much of the result rides on the
+  first-subword convention, by measuring tokenizer fertility over both corpora
+  in full (CPU only, no forward passes) and partialling it out of the reported
+  validity. Read-out: fertility correlates with proficiency at |r| ≈ .28 and
+  separates TOEFL 11 low from high by about 1 SD, but the selected
+  configuration retains 94% of its `|r|` with fertility held constant and the
+  model ranking is unchanged, so the reported ordering is not a tokenization
+  artefact. Writes `results/predictability/fertility_{by_essay.csv.gz,tokenizers.csv}`
+  and two figures.
 
 ## Prerequisites
 
@@ -227,11 +237,34 @@ the selected configuration is `olmo2-1b/8`.
 
 Excluded via `EXCLUDED_CONFIGS` in each report's setup chunk.
 
+**The masked path averages a word's subwords; the causal path scores one. Open.**
+
+`TokenPredictability.mean_loss` averages a word's subword surprisals, so a masked
+model's word score is information *density* per subword. The causal path scores
+the first subword only and has no such denominator. The two architectures are
+therefore not measuring the same quantity, and the matrix ranks them against each
+other. Density was not the intended construct on either path.
+
+The masked average is also a product of independent marginals rather than a joint:
+every subword of the word is masked at once, so within-word dependence is
+discarded. The fix is the within-word autoregressive scoring of Kauf & Ivanova
+(2023), which is the masked analogue of the causal chain rule.
+
+Evidence of the footprint is in `sensitivity/fertility.qmd` §5: the two masked
+models show the strongest coupling between essay surprisal and fertility
+(`bert-base` r = .53 against .40 at the other end), which is what a per-subword
+denominator predicts. The effect on the reported conclusion is small, since the
+masked models rank last on validity before and after fertility is partialled out,
+but the defect should be fixed before the masked arm is described as comparable.
+
 ## Method notes (kept consistent across all models)
 
 - **Surprisal in bits** (log base 2); text-level index = mean token surprisal.
 - **Masked** models mask the whole word and score it from a centered context
-  window (full window reserves 2 positions for `[CLS]`/`[SEP]`).
+  window (full window reserves 2 positions for `[CLS]`/`[SEP]`). Each of the
+  word's subwords is scored against the fully-masked sequence and the results
+  are **averaged**, which is not the same construct as the causal path — see
+  Known issues.
 - **Causal** models score each word's *first* subword from left context only,
   using equal-length windows that end at the target (verified against a manual
   next-token reference). The first token of an essay has no context and is left

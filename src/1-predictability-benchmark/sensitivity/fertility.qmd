@@ -1,0 +1,472 @@
+---
+title: "Study 1 Sensitivity: Tokenizer Fertility"
+subtitle: "How much of the predictability measure rides on how words are cut into subwords?"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Why this run exists
+
+Study 1 scores a word by its **first subword** under a causal LM. That was a
+convention adopted without a test, and it makes a word's surprisal depend on how
+its tokenizer cuts the word up. The more pieces a word is cut into, the more
+continuations its first piece sums over, and the cheaper the word looks. The
+alternative, summing a word's subword surprisals, recovers the word's actual
+information content by the chain rule and does not have that property.
+
+Two exposures follow, and both land on claims Study 1 actually makes.
+
+1. **Cross-model ranking.** The eleven models do not share a tokenizer, so the
+   deflation is not constant across the configurations being ranked.
+2. **Concurrent validity.** Fertility is a property of the writing, not only of
+   the tokenizer. Misspellings, non-target morphology and rare vocabulary all
+   split into more pieces, and all are more frequent in lower-proficiency
+   writing. If fertility tracks proficiency, then part of what the measure
+   correlates with is how the tokenizer treats the text.
+
+Neither claim needs a language model to check, only its tokenizer, so this runs
+on both corpora in full rather than on a subsample. `fertility.py` writes the
+per-essay table this report reads.
+
+**What this report is not.** It does not estimate what the measure would be under
+a different aggregation convention. It establishes whether the question is worth
+the GPU time, and if so, where the exposure sits.
+
+```{r}
+#| label: setup
+library(readr)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(ggplot2)
+library(knitr)
+
+set.seed(42)
+N_BOOT <- 2000
+D_FLAG <- 0.10   # Williamson et al. (2012) flag threshold, as in the main analysis
+FOCAL  <- "olmo2-1b"   # the selected configuration's model, at window 8
+
+find_results <- function() {
+  d <- normalizePath(getwd())
+  for (i in 1:6) {
+    cand <- file.path(d, "results", "predictability")
+    if (dir.exists(cand)) return(cand)
+    d <- dirname(d)
+  }
+  stop("results/predictability not found — run sensitivity/fertility.py first")
+}
+RESULTS <- find_results()
+
+for (hp in c("../_viz_helpers.R", "src/1-predictability-benchmark/_viz_helpers.R")) {
+  if (file.exists(hp)) { source(hp); break }
+}
+```
+
+```{r}
+#| label: load
+fert <- read_csv(file.path(RESULTS, "fertility_by_essay.csv.gz"),
+                 col_types = cols(text_id = col_character(),
+                                  l1 = col_character(), level = col_character(),
+                                  .default = col_guess()))
+toks <- read_csv(file.path(RESULTS, "fertility_tokenizers.csv"), show_col_types = FALSE)
+
+# One row per essay per *tokenizer*; the model-keyed rows are replays of these.
+uniq <- fert |>
+  distinct(corpus, text_id, tokenizer_group, .keep_all = TRUE) |>
+  mutate(
+    family      = factor(model_family(tokenizer_group), levels = FAMILY_LEVELS),
+    split_rate  = n_split2_alpha / n_words_alpha,
+    split3_rate = n_split3_alpha / n_words_alpha,
+    straddle_rate  = n_straddle / n_subwords,
+    unaligned_rate = n_unaligned_alpha / n_words_alpha
+  )
+ell <- filter(uniq, corpus == "ellipse")
+toe <- filter(uniq, corpus == "toefl11") |>
+  mutate(level = factor(level, levels = LEVEL_LEVELS))
+```
+
+# Section 1 — Eleven models, six tokenizers
+
+Before anything else, how many distinct tokenizers are actually in the matrix.
+Two models that share one cannot differ from each other for tokenization reasons,
+which bounds how much of the cross-model ranking this can touch.
+
+```{r}
+#| label: tokenizer-groups
+toks |>
+  group_by(tokenizer_group) |>
+  summarise(models = paste(model, collapse = ", "),
+            vocab_size = first(vocab_size), .groups = "drop") |>
+  arrange(vocab_size) |>
+  kable(col.names = c("Tokenizer", "Models sharing it", "Vocab size"))
+```
+
+Six. The base/instruct pairs share a tokenizer, as do `gpt2`/`gpt2-xl` and the
+two ModernBERT and OLMo-2 checkpoints. So of the fifteen within-window model
+contrasts that matter to the selection rule, five are tokenizer-identical by
+construction and cannot be explained by this.
+
+# Section 2 — How often the question even arises
+
+A word only exposes the convention if it is split into more than one piece. If
+almost nothing splits, first-subword and summed surprisal agree on almost every
+word and the rest of this report is about a rare event.
+
+Fertility below is subwords per **alphabetic** spaCy token, which excludes
+punctuation and numerals. The all-token version is in the table too.
+
+```{r}
+#| label: fertility-desc
+bind_rows(ell, toe) |>
+  group_by(corpus, tokenizer_group) |>
+  summarise(fertility_alpha = mean(fertility_alpha),
+            fertility_all   = mean(fertility),
+            split_rate      = mean(split_rate),
+            split3_rate     = mean(split3_rate), .groups = "drop") |>
+  arrange(corpus, fertility_alpha) |>
+  mutate(across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(col.names = c("Corpus", "Tokenizer", "Subwords/word (alpha)",
+                      "Subwords/token (all)", "Words split ≥2", "Words split ≥3"))
+```
+
+Fertility runs about 1.02 on ELLIPSE and 1.04–1.06 on TOEFL 11, so roughly two
+to four per cent of words split at all. The convention is therefore a rare event
+in frequency terms, and a first reading is that it cannot matter much.
+
+That reading is wrong for the reason the next two sections give. The words that
+split are not a random two per cent. They are the misspelled, the morphologically
+unusual and the rare, which is to say the words that carry most of the
+proficiency signal, and they carry far more surprisal each than an average word.
+Rarity in frequency and smallness in effect are not the same thing.
+
+# Section 3 — Fertility tracks proficiency
+
+ELLIPSE first, against the holistic score, per tokenizer.
+
+```{r}
+#| label: ellipse-r
+ell_r <- ell |>
+  group_by(tokenizer_group) |>
+  summarise(
+    r_fertility = cor(fertility_alpha, overall),
+    r_split     = cor(split_rate, overall),
+    rho         = cor(fertility_alpha, overall, method = "spearman"),
+    n           = n(), .groups = "drop") |>
+  arrange(r_fertility)
+
+ell_r |>
+  mutate(across(where(is.numeric) & !n, \(x) round(x, 3))) |>
+  kable(col.names = c("Tokenizer", "r (fertility, holistic)", "r (split rate, holistic)",
+                      "Spearman rho", "n"))
+```
+
+Every tokenizer correlates with the holistic score at about `r sprintf("%.2f", mean(abs(ell_r$r_fertility)))`
+in magnitude, negatively: more proficient writing splits less. For scale, the
+highest-validity configuration class in the main analysis reaches mean
+`|r|` = .627. A quantity computed with no language model at all, from the
+tokenizer alone, reaches roughly `r sprintf("%.0f", 100 * mean(abs(ell_r$r_fertility)) / 0.627)`
+per cent of that.
+
+TOEFL 11 has only three proficiency levels, so the same relationship shows up as
+a level contrast.
+
+```{r}
+#| label: toefl-level
+toe |>
+  group_by(tokenizer_group) |>
+  summarise(
+    low = mean(fertility_alpha[level == "low"]),
+    medium = mean(fertility_alpha[level == "medium"]),
+    high = mean(fertility_alpha[level == "high"]),
+    d_low_high = (low - high) / sd(fertility_alpha),
+    r_level = cor(fertility_alpha, as.integer(level)), .groups = "drop") |>
+  arrange(desc(d_low_high)) |>
+  mutate(across(where(is.numeric), \(x) round(x, 3))) |>
+  kable(col.names = c("Tokenizer", "Low", "Medium", "High",
+                      "d (low − high)", "r with level"))
+```
+
+The gap between low and high is around one standard deviation for every
+tokenizer. This is a large effect on a variable that is supposed to be an
+implementation detail.
+
+In the figure below the OLMo-2 and Qwen2.5 series sit on top of each other and
+only the upper one is visible. That is not an artefact. The two tokenizers agree
+on fertility to four decimal places on both corpora despite differing in vocabulary
+size by a factor of one and a half, which is a useful reminder that vocabulary
+size is a poor proxy for how a tokenizer treats learner writing.
+
+```{r}
+#| label: fig-fertility-proficiency
+#| fig-width: 9
+#| fig-height: 4.2
+# Both corpora on one panel row: the criterion is a 0.5-step holistic score on
+# ELLIPSE and a three-level band on TOEFL 11, so the facets take free x scales
+# and the bands enter as an ordered factor rather than a shared numeric axis.
+band_means <- bind_rows(
+  ell |>
+    filter(overall >= 1.5, overall <= 4.5) |>
+    transmute(family, panel = "ELLIPSE (holistic score)",
+              band = factor(format(overall, nsmall = 1)), fertility_alpha),
+  toe |>
+    transmute(family, panel = "TOEFL 11 (proficiency level)",
+              band = factor(as.character(level), levels = LEVEL_LEVELS),
+              fertility_alpha)
+  ) |>
+  group_by(panel, family, band) |>
+  summarise(m = mean(fertility_alpha),
+            se = sd(fertility_alpha) / sqrt(n()), .groups = "drop")
+
+p_fert <- ggplot(band_means, aes(band, m, colour = family, group = family)) +
+  geom_line(linewidth = 0.7) +
+  geom_pointrange(aes(ymin = m - 1.96 * se, ymax = m + 1.96 * se), size = 0.3) +
+  facet_wrap(~panel, scales = "free_x") +
+  scale_colour_manual(values = FAMILY_COLORS, drop = TRUE) +
+  labs(x = NULL, y = "Subwords per word", colour = "Tokenizer",
+       title = "Fertility falls as proficiency rises, under every tokenizer",
+       subtitle = "Essay means with 95% intervals. Alphabetic tokens only.") +
+  theme_study1(base_size = 11)
+p_fert
+save_fig(p_fert, "fertility_by_proficiency", width = 9, height = 4.2)
+```
+
+# Section 4 — Fertility displaces L1 groups
+
+The main analysis measures fairness as max `|d|` across the eleven L1 groups,
+computed within proficiency strata and weighted by focal-group size. Running that
+same statistic on fertility asks how much cross-L1 displacement the tokenizer
+contributes before any model is involved.
+
+```{r}
+#| label: dif
+col_var <- function(x) apply(x, 2, var)
+
+group_d <- function(y, l1, level, strata = LEVEL_LEVELS) {
+  groups <- sort(unique(l1))
+  vapply(groups, function(g) {
+    num <- 0; wsum <- 0
+    for (s in strata) {
+      in_s <- level == s
+      a <- y[in_s & l1 == g]; b <- y[in_s & l1 != g]
+      n1 <- length(a); n2 <- length(b)
+      if (n1 < 2L || n2 < 2L) next
+      sp <- sqrt(((n1 - 1) * var(a) + (n2 - 1) * var(b)) / (n1 + n2 - 2))
+      num <- num + n1 * (mean(a) - mean(b)) / sp
+      wsum <- wsum + n1
+    }
+    num / wsum
+  }, numeric(1))
+}
+
+dif <- toe |>
+  group_by(tokenizer_group) |>
+  group_modify(\(d, k) {
+    dd <- group_d(d$fertility_alpha, d$l1, as.character(d$level))
+    tibble(max_abs_d = max(abs(dd)), worst_l1 = names(dd)[which.max(abs(dd))],
+           n_flag = sum(abs(dd) >= D_FLAG))
+  }) |>
+  ungroup() |>
+  arrange(max_abs_d)
+
+dif |>
+  mutate(max_abs_d = round(max_abs_d, 3)) |>
+  kable(col.names = c("Tokenizer", "max |d|", "Worst L1", "Groups over flag (of 11)"))
+```
+
+Fertility alone displaces L1 groups by max `|d|` of
+`r sprintf("%.2f to %.2f", min(dif$max_abs_d), max(dif$max_abs_d))`, and the
+worst group is Arabic under every tokenizer. The selected configuration
+`olmo2-1b/8` has a max `|d|` of .42 on the measure itself, on Telugu.
+
+Two things follow, and they point in opposite directions. The displacement the
+tokenizer produces is *larger* than the displacement the finished measure shows,
+which is not reassuring. But it falls on a different group, so the measure's
+unfairness is not simply fertility passing through. Arabic writing is cut into
+more pieces than anyone else's and the measure does not flag Arabic hardest, so
+whatever the tokenizer is doing to Arabic is being partly absorbed somewhere
+between the pieces and the essay score.
+
+# Section 5 — How much of the validity runs through this channel
+
+The direct question. Take the main analysis's own ELLIPSE validity coefficient at
+window 8, and partial fertility out of it. What survives is the part of the
+correlation that is not shared with how the tokenizer cut the text up.
+
+```{r}
+#| label: partial
+ell_long <- read_csv(file.path(RESULTS, "ellipse_long.csv.gz"),
+                     col_types = cols(window = col_character(),
+                                      text_id = col_character())) |>
+  filter(window == "8") |>
+  inner_join(fert |> filter(corpus == "ellipse") |>
+               select(text_id, model, fertility_alpha),
+             by = c("text_id", "model"))
+
+partial_r <- function(x, y, z) {
+  rxy <- cor(x, y); rxz <- cor(x, z); ryz <- cor(y, z)
+  (rxy - rxz * ryz) / sqrt((1 - rxz^2) * (1 - ryz^2))
+}
+
+pr <- ell_long |>
+  group_by(model) |>
+  summarise(
+    abs_r      = abs(cor(mean_surprisal_bits, overall)),
+    abs_r_part = abs(partial_r(mean_surprisal_bits, overall, fertility_alpha)),
+    r_surp_fert = cor(mean_surprisal_bits, fertility_alpha),
+    .groups = "drop") |>
+  mutate(retained = abs_r_part / abs_r,
+         rank_before = rank(-abs_r), rank_after = rank(-abs_r_part)) |>
+  arrange(desc(abs_r))
+
+pr |>
+  mutate(across(c(abs_r, abs_r_part, r_surp_fert, retained), \(x) round(x, 3))) |>
+  select(model, abs_r, abs_r_part, retained, r_surp_fert, rank_before, rank_after) |>
+  kable(col.names = c("Model (window 8)", "|r|", "|r| · fertility held",
+                      "Retained", "r (surprisal, fertility)", "Rank before", "Rank after"))
+```
+
+```{r}
+#| label: boot-drop
+wide <- ell_long |>
+  select(text_id, model, mean_surprisal_bits, fertility_alpha, overall) |>
+  arrange(model, text_id)
+ids <- unique(wide$text_id)
+mods <- unique(wide$model)
+S <- matrix(wide$mean_surprisal_bits, nrow = length(ids), dimnames = list(NULL, mods))
+F <- matrix(wide$fertility_alpha,     nrow = length(ids), dimnames = list(NULL, mods))
+y <- wide$overall[wide$model == mods[1]]
+
+drop_boot <- replicate(N_BOOT, {
+  i <- sample.int(length(ids), replace = TRUE)
+  yb <- y[i]
+  vapply(seq_along(mods), function(k) {
+    x <- S[i, k]; z <- F[i, k]
+    abs(cor(x, yb)) - abs(partial_r(x, yb, z))
+  }, numeric(1))
+})
+rownames(drop_boot) <- mods
+
+boot_tbl <- tibble(
+  model = mods,
+  drop  = pr$abs_r[match(mods, pr$model)] - pr$abs_r_part[match(mods, pr$model)],
+  lo    = apply(drop_boot, 1, quantile, 0.025),
+  hi    = apply(drop_boot, 1, quantile, 0.975)) |>
+  arrange(desc(drop))
+
+boot_tbl |>
+  mutate(across(c(drop, lo, hi), \(x) round(x, 4))) |>
+  kable(col.names = c("Model (window 8)", "Drop in |r|", "2.5%", "97.5%"),
+        caption = paste0("Essay-level bootstrap, ", N_BOOT, " resamples."))
+```
+
+The coefficient falls, and the interval on the fall excludes zero everywhere, so
+the channel is real rather than noise. It is also small. The selected
+configuration goes from
+`r sprintf("%.3f to %.3f", pr$abs_r[pr$model == FOCAL], pr$abs_r_part[pr$model == FOCAL])`,
+retaining `r sprintf("%.0f", 100 * pr$retained[pr$model == FOCAL])` per cent of
+its validity with fertility held constant.
+
+The ranking is what the selection rule actually consumes, and it barely moves:
+`r sum(pr$rank_before != pr$rank_after)` of `r nrow(pr)` models change rank, none
+by more than one place. The two masked models stay at the bottom of the ordering
+before and after.
+
+One detail in that table is not about the tokenizer. The two masked models show
+the strongest coupling between surprisal and fertility
+(`r sprintf("%.2f", max(pr$r_surp_fert))` for `bert-base`, against
+`r sprintf("%.2f", min(pr$r_surp_fert))` at the other end). That is the
+signature of a separate problem: the masked path in
+`features.predictability` averages over a word's subwords rather than summing
+them, so a masked model's word score is information *density* per subword, and
+fertility is its denominator. The causal path scores one subword and has no such
+denominator. The two architectures are not measuring the same thing, and that is
+a defect to fix rather than a result to interpret.
+
+```{r}
+#| label: fig-partial
+#| fig-width: 7.5
+#| fig-height: 4.6
+p_part <- pr |>
+  mutate(model = factor(model, levels = rev(pr$model[order(pr$abs_r)])),
+         family = factor(model_family(as.character(model)), levels = FAMILY_LEVELS)) |>
+  ggplot(aes(y = model)) +
+  geom_segment(aes(x = abs_r_part, xend = abs_r, yend = model),
+               colour = "grey65", linewidth = 0.9) +
+  geom_point(aes(x = abs_r, colour = family), size = 2.6) +
+  geom_point(aes(x = abs_r_part, colour = family), size = 2.6, shape = 21,
+             fill = "white", stroke = 1.1) +
+  scale_colour_manual(values = FAMILY_COLORS, drop = TRUE) +
+  labs(x = "ELLIPSE validity  |r|", y = NULL, colour = "Family",
+       title = "Validity with and without the fertility channel",
+       subtitle = "Filled = as reported; open = fertility held constant. Window 8.") +
+  theme_study1(base_size = 11)
+p_part
+save_fig(p_part, "fertility_partial_validity", width = 7.5, height = 4.6)
+```
+
+# Section 6 — Whether the spans are even right
+
+Any move away from first-subword needs a word's subword span to be correct.
+Two diagnostics bear on that, both cheap byproducts of the measurement.
+
+`n_straddle` counts subwords crossing a spaCy token boundary, where no word-level
+aggregation can recover the word's probability exactly. `n_unaligned_alpha`
+counts alphabetic words receiving no subword of their own, which is the
+alignment failure that matters, because `features.predictability` builds a word's
+span as the gap to the *next aligned word* and silently folds an unaligned word
+into its predecessor.
+
+```{r}
+#| label: alignment
+bind_rows(ell, toe) |>
+  group_by(corpus, tokenizer_group) |>
+  summarise(straddle_rate = mean(straddle_rate),
+            unaligned_rate = mean(unaligned_rate),
+            essays_with_unaligned = mean(n_unaligned_alpha > 0), .groups = "drop") |>
+  arrange(corpus, desc(unaligned_rate)) |>
+  mutate(across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(col.names = c("Corpus", "Tokenizer", "Straddling subwords (per subword)",
+                      "Unaligned alpha words (per word)", "Essays with ≥1"))
+```
+
+The rates are low but not zero, and they are concentrated: a small share of
+essays carries them. Under the current first-subword convention this is
+harmless, because only one subword index is ever read. It stops being harmless
+the moment a word's span is summed over, and there is a second span defect that
+these counts do not capture at all: `pairwise(..., add_extra = True)` gives the
+final aligned word of every document a span of exactly one subword, so the last
+word of every essay would be truncated under summing. A joint-probability run
+should rebuild spans from the offset mapping rather than reuse `token_map`.
+
+# Read-out
+
+- Fertility is not an implementation detail. It correlates with ELLIPSE holistic
+  score at about `|r|` = .28 and separates TOEFL 11 low from high by about one
+  standard deviation, under all six tokenizers.
+- It displaces L1 groups more than the finished measure does
+  (max `|d|` up to `r sprintf("%.2f", max(dif$max_abs_d))` against .42), though
+  on Arabic rather than on the Telugu the measure flags, so it is not the same
+  unfairness travelling through.
+- Despite that, the validity coefficient is not mainly riding on this channel.
+  Holding fertility constant costs the selected configuration
+  `r sprintf("%.3f", pr$abs_r[pr$model == FOCAL] - pr$abs_r_part[pr$model == FOCAL])`
+  of its `|r|`, and the model ranking the selection rule reads is unchanged in
+  substance.
+- The six-tokenizer structure limits the blast radius further. Five of the
+  within-window contrasts are tokenizer-identical and cannot move.
+
+That combination is the argument for a bounded follow-up rather than a rerun.
+The ranking that Study 1 reports does not appear to be a tokenization artefact,
+which is the claim the chapter needs to defend. What remains open is the size of
+the gap between first-subword and summed surprisal on the two-to-four per cent of
+words that split, which this report cannot estimate because it never ran a model.
+A subsample comparison at window 8 answers it, and the masked-path averaging
+defect named in Section 5 should be fixed in the same pass, since until it is,
+the masked and causal arms are not measuring the same construct.
