@@ -79,6 +79,15 @@ plus the `pareto-*.qmd` reports, which run on the §2 outputs.
   appendix. All three agree; the two main methods rank the 32 configurations at
   Spearman 0.99 and clear all 32. Depends on `ordinal`, `truncnorm`, `sensemakr`.
 - `sensitivity/` — checks on the measure itself rather than on the analysis.
+  Two runs, in order. `fertility.*` asks what the tokenizer alone accounts for;
+  `subword_policy.py` + `subword-policy.qmd` then run the models and compare the
+  aggregation conventions directly. **Read-out: the first-subword convention is
+  kept.** Scoring a word by its joint probability instead lowers ELLIPSE `|r|`
+  for all eleven models (−.007 to −.029), leaves the validity ranking at
+  Spearman .99, keeps the causal class above the masked class, and does not
+  change the selected configuration. `assemble_policy_data.py` exports the tidy
+  CSV, `policy_example.py` the one-sentence worked example.
+
   `fertility.py` + `fertility.qmd` ask how much of the result rides on the
   first-subword convention, by measuring tokenizer fertility over both corpora
   in full (CPU only, no forward passes) and partialling it out of the reported
@@ -237,7 +246,8 @@ the selected configuration is `olmo2-1b/8`.
 
 Excluded via `EXCLUDED_CONFIGS` in each report's setup chunk.
 
-**The masked path averages a word's subwords; the causal path scores one. Open.**
+**The masked path averages a word's subwords; the causal path scores one.
+Measured 2026-09-22; fix identified, not yet applied.**
 
 `TokenPredictability.mean_loss` averages a word's subword surprisals, so a masked
 model's word score is information *density* per subword. The causal path scores
@@ -253,9 +263,23 @@ discarded. The fix is the within-word autoregressive scoring of Kauf & Ivanova
 Evidence of the footprint is in `sensitivity/fertility.qmd` §5: the two masked
 models show the strongest coupling between essay surprisal and fertility
 (`bert-base` r = .53 against .40 at the other end), which is what a per-subword
-denominator predicts. The effect on the reported conclusion is small, since the
-masked models rank last on validity before and after fertility is partialled out,
-but the defect should be fixed before the masked arm is described as comparable.
+denominator predicts.
+
+**The fix is to score the first subword, not to build a joint.**
+`sensitivity/subword-policy.qmd` scored both. Moving the masked path from the
+current average to the first subword changes ELLIPSE `|r|` by at most .0027 and
+max `|d|` by at most .007 across the three masked models, because 97% of words
+are single-subword and the two policies coincide there by definition. The proper
+joint (Kauf & Ivanova) is *worse* on both axes for all three, and for
+`bert-base` it moves the worst-displaced L1 from TEL to ARA, importing the
+tokenizer-fertility displacement that `first` blocks. So the construct error is
+real and worth correcting, the correction is cheap, and it will not move any
+number the chapter reports.
+
+To apply it: score only `subword_start` in `_process_masked`, then
+`run_surprisal.py --models bert-base modernbert-base modernbert-large
+--overwrite`, `assemble_analysis_data.py`, and re-render the four Study 1
+reports.
 
 ## Method notes (kept consistent across all models)
 

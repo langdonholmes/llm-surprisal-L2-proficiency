@@ -1,0 +1,455 @@
+---
+title: "Study 1 Sensitivity: Subword Aggregation Policy"
+subtitle: "Does scoring a word by its first subword change the validity, the fairness or the model selection?"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Why this run exists
+
+`fertility.qmd` asked what the tokenizer alone can account for, and found the
+channel real but small. It could not say how far apart the aggregation
+conventions actually are, because it never ran a model. This run does, at window
+8 only, on a stratified subsample of both corpora.
+
+Four policies, scored on the same words in the same pass so every comparison is
+paired:
+
+| Policy | Causal | Masked |
+|---|---|---|
+| `first` | the word's first subword, left context only. **The current convention.** | first subword with the whole word masked |
+| `joint` | `-log P(word \| context)` by the chain rule. Exact. | within-word autoregressive scoring (Kauf & Ivanova 2023) |
+| `density` | joint / *k*, per-subword information | **what the masked path does today** |
+| `joint_indep` | — | sum of the all-masked marginals, ignoring within-word dependence |
+
+The question this has to answer is narrow and practical. Not whether `first` is
+the theoretically preferred quantity, which it is not, but whether the chapter's
+conclusions depend on it. Those conclusions are a validity ordering across
+models, a fairness reading, and a selected configuration.
+
+**Subsample, and what that does to the numbers.** 1,500 ELLIPSE essays
+stratified on the holistic score, and 200 per L1 on TOEFL 11 stratified on level
+within L1. Absolute `|r|` and `max |d|` therefore differ a little from the
+full-corpus values in `pareto-analysis.qmd`. The decision-relevant quantity here
+is the *difference between policies on identical essays*, which is paired and far
+more precise than the subsample size suggests marginally.
+
+```{r}
+#| label: setup
+library(readr)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(ggplot2)
+library(knitr)
+
+set.seed(42)
+N_BOOT <- 2000
+D_FLAG <- 0.10
+LEVELS_ORD <- c("low", "medium", "high")
+POLICY_LEVELS <- c("first", "joint", "density", "joint_indep")
+POLICY_LABELS <- c(first = "first subword", joint = "joint",
+                   density = "density", joint_indep = "joint (independent)")
+
+find_results <- function() {
+  d <- normalizePath(getwd())
+  for (i in 1:6) {
+    cand <- file.path(d, "results", "predictability")
+    if (dir.exists(cand)) return(cand)
+    d <- dirname(d)
+  }
+  stop("results/predictability not found")
+}
+RESULTS <- find_results()
+for (hp in c("../_viz_helpers.R", "src/1-predictability-benchmark/_viz_helpers.R")) {
+  if (file.exists(hp)) { source(hp); break }
+}
+```
+
+```{r}
+#| label: load
+pol <- read_csv(file.path(RESULTS, "subword_policy_long.csv.gz"),
+                col_types = cols(text_id = col_character(), l1 = col_character(),
+                                 level = col_character(), .default = col_guess())) |>
+  mutate(policy = factor(policy, levels = POLICY_LEVELS),
+         family = factor(model_family(model), levels = FAMILY_LEVELS))
+
+MODELS <- sort(unique(pol$model))
+ARCH <- pol |> distinct(model, arch) |> deframe()
+
+ell <- filter(pol, corpus == "ellipse")
+toe <- filter(pol, corpus == "toefl11") |>
+  mutate(level = factor(level, levels = LEVELS_ORD))
+
+cat(sprintf("%d models, %d ELLIPSE essays, %d TOEFL essays\n",
+            length(MODELS), n_distinct(ell$text_id), n_distinct(toe$text_id)))
+```
+
+# Section 1 — Does this reproduce the production pipeline?
+
+Before anything is read off this run, the re-implementation has to agree with the
+one that produced the chapter. The production path is `first` for causal models
+and `density` for masked ones, so those two columns should reproduce
+`mean_surprisal_bits` at window 8. Spans are rebuilt from the offset mapping
+here rather than reused from `get_token_alignment`, so a handful of words differ
+per essay and exact equality is not expected; a high correlation and a small mean
+offset are.
+
+```{r}
+#| label: verify
+prod <- bind_rows(
+  read_csv(file.path(RESULTS, "ellipse_long.csv.gz"),
+           col_types = cols(window = col_character(), text_id = col_character())) |>
+    filter(window == "8") |> transmute(corpus = "ellipse", text_id, model,
+                                       prod_bits = mean_surprisal_bits),
+  read_csv(file.path(RESULTS, "toefl_long.csv.gz"),
+           col_types = cols(window = col_character(), text_id = col_character())) |>
+    filter(window == "8") |> transmute(corpus = "toefl11", text_id, model,
+                                       prod_bits = mean_surprisal_bits))
+
+verify <- pol |>
+  mutate(is_production = (arch == "causal" & policy == "first") |
+                         (arch == "masked" & policy == "density")) |>
+  filter(is_production) |>
+  inner_join(prod, by = c("corpus", "text_id", "model")) |>
+  group_by(model, arch) |>
+  summarise(r = cor(bits, prod_bits),
+            mean_diff = mean(bits - prod_bits),
+            max_abs_diff = max(abs(bits - prod_bits)),
+            n = n(), .groups = "drop") |>
+  arrange(r)
+
+verify |>
+  mutate(across(c(r, mean_diff, max_abs_diff), \(x) round(x, 4))) |>
+  kable(col.names = c("Model", "Arch", "r with production", "Mean difference (bits)",
+                      "Max |difference|", "n essays"))
+```
+
+`r if (min(verify$r) > 0.99) "Every model reproduces at r > .99, so the rest of this report is reading the same instrument the chapter reports." else "**A model falls below r = .99 against production. Investigate before reading on.**"`
+The residual offset is the span rebuild plus bf16 arithmetic, and it is common to
+all four policies, so it cancels in every paired comparison below.
+
+# Section 2 — How far apart are the policies?
+
+```{r}
+#| label: divergence
+div <- pol |>
+  select(corpus, text_id, model, arch, policy, bits) |>
+  pivot_wider(names_from = policy, values_from = bits)
+
+div |>
+  group_by(model, arch) |>
+  summarise(first = mean(first), joint = mean(joint), density = mean(density),
+            joint_over_first = mean(joint) / mean(first),
+            r_first_joint = cor(first, joint),
+            r_first_density = cor(first, density), .groups = "drop") |>
+  arrange(arch, desc(joint_over_first)) |>
+  mutate(across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(col.names = c("Model", "Arch", "first", "joint", "density",
+                      "joint / first", "r(first, joint)", "r(first, density)"))
+```
+
+The joint charges more than the first subword does, by construction, since it
+adds the continuation pieces. What matters is that the two order essays almost
+identically: `r(first, joint)` is what carries the validity through.
+
+```{r}
+#| label: split-words
+pol |>
+  filter(!is.na(bits_split), policy %in% c("first", "joint")) |>
+  select(corpus, text_id, model, arch, policy, bits_split) |>
+  pivot_wider(names_from = policy, values_from = bits_split) |>
+  group_by(model, arch) |>
+  summarise(first_split = mean(first), joint_split = mean(joint),
+            ratio = mean(joint) / mean(first), .groups = "drop") |>
+  arrange(desc(ratio)) |>
+  mutate(across(where(is.numeric), \(x) round(x, 3))) |>
+  kable(col.names = c("Model", "Arch", "first (split words)", "joint (split words)",
+                      "joint / first"),
+        caption = "Restricted to words the tokenizer split into two or more pieces.")
+```
+
+This is the number `fertility.qmd` could not produce. On the two-to-four per cent
+of words that split, the joint charges roughly twice what the first subword does.
+The convention is not a rounding error on those words. It survives to the essay
+level only because those words are rare.
+
+## A worked example
+
+The corpus averages hide a distinction that decides how worried to be. One
+sentence, scored by `policy_example.py` under the selected model and one masked
+model, in bits.
+
+```{r}
+#| label: example
+read_csv(file.path(RESULTS, "subword_policy_example.csv"), show_col_types = FALSE) |>
+  filter(k > 1 | word %in% c("rules", "every")) |>
+  mutate(across(c(first, joint, density, joint_indep), \(x) round(x, 2))) |>
+  select(model, word, k, pieces, first, joint, density, joint_indep) |>
+  kable(col.names = c("Model", "Word", "k", "Subwords", "first", "joint",
+                      "density", "joint (indep.)"),
+        caption = "Split words, plus two unsplit words for reference.")
+```
+
+Two split words, opposite behaviour, and the difference is the whole argument.
+
+*unpredictability* is a real English word. OLMo-2 cuts it `unpredict|ability`,
+and having seen `unpredict` the continuation is nearly free, so `first` (21.85)
+and `joint` (22.19) agree to within a third of a bit. The first subword already
+carries essentially all of the word's information, which is exactly the case the
+convention was implicitly assuming.
+
+*misstake* is a misspelling. It is cut `mis|st|ake`, and the continuation is not
+free at all, because nothing about `mis` predicts `st|ake`. `first` charges
+14.62 bits and `joint` charges 26.57. Here the convention undercharges by nearly
+half.
+
+That is the mechanism behind everything in `fertility.qmd`. The words where
+`first` and `joint` diverge are disproportionately the non-standard ones, and
+non-standard forms are more frequent in lower-proficiency writing. Whether the
+divergence is large enough at essay level to move a conclusion is what the rest
+of this report measures.
+
+The masked columns make the third point. `density` charges *less* for
+*misstake* than `first` does (19.69 against 18.29 for BERT, and 8.86 against
+14.62 for OLMo-2's three-piece cut), because dividing by *k* rewards a word for
+having been cut up. That is the defect in the masked path stated as plainly as it
+can be. And `joint (indep.)` charges 74.79 bits for *unpredictability* against
+the chain version's 44.89, which is why a masked joint cannot be assembled from
+the all-masked pass the production code already makes.
+
+# Section 3 — Validity
+
+```{r}
+#| label: validity
+val <- ell |>
+  group_by(model, arch, family, policy) |>
+  summarise(abs_r = abs(cor(bits, overall)), .groups = "drop")
+
+val |>
+  select(model, arch, policy, abs_r) |>
+  pivot_wider(names_from = policy, values_from = abs_r) |>
+  arrange(desc(first)) |>
+  mutate(across(where(is.numeric), \(x) round(x, 3))) |>
+  kable(caption = "ELLIPSE validity |r| by policy. Subsample; compare columns, not levels.")
+```
+
+```{r}
+#| label: validity-boot
+# Paired essay-level bootstrap on the change in |r| from `first` to `joint`.
+wide_e <- ell |>
+  filter(policy %in% c("first", "joint")) |>
+  select(text_id, model, policy, bits, overall) |>
+  pivot_wider(names_from = policy, values_from = bits) |>
+  arrange(model, text_id)
+ids_e <- unique(wide_e$text_id)
+mods <- unique(wide_e$model)
+Mf <- matrix(wide_e$first, nrow = length(ids_e), dimnames = list(NULL, mods))
+Mj <- matrix(wide_e$joint, nrow = length(ids_e), dimnames = list(NULL, mods))
+ye <- wide_e$overall[wide_e$model == mods[1]]
+
+bd <- replicate(N_BOOT, {
+  i <- sample.int(length(ids_e), replace = TRUE); yb <- ye[i]
+  as.vector(abs(cor(Mj[i, ], yb))) - as.vector(abs(cor(Mf[i, ], yb)))
+})
+rownames(bd) <- mods
+
+val_delta <- tibble(
+  model = mods,
+  d_abs_r = as.vector(abs(cor(Mj, ye))) - as.vector(abs(cor(Mf, ye))),
+  lo = apply(bd, 1, quantile, 0.025),
+  hi = apply(bd, 1, quantile, 0.975)) |>
+  mutate(crosses_zero = lo <= 0 & hi >= 0) |>
+  arrange(d_abs_r)
+
+val_delta |>
+  mutate(across(c(d_abs_r, lo, hi), \(x) round(x, 4))) |>
+  kable(col.names = c("Model", "Δ|r| (joint − first)", "2.5%", "97.5%", "CI covers 0"),
+        caption = paste0("Paired essay-level bootstrap, ", N_BOOT, " resamples."))
+```
+
+# Section 4 — Fairness
+
+The same max `|d|` the main analysis uses: Cohen's *d* between each L1 group and
+the rest within each proficiency stratum, standardized by the pooled
+within-stratum SD, combined as a focal-group-size weighted average, then the
+worst group.
+
+```{r}
+#| label: fairness
+group_d <- function(y, l1, level, strata = LEVELS_ORD) {
+  groups <- sort(unique(l1))
+  vapply(groups, function(g) {
+    num <- 0; wsum <- 0
+    for (s in strata) {
+      in_s <- level == s
+      a <- y[in_s & l1 == g]; b <- y[in_s & l1 != g]
+      n1 <- length(a); n2 <- length(b)
+      if (n1 < 2L || n2 < 2L) next
+      sp <- sqrt(((n1 - 1) * var(a) + (n2 - 1) * var(b)) / (n1 + n2 - 2))
+      num <- num + n1 * (mean(a) - mean(b)) / sp; wsum <- wsum + n1
+    }
+    num / wsum
+  }, numeric(1))
+}
+
+fair <- toe |>
+  group_by(model, arch, policy) |>
+  group_modify(\(d, k) {
+    dd <- group_d(d$bits, d$l1, as.character(d$level))
+    tibble(max_abs_d = max(abs(dd)), worst_l1 = names(dd)[which.max(abs(dd))],
+           n_flag = sum(abs(dd) >= D_FLAG))
+  }) |>
+  ungroup()
+
+fair |>
+  select(model, arch, policy, max_abs_d) |>
+  pivot_wider(names_from = policy, values_from = max_abs_d) |>
+  arrange(first) |>
+  mutate(across(where(is.numeric), \(x) round(x, 3))) |>
+  kable(caption = "TOEFL 11 max |d| by policy. Lower is fairer.")
+
+fair |>
+  filter(policy %in% c("first", "joint")) |>
+  select(model, arch, policy, worst_l1, n_flag) |>
+  pivot_wider(names_from = policy, values_from = c(worst_l1, n_flag)) |>
+  kable(col.names = c("Model", "Arch", "Worst L1 (first)", "Worst L1 (joint)",
+                      "Groups flagged (first)", "Groups flagged (joint)"))
+```
+
+# Section 5 — Does the selection change?
+
+This is the only question with a consequence for the chapter. The rule is: take
+the highest-validity configuration class, then within it the smallest model with
+a publicly released pretraining corpus. At window 8 the class is the generative
+models, and the pick is `olmo2-1b`.
+
+```{r}
+#| label: selection
+rank_tbl <- val |>
+  filter(policy %in% c("first", "joint", "density")) |>
+  select(model, arch, policy, abs_r) |>
+  group_by(policy) |>
+  mutate(rank = rank(-abs_r)) |>
+  ungroup() |>
+  select(model, arch, policy, rank) |>
+  pivot_wider(names_from = policy, values_from = rank) |>
+  arrange(first)
+
+rank_tbl |>
+  kable(col.names = c("Model", "Arch", "Rank under first", "Rank under joint",
+                      "Rank under density"),
+        caption = "Validity rank, 1 = highest |r|.")
+
+class_tbl <- val |>
+  filter(policy %in% c("first", "joint")) |>
+  group_by(policy, arch) |>
+  summarise(mean_abs_r = mean(abs_r), .groups = "drop") |>
+  pivot_wider(names_from = policy, values_from = mean_abs_r)
+
+class_tbl |>
+  mutate(across(where(is.numeric), \(x) round(x, 3))) |>
+  kable(col.names = c("Architecture class", "Mean |r| (first)", "Mean |r| (joint)"),
+        caption = "The class comparison the selection rule reads.")
+```
+
+```{r}
+#| label: selection-readout
+spearman <- cor(rank_tbl$first, rank_tbl$joint, method = "spearman")
+top_first <- rank_tbl$model[which.min(rank_tbl$first)]
+top_joint <- rank_tbl$model[which.min(rank_tbl$joint)]
+causal_wins_first <- class_tbl$first[class_tbl$arch == "causal"] >
+                     class_tbl$first[class_tbl$arch == "masked"]
+causal_wins_joint <- class_tbl$joint[class_tbl$arch == "causal"] >
+                     class_tbl$joint[class_tbl$arch == "masked"]
+cat(sprintf("Rank correlation first vs joint: %.3f\n", spearman))
+cat(sprintf("Highest |r|: %s under first, %s under joint\n", top_first, top_joint))
+cat(sprintf("Causal class beats masked class: %s under first, %s under joint\n",
+            causal_wins_first, causal_wins_joint))
+cat(sprintf("Models changing rank: %d of %d; largest move %d place(s)\n",
+            sum(rank_tbl$first != rank_tbl$joint), nrow(rank_tbl),
+            max(abs(rank_tbl$first - rank_tbl$joint))))
+```
+
+```{r}
+#| label: fig-policy
+#| fig-width: 8
+#| fig-height: 5
+plot_df <- val |>
+  filter(policy %in% c("first", "joint", "density")) |>
+  left_join(fair |> select(model, policy, max_abs_d), by = c("model", "policy"))
+
+p_pol <- ggplot(plot_df, aes(max_abs_d, abs_r, colour = family, shape = policy)) +
+  geom_line(aes(group = model), colour = "grey70", linewidth = 0.4) +
+  geom_point(size = 2.6) +
+  scale_colour_manual(values = FAMILY_COLORS, drop = TRUE) +
+  scale_shape_manual(values = c(first = 16, joint = 17, density = 1),
+                     labels = unname(POLICY_LABELS[c("first", "joint", "density")])) +
+  labs(x = "TOEFL 11 max |d|  (lower is fairer)", y = "ELLIPSE validity  |r|",
+       colour = "Family", shape = "Policy",
+       title = "Each model under three aggregation policies",
+       subtitle = "Grey lines join the same model. Window 8, subsample.") +
+  theme_study1(base_size = 11)
+p_pol
+save_fig(p_pol, "subword_policy_plane", width = 8, height = 5)
+```
+
+# Section 6 — The masked arm
+
+The masked path is a separate matter from the first-subword question, because
+what it does today is `density`, which was not the intended construct. Three
+columns bear on the fix.
+
+```{r}
+#| label: masked
+#| eval: !expr any(pol$arch == "masked")
+masked_tbl <- val |>
+  filter(arch == "masked") |>
+  select(model, policy, abs_r) |>
+  pivot_wider(names_from = policy, values_from = abs_r) |>
+  left_join(fair |> filter(arch == "masked") |>
+              select(model, policy, max_abs_d) |>
+              pivot_wider(names_from = policy, values_from = max_abs_d,
+                          names_prefix = "d_"), by = "model")
+
+masked_tbl |>
+  mutate(across(where(is.numeric), \(x) round(x, 3))) |>
+  kable(caption = "Masked models only. |r| columns first, then max |d| columns.")
+
+div |>
+  filter(arch == "masked") |>
+  group_by(model) |>
+  summarise(joint = mean(joint), joint_indep = mean(joint_indep),
+            overcharge = mean(joint_indep) - mean(joint),
+            r = cor(joint, joint_indep), .groups = "drop") |>
+  mutate(across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(col.names = c("Model", "joint (chain)", "joint (independent)",
+                      "Overcharge (bits)", "r"),
+        caption = "What ignoring within-word dependence costs.")
+```
+
+The independent version charges more than the chain version, as it must: masking
+every subword of a word at once throws away the fact that a word's pieces predict
+each other. That is the reason a masked joint cannot be assembled from the
+existing all-masked pass and needs the extra forward passes this run made.
+
+# Read-out
+
+```{r}
+#| label: readout
+sel_r <- val |> filter(model == "olmo2-1b") |> select(policy, abs_r) |> deframe()
+sel_d <- fair |> filter(model == "olmo2-1b") |> select(policy, max_abs_d) |> deframe()
+cat(sprintf("olmo2-1b/8   |r|: first %.3f, joint %.3f (Δ %+.3f)\n",
+            sel_r["first"], sel_r["joint"], sel_r["joint"] - sel_r["first"]))
+cat(sprintf("olmo2-1b/8 max|d|: first %.3f, joint %.3f (Δ %+.3f)\n",
+            sel_d["first"], sel_d["joint"], sel_d["joint"] - sel_d["first"]))
+cat(sprintf("Median |r(first, joint)| across models: %.4f\n",
+            median(div |> group_by(model) |> summarise(r = cor(first, joint)) |> pull(r))))
+```
