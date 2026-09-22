@@ -501,18 +501,17 @@ pxc_df <- points
 
 p_xc <- ggplot(pxc_df, aes(abs_rho, abs_r)) +
   geom_point(aes(colour = window, shape = instruct), size = 2.6) +
+  # Front members are labelled. The selected default is deliberately NOT marked
+  # here: the chapter withholds the pick until the end, so no figure in this
+  # section may single it out.
   ggrepel::geom_text_repel(
-    data = filter(pxc_df, front | config == sel_cfg),
+    data = filter(pxc_df, front),
     aes(label = config), size = 2.5, max.overlaps = Inf, box.padding = 0.5,
     min.segment.length = 0, segment.colour = "grey55", seed = 42) +
-  geom_point(data = filter(pxc_df, config == sel_cfg),
-             shape = 21, size = 5, stroke = 1, colour = "black", fill = NA) +
   labs(x = "TOEFL 11 validity (|Spearman rho| vs proficiency band)",
        y = "ELLIPSE validity (|Pearson r| vs holistic score)",
        colour = "Window", shape = "Instruct",
-       title = "Does the validity ordering survive changing the criterion corpus?",
-       subtitle = paste("Circled point is the selected default. Axes are not on a common scale.",
-                        sep = "\n")) +
+       title = "ELLIPSE validity against TOEFL 11 validity") +
   theme_minimal(base_size = 10)
 p_xc
 for (hp in c("_viz_helpers.R", "src/1-predictability-benchmark/_viz_helpers.R")) {
@@ -648,10 +647,9 @@ p_hm <- ggplot(hm, aes(window, model, fill = fill_rank)) +
   scale_fill_viridis_c(option = "mako", direction = -1, name = "Within-corpus\nrank",
                        labels = scales::percent_format(accuracy = 1)) +
   labs(x = "Context window", y = NULL,
-       title = "Concurrent validity by model and context window",
-       subtitle = "Fill is rank within corpus; the two corpora are not on a common scale. Labels are raw coefficients.") +
+       title = "Concurrent validity by model and context window") +
   theme_minimal(base_size = 10) +
-  theme(panel.grid = element_blank(), plot.subtitle = element_text(size = 8, colour = "grey30"))
+  theme(panel.grid = element_blank())
 p_hm
 save_fig(p_hm, "validity_heatmap", width = 8, height = 6)
 ```
@@ -868,7 +866,7 @@ vfig <- points |>
 ends <- vfig |> group_by(model) |> slice_max(as.integer(win), n = 1) |> ungroup() |>
   mutate(nx = ifelse(win == tail(levels(win), 1), 0.10, 0.45))
 
-window_panel <- function(yvar, ylim, ylab, title, subtitle) {
+window_panel <- function(yvar, ylim, ylab, title) {
   ggplot(vfig, aes(win, .data[[yvar]], group = model, colour = family)) +
     geom_line(aes(linetype = arch_lab, alpha = instruct), linewidth = 0.75) +
     geom_point(aes(shape = instruct, alpha = instruct), size = 2.1) +
@@ -885,7 +883,7 @@ window_panel <- function(yvar, ylim, ylab, title, subtitle) {
     coord_cartesian(ylim = ylim, clip = "off") +
     labs(x = "Context window", y = ylab, colour = "Model family",
          linetype = "Architecture", shape = NULL,
-         title = title, subtitle = subtitle) +
+         title = title) +
     theme_study1(11) +
     theme(legend.position = "bottom", legend.box = "vertical",
           legend.margin = margin(t = 0, b = 0),
@@ -893,7 +891,6 @@ window_panel <- function(yvar, ylim, ylab, title, subtitle) {
           legend.key.spacing.x = grid::unit(3, "pt"),
           plot.title.position = "plot",
           plot.title = element_text(size = 11.5),
-          plot.subtitle = element_text(size = 8.5),
           axis.title.y = element_text(size = 9.5)) +
     guides(colour   = guide_legend(nrow = 2, order = 1,
                                    override.aes = list(size = 2.2, alpha = 1)),
@@ -906,10 +903,7 @@ window_panel <- function(yvar, ylim, ylab, title, subtitle) {
 p_win_ell <- window_panel(
   "abs_r", c(0.525, 0.641),
   "Validity — |Pearson r| with holistic score",
-  "Concurrent validity by model and context window (ELLIPSE)",
-  paste("Generative models give up .04 to .09 of |r| between the 8- and 64-token windows; the",
-        "masked models hold or gain over the same step. modernbert-base is excluded at the full",
-        "window as a diagnosed instrument failure, so its line stops at 64.", sep = "\n"))
+  "Concurrent validity by context window, ELLIPSE")
 p_win_ell
 save_fig(p_win_ell, "validity_by_window_ellipse", width = 6.5, height = 6)
 
@@ -918,11 +912,7 @@ save_fig(p_win_ell, "validity_by_window_ellipse", width = 6.5, height = 6)
 p_win_toe <- window_panel(
   "abs_rho", c(0.33, 0.55),
   "Validity — |Spearman rho| with proficiency band",
-  "Concurrent validity by model and context window (TOEFL 11)",
-  paste("The same layout and model set as the ELLIPSE figure, on its own scale; rho is pooled",
-        "over all essays. The window effect holds under the second criterion. The two",
-        "coefficients are not on a common scale, so only the shape of each series is comparable.",
-        sep = "\n"))
+  "Concurrent validity by context window, TOEFL 11")
 p_win_toe
 save_fig(p_win_toe, "validity_by_window_toefl", width = 6.5, height = 6)
 ```
@@ -984,10 +974,7 @@ p_size <- ggplot(vsize, aes(params_b, abs_r, colour = family)) +
   labs(x = "Parameter count (log scale)",
        y = "Validity — |Pearson r| with holistic score",
        colour = "Model family", linetype = "Architecture",
-       title = "Concurrent validity by parameter count within family (ELLIPSE)",
-       subtitle = paste("At the 8-token window, on the same y-axis as the window figure. A 3x to 10x",
-                        "parameter increase within a family moves |r| by at most .012, against the .04",
-                        "to .09 the context window costs on the same axis.", sep = "\n")) +
+       title = "Concurrent validity by parameter count within family, ELLIPSE") +
   theme_study1(11) +
   theme(legend.position = "bottom", legend.box = "vertical",
         legend.margin = margin(t = 0, b = 0),
@@ -995,7 +982,6 @@ p_size <- ggplot(vsize, aes(params_b, abs_r, colour = family)) +
         legend.key.spacing.x = grid::unit(3, "pt"),
         plot.title.position = "plot",
         plot.title = element_text(size = 11.5),
-        plot.subtitle = element_text(size = 8.5),
         axis.title.y = element_text(size = 9.5)) +
   guides(colour   = guide_legend(nrow = 1, order = 1,
                                  override.aes = list(size = 2.2)),
@@ -1045,7 +1031,6 @@ pa <- points |>
          lbl    = short_model(model),
          window = factor(window, levels = c("8", "64", "full")))
 win_labs <- c("8" = "window 8", "64" = "window 64", "full" = "window full")
-selected <- selected |> mutate(window = factor(window, levels = c("8", "64", "full")))
 
 p <- ggplot(pa, aes(max_abs_d, abs_r)) +
   geom_vline(xintercept = D_FLAG, linetype = "dotted", colour = "grey55") +
@@ -1059,22 +1044,13 @@ p <- ggplot(pa, aes(max_abs_d, abs_r)) +
   geom_point(aes(colour = family, shape = instruct, alpha = instruct), size = 3.1) +
   geom_point(data = filter(pa, front), shape = 21, size = 5.6, stroke = 1,
              colour = "black", fill = NA) +
-  # The selection is not a front member, so it needs a marker the eye separates
-  # from the circles rather than one drawn on top of them: a filled black
-  # diamond, called out by name.
-  geom_point(data = selected, shape = 23, size = 3.4, stroke = 0.9,
-             colour = "black", fill = "black") +
+  # The selected default carries NO marker of its own. The chapter reveals the
+  # pick at the end, and it is a dominated point, so circling the front gives
+  # nothing away. Every eligible configuration is labelled the same way.
   ggrepel::geom_text_repel(aes(label = lbl, colour = family, alpha = instruct),
                            size = 3.1, max.overlaps = Inf, box.padding = 0.4,
                            min.segment.length = 0, segment.colour = "grey65",
                            seed = 42, show.legend = FALSE) +
-  ggrepel::geom_label_repel(
-    data = mutate(selected, tag = "selected default"), aes(label = tag),
-    size = 3.0, fontface = "bold", colour = "black", fill = "white",
-    label.size = 0.3, label.padding = grid::unit(0.14, "lines"),
-    box.padding = 0.3, point.padding = 0.4, nudge_y = -0.072, nudge_x = 0.02,
-    direction = "y", min.segment.length = 0, segment.colour = "black",
-    segment.size = 0.4, seed = 42) +
   annotate("text", x = D_FLAG, y = 0.503, label = "|d| = 0.10", hjust = -0.06,
            size = 3.1, colour = "grey45") +
   facet_wrap(~window, ncol = 1, labeller = labeller(window = win_labs)) +
@@ -1087,16 +1063,13 @@ p <- ggplot(pa, aes(max_abs_d, abs_r)) +
     x = "Unfairness — max |Cohen's d| across L1 groups, TOEFL 11 (worse →)",
     y = "Validity — |Pearson r| with holistic score, ELLIPSE (better ↑)",
     colour = "Model family", shape = NULL,
-    title = "Fairness–validity plane, by context window",
-    subtitle = paste("Circled = non-dominated within the eligible set. Contrast models are plotted",
-                     "but excluded from the domination comparison. CIs (front only) = 95%",
-                     "bootstrap; dotted = |d| = 0.10 flag.",
-                     sep = "\n")) +
+    # Kept short deliberately: at 6.5in the longer form overran the page and
+    # the last word was clipped. The facet strips already say "window 8/64/full".
+    title = "Cross-L1 unfairness against ELLIPSE validity") +
   theme_study1(12) +
   theme(legend.position = "bottom", legend.box = "vertical",
         legend.margin = margin(t = 0, b = 0), legend.spacing.y = grid::unit(0, "pt"),
         legend.key.spacing.x = grid::unit(4, "pt"),
-        plot.subtitle = element_text(size = 9),
         plot.margin = margin(5.5, 11, 5.5, 5.5)) +
   guides(colour = guide_legend(nrow = 2, order = 1, title.position = "top",
                                override.aes = list(size = 2.6, alpha = 1)),

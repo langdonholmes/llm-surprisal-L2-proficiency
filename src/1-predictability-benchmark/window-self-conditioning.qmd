@@ -183,12 +183,7 @@ p_heat <- text_heatmap(
   width = CHAR_WIDTH, limits = LIMITS, label_size = LABEL_SIZE,
   legend_title = "Surprisal\n(bits)"
 ) +
-  labs(title = "The same words, scored twice",
-       subtitle = paste0(
-         "Opening third of TOEFL 11 response ", EXAMPLE, ". Underlined tokens are\n",
-         "\u201cpeoples\u201d (non-standard) and \u201cpeople\u201d (standard). The first \u201cpeoples\u201d is\n",
-         "costly under both windows, since nothing earlier in the essay predicts it.\n",
-         "The next two are costly only under the 8-token window."))
+  labs(title = "Token surprisal under an 8-token and a whole-essay window")
 p_heat
 save_fig(p_heat, "self_conditioning_heatmap",
          width = HM[["width"]], height = HM[["height"]])
@@ -212,14 +207,9 @@ p_occ <- ggplot(occ, aes(occurrence, surprisal_bits,
   scale_x_continuous(breaks = seq(1, max(occ$occurrence), 1)) +
   labs(x = paste0("Occurrence of \u201c", TARGET, "\u201d in reading order"),
        y = "Surprisal (bits)",
-       title = "Each time the form reappears",
-       subtitle = paste0(
-         "All twelve occurrences, whole essay. The 8-token window never reaches back far enough to\n",
-         "include an earlier use, so it charges close to full price every time. Occurrence 1 has no\n",
-         "earlier use for any window, so the gap there is ordinary context benefit rather than repetition.")) +
+       title = "Surprisal at each occurrence of the target form") +
   theme_study1(base_size = 10) +
-  theme(legend.position = "bottom",
-        plot.subtitle = element_text(size = 8, colour = "grey30"))
+  theme(legend.position = "bottom")
 p_occ
 save_fig(p_occ, "self_conditioning_occurrences", width = 8, height = 3.6)
 ```

@@ -303,18 +303,15 @@ p <- ggplot(plot_df, aes(y = config)) +
   geom_point(aes(x = allow_bits), shape = 23, fill = "white", colour = "black", size = 2) +
   geom_point(aes(x = obs_bits, colour = window, shape = window), size = 2.8) +
   geom_text(aes(x = obs_bits + 0.012, label = worst_l1), size = 2.5, hjust = 0, colour = "grey30") +
-  geom_point(data = filter(plot_df, selected), aes(x = obs_bits),
-             shape = 21, size = 5.5, stroke = 1, colour = "black", fill = NA) +
+  # The selected default is NOT circled here. The chapter withholds the pick
+  # until the end, so every configuration is drawn the same way. `selected` is
+  # still carried in the data for the tables and the prose below.
   labs(x = "Within-band gap for the worst-case L1 (bits of surprisal)", y = NULL,
        colour = "Window", shape = "Window",
-       title = "Observed displacement versus what residual confounding allows",
-       subtitle = paste("White diamond: gap that within-band proficiency could produce (Cochran 21% residual).",
-                        "Coloured point: gap actually observed. Circled point is the selected default.",
-                        sep = "\n")) +
+       title = "Observed within-band gap against the gap confounding allows") +
   scale_x_continuous(expand = expansion(mult = c(0.02, 0.10))) +
   theme_minimal(base_size = 10) +
-  theme(panel.grid.major.y = element_line(colour = "grey93"),
-        plot.subtitle = element_text(size = 8, colour = "grey30"))
+  theme(panel.grid.major.y = element_line(colour = "grey93"))
 p
 # Shared save helper (vector PDF + 400 dpi PNG), as in the Pareto reports.
 for (hp in c("_viz_helpers.R", "src/1-predictability-benchmark/_viz_helpers.R")) {

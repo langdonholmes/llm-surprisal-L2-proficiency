@@ -59,6 +59,41 @@ if (is.null(drop_var)) {
 dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
 fig_path <- function(stem) file.path(fig_dir, paste0(fig_prefix, stem))
 
+# Figure export, matching the Study 1 helper in
+# src/1-predictability-benchmark/_viz_helpers.R: an embedded-font vector PDF
+# plus a 400 dpi PNG for contexts that cannot place vector art.
+#
+# cairo_pdf() rather than grDevices::pdf(). The default device does not embed
+# its fonts, naming Helvetica and leaving the viewer to substitute, which fails
+# the "all fonts embedded" check most print submissions apply; it is also
+# Latin-1 only, so it silently rewrites en dashes and arrows as hyphens and
+# drops a Greek delta outright.
+#
+# Study 1's helper takes a ggplot. The network figures here are base graphics
+# (qgraph, bootnet), which draw as a side effect and cannot be replayed from a
+# saved object, so this one takes a drawing function and calls it once per
+# device instead.
+FIG_DPI <- 400
+
+save_base_fig <- function(stem, width, height, draw) {
+  pdf_path <- fig_path(paste0(stem, ".pdf"))
+  png_path <- fig_path(paste0(stem, ".png"))
+  render <- function() {
+    out <- draw()
+    # bootnet's plot methods return a ggplot, which reaches the device only when
+    # printed. qgraph draws directly and returns its object, so printing that
+    # would dump a list to the console.
+    if (inherits(out, "ggplot")) print(out)
+    invisible(NULL)
+  }
+  grDevices::cairo_pdf(pdf_path, width = width, height = height)
+  render(); grDevices::dev.off()
+  grDevices::png(png_path, width = width, height = height, units = "in",
+                 res = FIG_DPI, type = "cairo")
+  render(); grDevices::dev.off()
+  cat("Saved", pdf_path, "+", png_path, "\n")
+}
+
 n_cores <- parallel::detectCores() - 1
 
 cat("Held out:", if (is.null(drop_var)) "nothing (full battery)" else drop_var, "\n")
@@ -571,18 +606,17 @@ negative.
 spring_layout <- spring_coords(network$graph)
 
 plot_network(network$graph, spring_layout,
-             title = "ELLIPSE Linguistic Features (GGM Network)")
+             title = "ELLIPSE feature network (EBICglasso)")
 ```
 
 ```{r}
 #| label: save-spring-plot
 #| include: false
 
-pdf(fig_path("network_spring.pdf"), width = 13, height = 8.5)
-plot_network(network$graph, spring_layout,
-             title = "ELLIPSE Linguistic Features (GGM Network)")
-dev.off()
-cat("Saved to", fig_path("network_spring.pdf"), "\n")
+save_base_fig("network_spring", width = 13, height = 8.5, draw = function() {
+  plot_network(network$graph, spring_layout,
+               title = "ELLIPSE feature network (EBICglasso)")
+})
 ```
 
 ```{r}
@@ -599,7 +633,7 @@ circle_layout <- local({
 })
 
 plot_network(network$graph, circle_layout,
-             title = "ELLIPSE Linguistic Features (GGM Network, Circle Layout)")
+             title = "ELLIPSE feature network, circle layout")
 ```
 
 ```{r}
@@ -620,7 +654,7 @@ grey_community <- setNames(
 )
 
 plot_network(network$graph, spring_layout,
-             title = "GGM Network, Greyscale Proof",
+             title = "ELLIPSE feature network, greyscale",
              color = unname(grey_community[match(ega_result$wc[node_order], comm_ids)]),
              swatches = grey_community,
              posCol = "grey20", negCol = "grey20")
@@ -880,11 +914,10 @@ plot(boot_nonparam, labels = net_labels,
 #| label: save-edge-boot
 #| include: false
 
-pdf(fig_path("network_edge_bootstrap.pdf"), width = 12, height = 10)
-plot(boot_nonparam, labels = net_labels,
-     order = "sample", CIstyle = "quantiles")
-dev.off()
-cat("Saved to", fig_path("network_edge_bootstrap.pdf"), "\n")
+save_base_fig("network_edge_bootstrap", width = 12, height = 10, draw = function() {
+  plot(boot_nonparam, labels = net_labels,
+       order = "sample", CIstyle = "quantiles")
+})
 ```
 
 ```{r}
@@ -1042,7 +1075,8 @@ plot_proficiency_panels <- function() {
   graphics::layout(matrix(1:4, nrow = 1), widths = c(1, 1, 1, 0.42))
   for (g in prof_levels) {
     plot_network(nets_prof[[g]]$graph, avg_layout,
-                 title = paste0(g, " proficiency (n = ", nrow(df_prof[[g]]), ")"),
+                 title = paste0(g, " proficiency (n = ",
+                                format(nrow(df_prof[[g]]), big.mark = ","), ")"),
                  legend = FALSE,
                  maximum = prof_max)
   }
@@ -1057,10 +1091,8 @@ plot_proficiency_panels()
 #| label: save-group-plots
 #| include: false
 
-pdf(fig_path("network_group_comparison.pdf"), width = 18, height = 6)
-plot_proficiency_panels()
-dev.off()
-cat("Saved to", fig_path("network_group_comparison.pdf"), "\n")
+save_base_fig("network_group_comparison", width = 18, height = 6,
+              draw = plot_proficiency_panels)
 ```
 
 ```{r}

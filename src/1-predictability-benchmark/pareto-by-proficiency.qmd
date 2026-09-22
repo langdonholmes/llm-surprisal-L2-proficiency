@@ -277,11 +277,7 @@ p <- ggplot(pc, aes(maxd, config, colour = level)) +
   labs(
     x = "Unfairness — max |Cohen's d| across L1 groups (within level)   → worse",
     y = NULL,
-    title = "Cross-L1 Unfairness by Proficiency Level (shared scale)",
-    subtitle = paste("Each row = one configuration; dots = low / medium / high;",
-                     "grey line spans low↔high. Dotted = |d|=0.10 flag.\nlow is",
-                     "severely underpowered (14/L1 balanced) — hence the wide CIs",
-                     "and the long rightward reach.")) +
+    title = "Cross-L1 unfairness by proficiency level") +
   theme_study1(10) +
   theme(axis.text.y = element_text(size = 6.5),
         panel.grid.major.y = element_line(colour = "grey93"))
