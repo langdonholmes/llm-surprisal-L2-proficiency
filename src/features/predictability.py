@@ -304,8 +304,13 @@ class Predictor:
         window_size: int,
     ) -> DocPredictability:
         """
-        Process with masked language model.
-        Creates one windowed, masked sequence per token and batches them.
+        Process with a masked LM, scoring each spaCy token's *first* subword from
+        a centered context window of ``window_size`` transformer tokens.
+
+        One sequence per word: every subword of the word is replaced by
+        ``[MASK]``, so none of the word's own orthography leaks into its
+        prediction, and the first masked position is scored against its true id.
+        Words are batched together.
         """
         doc_predictability = DocPredictability(
             model_type=self.model_type, window_size=window_size
@@ -406,39 +411,29 @@ class Predictor:
                 if len(actual_ids) == 0:
                     continue
 
-                # Calculate metrics
-                losses = []
-                entropies = []
+                # The word is scored by its first subword.
+                pos = int(mask_pos[0])
+                if pos >= logits.shape[1]:
+                    continue
 
-                for pos, actual_id in zip(mask_pos, actual_ids):
-                    # Validate position is within bounds
-                    if pos >= logits.shape[1]:
-                        continue
+                pred_logits = logits[j, pos].float()
+                probs_dist = torch.softmax(pred_logits, dim=-1)
 
-                    pred_logits = logits[j, pos].float()
-                    probs_dist = torch.softmax(pred_logits, dim=-1)
+                # Cross-entropy of the true first subword under the prediction.
+                target = torch.tensor([int(actual_ids[0])], device=self.device)
+                loss = crossloss(pred_logits.unsqueeze(0), target).item()
 
-                    # Calculate cross-entropy loss
-                    target = torch.tensor([int(actual_id)], device=self.device)
-                    loss = crossloss(pred_logits.unsqueeze(0), target).item()
-                    losses.append(loss)
+                # Entropy of the predicted distribution, H(p) = -sum(p * log(p)).
+                entropy = -torch.sum(probs_dist * torch.log(probs_dist + 1e-10)).item()
 
-                    # Calculate entropy of the predicted distribution
-                    # H(p) = -sum(p * log(p))
-                    entropy = -torch.sum(
-                        probs_dist * torch.log(probs_dist + 1e-10)
-                    ).item()
-                    entropies.append(entropy)
-
-                # Store results only if we have valid losses
-                if losses:
-                    token_pred = TokenPredictability(
+                doc_predictability.add_token(
+                    TokenPredictability(
                         spacy_idx=spacy_idx,
                         text=doc[spacy_idx].text,
-                        subword_losses=losses,
-                        subword_entropy=entropies,
+                        subword_losses=[loss],
+                        subword_entropy=[entropy],
                     )
-                    doc_predictability.add_token(token_pred)
+                )
 
         return doc_predictability
 

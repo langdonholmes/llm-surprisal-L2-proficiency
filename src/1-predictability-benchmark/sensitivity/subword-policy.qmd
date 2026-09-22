@@ -26,7 +26,7 @@ paired:
 |---|---|---|
 | `first` | the word's first subword, left context only. **The current convention.** | first subword with the whole word masked |
 | `joint` | `-log P(word \| context)` by the chain rule. Exact. | within-word autoregressive scoring (Kauf & Ivanova 2023) |
-| `density` | joint / *k*, per-subword information | **what the masked path does today** |
+| `density` | joint / *k*, per-subword information | joint / *k*, per-subword information |
 | `joint_indep` | — | sum of the all-masked marginals, ignoring within-word dependence |
 
 The question this has to answer is narrow and practical. Not whether `first` is
@@ -95,11 +95,11 @@ cat(sprintf("%d models, %d ELLIPSE essays, %d TOEFL essays\n",
 # Section 1 — Does this reproduce the production pipeline?
 
 Before anything is read off this run, the re-implementation has to agree with the
-one that produced the chapter. The production path is `first` for causal models
-and `density` for masked ones, so those two columns should reproduce
-`mean_surprisal_bits` at window 8. Spans are rebuilt from the offset mapping
-here rather than reused from `get_token_alignment`, so a handful of words differ
-per essay and exact equality is not expected; a high correlation and a small mean
+one that produced the chapter. The production path scores a word by its first
+subword under both architectures, so the `first` column should reproduce
+`mean_surprisal_bits` at window 8. Spans are rebuilt from the offset mapping here
+rather than reused from `get_token_alignment`, so a handful of words differ per
+essay and exact equality is not expected; a high correlation and a small mean
 offset are.
 
 ```{r}
@@ -115,9 +115,7 @@ prod <- bind_rows(
                                        prod_bits = mean_surprisal_bits))
 
 verify <- pol |>
-  mutate(is_production = (arch == "causal" & policy == "first") |
-                         (arch == "masked" & policy == "density")) |>
-  filter(is_production) |>
+  filter(policy == "first") |>
   inner_join(prod, by = c("corpus", "text_id", "model")) |>
   group_by(model, arch) |>
   summarise(r = cor(bits, prod_bits),
@@ -217,13 +215,14 @@ non-standard forms are more frequent in lower-proficiency writing. Whether the
 divergence is large enough at essay level to move a conclusion is what the rest
 of this report measures.
 
-The masked columns make the third point. `density` charges *less* for
-*misstake* than `first` does (19.69 against 18.29 for BERT, and 8.86 against
-14.62 for OLMo-2's three-piece cut), because dividing by *k* rewards a word for
-having been cut up. That is the defect in the masked path stated as plainly as it
-can be. And `joint (indep.)` charges 74.79 bits for *unpredictability* against
-the chain version's 44.89, which is why a masked joint cannot be assembled from
-the all-masked pass the production code already makes.
+The other two columns show why neither alternative is attractive. `density`
+charges *less* for *misstake* than `first` does (19.69 against 18.29 for BERT,
+and 8.86 against 14.62 for OLMo-2's three-piece cut), because dividing by *k*
+rewards a word for having been cut up, which is the opposite of what a
+proficiency measure wants. And `joint (indep.)` charges 74.79 bits for
+*unpredictability* against the chain version's 44.89, which is why a masked joint
+cannot be assembled from an all-masked pass and needs the extra forward passes
+this run made.
 
 # Section 3 — Validity
 
@@ -403,9 +402,9 @@ save_fig(p_pol, "subword_policy_plane", width = 8, height = 5)
 
 # Section 6 — The masked arm
 
-The masked path is a separate matter from the first-subword question, because
-what it does today is `density`, which was not the intended construct. Three
-columns bear on the fix.
+Masked models admit one policy the causal models do not, since a masked LM has
+no chain rule to appeal to, and they are also where the four policies spread
+furthest apart. All four are reported here.
 
 ```{r}
 #| label: masked

@@ -540,10 +540,10 @@ Three further readings. The pooled and within-L1 TOEFL orderings agree at 0.966,
 so the band-by-L1 confounding documented in
 `proficiency-confound-sensitivity.qmd` does not drive the validity ordering.
 The window effect replicates across corpora, with mean validity falling from
-window 8 to 64 to full on both (0.626, 0.574, 0.543 on ELLIPSE; 0.499, 0.462,
-0.430 on TOEFL), although it is architecture-dependent, since masked models are
+window 8 to 64 to full on both (0.626, 0.574, 0.526 on ELLIPSE; 0.498, 0.461,
+0.393 on TOEFL), although it is architecture-dependent, since masked models are
 level or better at window 64 while causal models are clearly best at window 8.
-The excluded `modernbert-base/full` configuration reached |rho| = 0.034 on
+The excluded `modernbert-base/full` configuration reached |rho| = 0.029 on
 TOEFL 11 before it was dropped, near zero on a corpus and criterion entirely
 independent of the evidence used to diagnose it.
 
@@ -787,10 +787,11 @@ purrr::map(better, \(b) zou_pair(sel_cfg, b)) |> bind_rows() |>
 
 **Architecture is window-dependent, not uniform.** The plan (§4) expects masked
 to beat comparable generative at this tier, and at window 64 it does clearly,
-with both masked models ahead of `gpt2` by about 0.047. At window 8 the
-advantage disappears, with `modernbert-base` tied against `gpt2`
-([-0.0096, +0.0010]) and `bert-base` actually behind by 0.0075. The full-window
-row for `modernbert-base` is absent because that configuration is excluded.
+with both masked models ahead of `gpt2` by about 0.044. At window 8 the
+advantage does not merely disappear but reverses: `modernbert-base` is behind
+`gpt2` by 0.0074 [-0.0126, -0.0022] and `bert-base` by 0.0097 [-0.0159,
+-0.0036], and both intervals exclude zero. The full-window row for
+`modernbert-base` is absent because that configuration is excluded.
 
 **Every window contrast is resolved.** All 31 intervals exclude zero — 33 within-
 model pairs less the two that `modernbert-base/full` would have entered — so with
@@ -997,7 +998,7 @@ size_zou |>
 ```
 
 Only one of the three within-family contrasts is null. ModernBERT gains 0.012
-[0.010, 0.014] of `|r|` from base to large and GPT-2 gains 0.006 [0.003, 0.008]
+[0.010, 0.015] of `|r|` from base to large and GPT-2 gains 0.006 [0.003, 0.008]
 from 124M to 1.5B, and on 6,482 essays neither interval reaches zero. The
 OLMo-2 contrast, the one the selection rule turns on, is 0.0007 [-0.0012,
 +0.0025] for a sevenfold increase in parameters, and does.

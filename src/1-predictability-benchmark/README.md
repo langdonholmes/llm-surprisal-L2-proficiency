@@ -78,15 +78,20 @@ plus the `pareto-*.qmd` reports, which run on the §2 outputs.
   `sensemakr` (Cinelli & Hazlett 2020), with a latent-variable version kept in an
   appendix. All three agree; the two main methods rank the 32 configurations at
   Spearman 0.99 and clear all 32. Depends on `ordinal`, `truncnorm`, `sensemakr`.
+- `recompute_masked_first_subword.py` — brings an existing masked table onto the
+  first-subword policy by rescoring only the words the tokenizer split, which is
+  a few per cent of the cost of a full rescore. Not part of the pipeline; use it
+  instead of `run_surprisal.py --overwrite` when only the word-scoring rule has
+  changed.
 - `sensitivity/` — checks on the measure itself rather than on the analysis.
   Two runs, in order. `fertility.*` asks what the tokenizer alone accounts for;
   `subword_policy.py` + `subword-policy.qmd` then run the models and compare the
-  aggregation conventions directly. **Read-out: the first-subword convention is
-  kept.** Scoring a word by its joint probability instead lowers ELLIPSE `|r|`
-  for all eleven models (−.007 to −.029), leaves the validity ranking at
-  Spearman .99, keeps the causal class above the masked class, and does not
-  change the selected configuration. `assemble_policy_data.py` exports the tidy
-  CSV, `policy_example.py` the one-sentence worked example.
+  candidate word-scoring rules directly. **This is the justification for the
+  first-subword convention.** Scoring a word by its joint probability instead
+  lowers ELLIPSE `|r|` for all eleven models (−.007 to −.029), leaves the
+  validity ranking at Spearman .99, keeps the causal class above the masked
+  class, and does not change the selected configuration. `assemble_policy_data.py`
+  exports the tidy CSV, `policy_example.py` the one-sentence worked example.
 
   `fertility.py` + `fertility.qmd` ask how much of the result rides on the
   first-subword convention, by measuring tokenizer fertility over both corpora
@@ -217,8 +222,8 @@ ELLIPSE essays on BERT/GPT-2 at the full window; flagged for reporting).
 
 **`modernbert-base/full` is excluded from the matrix. Resolved 2026-08-26.**
 
-Mean surprisal at the full window (5.364 bits on ELLIPSE) exceeded its own
-8-token window (4.736), which a working configuration cannot do. The cause is an
+Mean surprisal at the full window (5.339 bits on ELLIPSE) exceeded its own
+8-token window (4.706), which a working configuration cannot do. The cause is an
 **interaction**, not a long-context failure: ModernBERT-base degrades only when
 it receives long real context *and* a masking rate far below its 30% training
 rate. This method masks one token per sequence, so the rate is `1/window`, about
@@ -238,7 +243,7 @@ repo's code (`Predictor` reproduces a standalone implementation and the corpus
 numbers), and tensor length (padding 128 real tokens to 514 reproduces the
 128-token result exactly).
 
-Only the full window is affected. `modernbert-base/64` is normal at |r| = 0.620.
+Only the full window is affected. `modernbert-base/64` is normal at |r| = 0.618.
 Scoring the full window at a higher masking rate would change the construct and
 break comparability with the other 32 configurations, so there is no in-method
 fix and the configuration is dropped. **Studies 2 and 3 are unaffected**, since
@@ -246,52 +251,18 @@ the selected configuration is `olmo2-1b/8`.
 
 Excluded via `EXCLUDED_CONFIGS` in each report's setup chunk.
 
-**The masked path averages a word's subwords; the causal path scores one.
-Measured 2026-09-22; fix identified, not yet applied.**
-
-`TokenPredictability.mean_loss` averages a word's subword surprisals, so a masked
-model's word score is information *density* per subword. The causal path scores
-the first subword only and has no such denominator. The two architectures are
-therefore not measuring the same quantity, and the matrix ranks them against each
-other. Density was not the intended construct on either path.
-
-The masked average is also a product of independent marginals rather than a joint:
-every subword of the word is masked at once, so within-word dependence is
-discarded. The fix is the within-word autoregressive scoring of Kauf & Ivanova
-(2023), which is the masked analogue of the causal chain rule.
-
-Evidence of the footprint is in `sensitivity/fertility.qmd` §5: the two masked
-models show the strongest coupling between essay surprisal and fertility
-(`bert-base` r = .53 against .40 at the other end), which is what a per-subword
-denominator predicts.
-
-**The fix is to score the first subword, not to build a joint.**
-`sensitivity/subword-policy.qmd` scored both. Moving the masked path from the
-current average to the first subword changes ELLIPSE `|r|` by at most .0027 and
-max `|d|` by at most .007 across the three masked models, because 97% of words
-are single-subword and the two policies coincide there by definition. The proper
-joint (Kauf & Ivanova) is *worse* on both axes for all three, and for
-`bert-base` it moves the worst-displaced L1 from TEL to ARA, importing the
-tokenizer-fertility displacement that `first` blocks. So the construct error is
-real and worth correcting, the correction is cheap, and it will not move any
-number the chapter reports.
-
-To apply it: score only `subword_start` in `_process_masked`, then
-`run_surprisal.py --models bert-base modernbert-base modernbert-large
---overwrite`, `assemble_analysis_data.py`, and re-render the four Study 1
-reports.
-
 ## Method notes (kept consistent across all models)
 
 - **Surprisal in bits** (log base 2); text-level index = mean token surprisal.
-- **Masked** models mask the whole word and score it from a centered context
-  window (full window reserves 2 positions for `[CLS]`/`[SEP]`). Each of the
-  word's subwords is scored against the fully-masked sequence and the results
-  are **averaged**, which is not the same construct as the causal path — see
-  Known issues.
-- **Causal** models score each word's *first* subword from left context only,
-  using equal-length windows that end at the target (verified against a manual
-  next-token reference). The first token of an essay has no context and is left
-  unscored.
+- **A word is scored by its first subword**, under both architectures. Words the
+  tokenizer leaves whole are unaffected by this; for the 2-4% it splits, the
+  alternatives are compared in `sensitivity/subword-policy.qmd`, which is the
+  justification for the convention.
+- **Masked** models mask the whole word, so none of its own orthography leaks
+  into the prediction, and score the first masked position from a centered
+  context window (full window reserves 2 positions for `[CLS]`/`[SEP]`).
+- **Causal** models score from left context only, using equal-length windows that
+  end at the target (verified against a manual next-token reference). The first
+  token of an essay has no context and is left unscored.
 - **Raw essay text is scored identically for base and instruct models** — no
   chat template, no system prompt — so the post-training contrast is valid.

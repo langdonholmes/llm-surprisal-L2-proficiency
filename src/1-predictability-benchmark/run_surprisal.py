@@ -12,6 +12,9 @@ Each surprisal row is one essay scored at one context window, carrying the
 essay's labels (ELLIPSE trait scores / TOEFL l1+level) so the §3 analysis has
 everything in one place. Surprisal is reported in **bits** (log base 2).
 
+A word is scored by its **first subword** under both architectures; see
+`sensitivity/subword-policy.qmd` for the comparison against the alternatives.
+
 Idempotent at (text_id, window) granularity: re-running skips work already on
 disk and writes are flushed atomically every FLUSH_EVERY essays, so a crash or
 a newly-added model/window only computes what is missing.

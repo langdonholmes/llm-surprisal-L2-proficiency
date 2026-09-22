@@ -378,16 +378,16 @@ The ranking is what the selection rule actually consumes, and it barely moves:
 by more than one place. The two masked models stay at the bottom of the ordering
 before and after.
 
-One detail in that table is not about the tokenizer. The two masked models show
-the strongest coupling between surprisal and fertility
-(`r sprintf("%.2f", max(pr$r_surp_fert))` for `bert-base`, against
-`r sprintf("%.2f", min(pr$r_surp_fert))` at the other end). That is the
-signature of a separate problem: the masked path in
-`features.predictability` averages over a word's subwords rather than summing
-them, so a masked model's word score is information *density* per subword, and
-fertility is its denominator. The causal path scores one subword and has no such
-denominator. The two architectures are not measuring the same thing, and that is
-a defect to fix rather than a result to interpret.
+The right-hand column of that table orders the models by how tightly their essay
+surprisal tracks fertility, from
+`r sprintf("%.2f", max(pr$r_surp_fert))` down to
+`r sprintf("%.2f", min(pr$r_surp_fert))`, and the masked models sit at the top of
+it. That ordering is reported rather than interpreted, because nothing here
+separates the two candidate explanations. The tokenizers with the highest
+fertility are BERT's and ModernBERT's (Section 2), and those same models are the
+weakest on validity, so architecture, vocabulary size and capacity all move
+together across this matrix. A design that varied the tokenizer within a model
+would be needed to tell them apart.
 
 ```{r}
 #| label: fig-partial
@@ -439,7 +439,7 @@ bind_rows(ell, toe) |>
 The rates are low but not zero, and they are concentrated: a small share of
 essays carries them. Under the current first-subword convention this is
 harmless, because only one subword index is ever read. It stops being harmless
-the moment a word's span is summed over, and there is a second span defect that
+the moment a word's span is summed over, and there is a second span issue that
 these counts do not capture at all: `pairwise(..., add_extra = True)` gives the
 final aligned word of every document a span of exactly one subword, so the last
 word of every essay would be truncated under summing. A joint-probability run
@@ -467,6 +467,5 @@ The ranking that Study 1 reports does not appear to be a tokenization artefact,
 which is the claim the chapter needs to defend. What remains open is the size of
 the gap between first-subword and summed surprisal on the two-to-four per cent of
 words that split, which this report cannot estimate because it never ran a model.
-A subsample comparison at window 8 answers it, and the masked-path averaging
-defect named in Section 5 should be fixed in the same pass, since until it is,
-the masked and causal arms are not measuring the same construct.
+A subsample comparison at window 8 answers it, and `subword-policy.qmd` is that
+comparison.
