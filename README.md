@@ -108,8 +108,7 @@ src/
     metrics.py              # ELLIPSE features merged with scores
   1-predictability-benchmark/   # Study 1: predictability benchmark (ELLIPSE, TOEFL)
   2-nomological-network/        # Study 2: network psychometric analysis (R/Quarto, ELLIPSE)
-  3-vector-transformations/     # Study 3: NMF / vector transformations (ELLIPSE, TOEFL)
-    pilot/                  # Archived pilot code (UMAP/HDBSCAN + NMF exploration)
+  3-surprisal-decomposition/    # Study 3: what high-surprisal tokens are (W&I+LOCNESS, ELLIPSE)
 data/
   ellipse/                  # ELLIPSE target corpus (studies 1, 2, 3)
     ELLIPSE_Final_github.csv  # Public ELLIPSE dataset (6,482 essays, 44 prompts)

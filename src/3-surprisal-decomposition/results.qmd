@@ -1,0 +1,290 @@
+---
+title: "Study 3. Results"
+subtitle: "What the high-surprisal tokens are: errors, acceptable surprise, and the repairs that name them"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Overview
+
+Studies 1 and 2 showed that the share of high-surprisal tokens tracks
+proficiency. Study 3 asks what those tokens are. A token is *high* when its
+surprisal under the Study 1 configuration (OLMo-2 1B, 8-token window) exceeds
+τ, the 90th percentile of token surprisal in the strongest third of ELLIPSE dev
+essays.
+
+Two corpora are used.
+
+- **W&I+LOCNESS** (BEA-2019; Yannakoudakis et al. 2018) has expert corrections.
+  It holds learner essays at CEFR levels A, B and C and 50 essays by native
+  student writers (LOCNESS, level N). Every high token is either corrected by
+  the annotator (an error) or left alone (acceptable). This answers *how much*
+  of the surprisal is error, with no model involved.
+- **ELLIPSE** is the corpus of Studies 1 and 2. It has no corrections, so it is
+  where the LM repairs are applied as essay profiles against the human scores.
+
+The LM repair method asks the same model which minimal edit would make the text
+expected, which names *what kind* of error a token is. It is checked against
+the W&I corrections before it is read on ELLIPSE. The proposal's δ-vector
+method, and why it does not answer the question, is in `appendix/appendix.qmd`.
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(jsonlite)
+library(knitr)
+source("src/1-predictability-benchmark/_viz_helpers.R")
+R3 <- "results/study3"
+TH <- fromJSON(file.path(R3, "threshold.json"))
+LEVELS <- c("A", "B", "C", "N")
+gt <- fromJSON(file.path(R3, "gold_tests.json"))
+lv <- read_csv(file.path(R3, "gold_by_level.csv")) |> mutate(level = factor(level, LEVELS))
+fmt_rho <- function(x) sprintf("%.2f [%.2f, %.2f]", x$rho, x$ci[1], x$ci[2])
+```
+
+τ = `r sprintf("%.2f", TH$tau_bits)` bits, which means the model gave the
+observed word a probability below about 1 in 2,500. It is fixed on ELLIPSE dev
+and applied unchanged to every corpus.
+
+# 1. How much of high surprisal is error
+
+```{r}
+#| label: threshold
+thr <- read_csv(file.path(R3, "gold_threshold.csv")) |> mutate(level = factor(level, LEVELS)) |> arrange(level)
+thr |>
+  transmute(level, `tokens` = n_tokens, `above τ` = n_high,
+            `corrected token` = share_of_high_ERR_TOK, `word missing before it` = share_of_high_ERR_INS,
+            `follows an error` = share_of_high_POST, `left uncorrected` = share_of_high_OK) |>
+  kable(digits = 3, format.args = list(big.mark = ","),
+        caption = "W&I+LOCNESS: what the annotator did with the tokens above τ, as shares of those tokens")
+```
+
+A token counts as an error when the annotator changed it, or inserted a word
+just before it (an omission surfaces at the next word). Tokens right after a
+corrected token are kept apart, since they may owe their surprisal to the error
+before them.
+
+```{r}
+#| label: fig-decomposition
+#| fig-width: 7
+#| fig-height: 3.5
+dec <- lv |>
+  select(level, Errors = err_rate, Acceptable = acc_rate, `Follows an error` = post_rate) |>
+  pivot_longer(-level, names_to = "part", values_to = "per_1000") |>
+  mutate(part = factor(part, c("Errors", "Follows an error", "Acceptable")))
+p <- ggplot(dec, aes(level, per_1000, fill = part)) +
+  geom_col(width = 0.7) +
+  scale_fill_manual(values = c(Errors = "#b2182b", `Follows an error` = "#ef8a62", Acceptable = "#2166ac"), name = NULL) +
+  labs(x = "Level (N = native writers)", y = "High-surprisal tokens per 1,000") +
+  theme_study1()
+save_fig(p, "gold_decomposition", 7, 3.5, dir = R3)
+p
+```
+
+```{r}
+#| label: rates
+lv |>
+  transmute(level, essays = n_essays, `all above τ` = high_rate, errors = err_rate, acceptable = acc_rate,
+            `follows an error` = post_rate, `acceptable share` = acc_share) |>
+  kable(digits = 2, caption = "Mean rate per 1,000 tokens by level. Acceptable share is acceptable / (acceptable + errors)")
+tibble(rate = c("all above τ", "errors", "acceptable", "acceptable share"),
+       key = c("high_rate", "err_rate", "acc_rate", "acc_share")) |>
+  mutate(`ρ with level, learners (A < B < C)` = map_chr(key, ~ fmt_rho(gt$rho_with_level[[.x]])),
+         `native − C, per 1,000` = map_chr(key, ~ {
+           d <- gt$native_minus_C[[.x]]; k <- if (.x == "acc_share") 1 else 1000
+           sprintf("%.1f [%.1f, %.1f]", k * d$diff, k * d$ci[1], k * d$ci[2])
+         })) |>
+  select(-key) |>
+  kable(caption = "Essay-level Spearman ρ with CEFR level, and the native − C difference (95% bootstrap CIs over essays). The acceptable-share row is a proportion, not a rate")
+```
+
+High surprisal is two signals that move in opposite directions.
+
+- **Errors fall steeply with proficiency**, from about
+  `r round(lv$err_rate[lv$level == "A"])` per 1,000 tokens at A to
+  `r round(lv$err_rate[lv$level == "C"])` at C.
+- **Acceptable surprise rises**, from `r round(lv$acc_rate[lv$level == "A"])`
+  to `r round(lv$acc_rate[lv$level == "C"])` per 1,000.
+- **Total surprise still falls**, because errors fall faster than acceptable
+  surprise rises. The total therefore understates how strongly errors track
+  level (ρ = `r sprintf("%.2f", gt$rho_with_level$err_rate$rho)` for errors
+  against `r sprintf("%.2f", gt$rho_with_level$high_rate$rho)` for the total).
+- **Native writers are more surprising than C learners, not less.** Their
+  error rate is at the C level, and the difference is acceptable surprise.
+
+So the measure does not penalize unexpected but acceptable writing. The penalty
+comes from errors. Whether acceptable surprise is *effective* writing is beyond
+what the corrections can show, since they mark errors and not quality.
+
+# 2. What acceptable surprise looks like
+
+Each high token is looked up in the Dolma reference corpora built for Study 2.
+A word counts as *attested* in context when both of its bigrams (with the
+previous word and with the next word) occur in edited Dolma prose, and as *rare*
+when it occurs fewer than once per million words there.
+
+```{r}
+#| label: types
+ty <- read_csv(file.path(R3, "gold_types.csv"))
+ty |>
+  transmute(type = ttype, n, `share acceptable` = share_ok, A = share_ok_A, B = share_ok_B, C = share_ok_C,
+            N = share_ok_N, `share of all errors` = share_of_errors) |>
+  arrange(desc(`share acceptable`)) |>
+  kable(digits = 2, format.args = list(big.mark = ","),
+        caption = "W&I+LOCNESS tokens above τ by type: share left uncorrected, overall and by level (tokens that follow an error excluded)")
+```
+
+```{r}
+#| label: rare-attested
+ra <- gt$rho_with_level$rare_attested_acc_rate
+```
+
+- **Attestation separates acceptable from erroneous content words.** Rare words
+  attested on both sides are the most reliably acceptable type of high token,
+  and rare words in unattested combinations are close to a coin flip.
+- **Nonwords, function words and punctuation lean towards error.** Proper nouns
+  and numbers lean towards acceptable.
+- **Rare, attested, acceptable words rise with proficiency**, from
+  `r sprintf("%.1f", lv$rare_attested_acc_rate[lv$level == "A"])` per 1,000
+  tokens at A to `r sprintf("%.1f", lv$rare_attested_acc_rate[lv$level == "C"])`
+  at C and `r sprintf("%.1f", lv$rare_attested_acc_rate[lv$level == "N"])` for
+  native writers (ρ with level `r fmt_rho(ra)`). They are a small part of
+  acceptable surprise, most of which is common words in attested combinations.
+- **Every type is more often acceptable from A to C.** The same kind of word is
+  more likely to be used correctly by a stronger writer, so type alone is a
+  weak guide to whether a given token is an error.
+
+# 3. What the error is: LM repairs
+
+For each high token, about 23 minimal single-word edits are proposed:
+
+- another inflection of the word;
+- a near spelling (edit distance 1 or 2);
+- one of the model's top predictions in its place;
+- deleting it;
+- inserting one of the model's top predictions before it.
+
+Each edit is scored by how much it raises the log-probability of the word and
+the next five subwords, under the same model and window as the surprisal. An
+edit has to pay for itself at 1 bit per character changed, a cost fixed in
+advance from Shannon's estimate for English. The token's label is the best
+paying edit, subclassed by what it changes (for example `INS_DET` for an
+inserted determiner, `MORPH_S_V` for verb agreement, `FORM_NONWORD` for a
+misspelling), or NONE when no edit pays. This adapts LM-based error correction
+(Bryant & Briscoe 2018; Yasunaga et al. 2021) to explain the measure's own
+surprisal.
+
+Labels fall into three groups. *Grammatical* labels fix an inflection or a
+spelling, or insert, delete or replace a function word or punctuation.
+*Lexical* labels replace, delete or insert a content word. NONE means no edit
+paid.
+
+```{r}
+#| label: repair-groups
+rep <- read_csv(file.path(R3, "gold_repair.csv"))
+rep |>
+  filter(level_of == "group") |>
+  transmute(group = label, n, `share corrected` = 1 - share_ok, `share of all errors` = share_of_errors,
+            A = 1 - share_ok_A, B = 1 - share_ok_B, C = 1 - share_ok_C, N = 1 - share_ok_N) |>
+  kable(digits = 2, format.args = list(big.mark = ","),
+        caption = "W&I+LOCNESS: share of tokens in each repair group that the annotator corrected, overall and by level")
+```
+
+```{r}
+#| label: repair-labels
+rep |>
+  filter(level_of == "label", n >= 200) |>
+  transmute(label, n, `share corrected` = 1 - share_ok, `share of all errors` = share_of_errors) |>
+  arrange(desc(`share corrected`)) |>
+  kable(digits = 2, format.args = list(big.mark = ","),
+        caption = "Share corrected by repair label (labels with at least 200 tokens)")
+```
+
+- **Grammatical labels lean towards error.** The group is corrected
+  `r sprintf("%.0f%%", 100 * (1 - rep$share_ok[rep$level_of == "group" & rep$label == "grammatical"]))`
+  of the time, against `r sprintf("%.0f%%", 100 * gt$base_share_corrected)` for
+  all high tokens. Inserting a missing preposition or determiner, fixing a
+  nonword, and fixing an irregular form or verb agreement are corrected 80–90%
+  of the time. Swapping in a different function word is closer to even.
+- **Lexical labels do not.** "The model expected a different content word" is
+  as often an acceptable choice as an error, which is why a paying repair alone
+  cannot decide whether a token is an error.
+- **NONE is mostly acceptable**, but it still holds a fifth of all errors.
+  These are errors with no single-word fix, such as word order or phrasing.
+- **The same label is more often an error at lower levels**, from A to C, as
+  with the token types.
+
+Examples of winning edits on ELLIPSE (the full set is in
+`results/study3/repair_cards.md`):
+
+- nonword spelling: *atitude → attitude*, *thier → their*;
+- real-word confusion: *thing → think*, *Specially → especially*;
+- inflection: *described → describes*, *a street that look → looks*,
+  *I have choose → chosen*;
+- omission: *have [a] sort of*, *as [a] result*, *never too late [to] fix*.
+
+# 4. Repairs as essay profiles (ELLIPSE)
+
+Per essay, the rate of each label per scored token.
+
+```{r}
+#| label: profiles
+pr <- read_csv(file.path(R3, "profiles_rho.csv"))
+pr |>
+  filter(str_starts(label, "group_")) |>
+  transmute(group = str_remove(label, "group_"), `share of high tokens` = share_of_high,
+            `ρ with Overall` = sprintf("%.2f [%.2f, %.2f]", rho_overall, lo, hi),
+            `low` = per_1000_low, `mid` = per_1000_mid, `high` = per_1000_high) |>
+  kable(digits = 2, caption = "ELLIPSE (all 6,482 essays): rate per 1,000 tokens by Overall band (below 3, 3, 3.5 and above) and Spearman ρ with Overall (95% bootstrap CI)")
+```
+
+```{r}
+#| label: fig-profiles
+#| fig-width: 7
+#| fig-height: 5
+pp <- pr |>
+  filter(!str_starts(label, "group_"), share_of_high >= .005) |>
+  mutate(group = if_else(str_ends(label, "_CONTENT"), "lexical", "grammatical")) |>
+  ggplot(aes(rho_overall, fct_reorder(label, rho_overall), colour = group)) +
+  geom_vline(xintercept = 0, colour = "grey60") +
+  geom_pointrange(aes(xmin = lo, xmax = hi), size = 0.3) +
+  scale_colour_manual(values = c(grammatical = "#b2182b", lexical = "#ef8a62"), name = NULL) +
+  labs(x = "Spearman ρ of the label's rate with Overall", y = NULL) +
+  theme_study1(10)
+save_fig(pp, "profiles_rho", 7, 5, dir = R3)
+pp
+```
+
+- **Every frequent label except inserted punctuation is rarer in stronger
+  essays.** The grammatical group falls most steeply, and the lexical group
+  nearly as steeply.
+- **The rate of high tokens with no paying repair rises slightly with
+  Overall.** This matches the W&I result that NONE is mostly acceptable
+  surprise.
+- **The W&I levels show the same pattern** (`profiles_wi_levels.csv`). Almost
+  every grammatical label falls from A to C, and native writers sit near the C
+  level, with somewhat more spelling labels.
+
+# Summary for the write-up
+
+- **High surprisal is two opposite signals.** On W&I+LOCNESS, errors fall
+  steeply with proficiency and acceptable surprise rises, so total surprise
+  understates the error signal. Native writers have the most acceptable
+  surprise, at a C-level error rate.
+- **Attestation characterizes acceptable surprise.** Rare words in combinations
+  attested in edited prose are the most reliably acceptable kind of high token,
+  and their rate rises with level.
+- **LM repairs name the error.** Grammatical repair labels lean towards
+  corrected tokens, and the insertion, inflection and nonword labels are
+  corrected 80–90% of the time. Content-word substitutions and NONE are mostly
+  acceptable.
+- **On ELLIPSE, repair profiles behave as error measures should.** Every
+  frequent label but inserted punctuation falls with Overall, and unrepaired
+  high tokens rise slightly.

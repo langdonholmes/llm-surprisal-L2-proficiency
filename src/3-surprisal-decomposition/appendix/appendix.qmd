@@ -1,0 +1,395 @@
+---
+title: "Study 3. Appendix: Delta Vectors"
+subtitle: "Why the proposal's δ decomposition describes words, not errors"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Overview
+
+The proposal planned to explain high-surprisal tokens with delta vectors,
+δ = e_pred − e_obs in OLMo-2 1B's output space, decomposed by NMF. This
+appendix reports that analysis and why it does not answer the question. It
+rests on two premises, checked first.
+
+1. The token-level surprisal used here is the same quantity Study 1 validated
+   and Study 2 placed in the nomological network.
+2. δ carries information about *how the prediction failed*, not just *which
+   word was observed*. If δ is mostly a function of the observed word, an NMF
+   of δ will recover a vocabulary partition.
+
+The second premise fails, by construction, and the decomposition then does
+what that predicts. Inputs come from `1_extract.py`, `2_select.py` and
+`appendix/A1`–`A6`. Every estimate uses ELLIPSE dev essays unless a table says
+otherwise. Units are bits. The analysis rules were frozen before the test set
+was read (`DECISIONS.md`, D11).
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(jsonlite)
+library(knitr)
+
+source("src/1-predictability-benchmark/_viz_helpers.R")
+RESULTS <- "results/study3"
+R3 <- RESULTS
+TH <- fromJSON(file.path(RESULTS, "threshold.json"))
+BANDS <- c("low", "mid", "high")
+labels <- read_csv("src/3-surprisal-decomposition/appendix/component_labels.csv")
+comps <- read_csv(file.path(R3, "components_delta.csv")) |> left_join(select(labels, -top_lemma_share), by = "component")
+cors_test <- read_csv(file.path(R3, "component_correlations_test.csv")) |> left_join(select(labels, -top_lemma_share), by = "component")
+sweep <- list.files(R3, "^nmf_ksweep_\\d+\\.csv$", full.names = TRUE) |> map_dfr(read_csv)
+```
+
+# 1. The token-level surprisal reproduces Study 1
+
+The extraction pass runs the Study 1 `Predictor` with the same model revision,
+dtype, batch size and window, and records the top-50 next-token distribution at
+every scored position. The surprisal is recomputed from the same logits the
+top-50 comes from, so δ is computed at exactly the prediction that was
+thresholded.
+
+```{r}
+#| label: reproduction
+bind_rows(lapply(names(TH$checks), function(c) as_tibble(TH$checks[[c]]) |> mutate(corpus = c))) |>
+  select(corpus, everything()) |>
+  kable(digits = 20, caption = "Per-essay agreement with the Study 1 table (window 8)")
+```
+
+Agreement is exact up to floating-point summation order. Every essay is
+present and every token count matches.
+
+# 2. Threshold and selection
+
+```{r}
+#| label: threshold
+tibble(
+  quantity = c("τ (bits)", "Reference set", "Reference essays", "Reference tokens",
+               "ELLIPSE tokens scored", "ELLIPSE tokens selected", "Share selected",
+               "Selected, dev", "Selected, test"),
+  value = c(sprintf("%.3f", TH$tau_bits),
+            sprintf("dev essays with Overall ≥ %.1f", TH$dev_top_tertile_overall_cut),
+            format(TH$n_reference_essays, big.mark = ","),
+            format(TH$n_reference_tokens, big.mark = ","),
+            format(TH$exclusions$ellipse$n_scored, big.mark = ","),
+            format(TH$exclusions$ellipse$n_selected, big.mark = ","),
+            sprintf("%.1f%%", 100 * TH$exclusions$ellipse$n_selected / TH$exclusions$ellipse$n_scored),
+            format(TH$n_selected_by_split$dev, big.mark = ","),
+            format(TH$n_selected_by_split$test, big.mark = ","))
+) |> kable(caption = "Threshold definition and counts")
+```
+
+Overall is reported in half-points, so the "top tertile" is every dev essay at
+3.5 or above. That is 37% of dev essays, not 33%. A threshold of 11.3 bits
+means the model gave the observed word a probability below about 1 in 2,500.
+
+## How the selected tokens spread over proficiency
+
+```{r}
+#| label: topk
+topk <- read_csv(file.path(RESULTS, "premise_topk.csv")) |>
+  mutate(band = factor(band, BANDS)) |> arrange(band)
+kable(topk, digits = 3,
+      col.names = c("Tertile", "Tokens selected", "Observed in top 50",
+                    "Top-50 mass", "Median surprisal", "Mean p(top 1)"),
+      caption = "Selected tokens by Overall tertile (all ELLIPSE essays)")
+```
+
+The tertiles contribute about equally to the selected set. Low-proficiency
+essays have a higher *rate* of high-surprisal tokens, but high-proficiency
+essays are longer, and the two roughly cancel. A decomposition fitted to these
+rows is therefore not a decomposition of weak writing. A third of its input
+comes from the strongest essays in the corpus.
+
+The observed word is almost never among the model's 50 most probable
+continuations (`r sprintf("%.1f%%", 100 * weighted.mean(topk[[3]], topk[[2]]))` of selected
+positions). At these positions, the prediction and the observation are not
+near-competitors in the same paradigm. The model was expecting something of a
+different kind.
+
+## Composition by part of speech
+
+```{r}
+#| label: composition
+comp <- read_csv(file.path(RESULTS, "premise_composition.csv")) |>
+  mutate(band = factor(band, BANDS))
+comp |>
+  filter(level == "pos") |>
+  select(set, band, pos, share) |>
+  pivot_wider(names_from = c(set, band), values_from = share, values_fill = 0) |>
+  arrange(desc(high_low)) |>
+  slice_head(n = 12) |>
+  kable(digits = 3, caption = "Share of tokens by POS, all scored tokens vs. selected tokens, by tertile")
+```
+
+```{r}
+#| label: fig-composition
+#| fig-width: 8
+#| fig-height: 4.5
+p <- comp |>
+  filter(level == "pos", pos %in% c("NOUN", "VERB", "ADJ", "ADV", "PRON", "AUX",
+                                     "ADP", "DET", "PUNCT", "PROPN", "SCONJ", "CCONJ")) |>
+  mutate(set = recode(set, all = "All scored tokens", high = "Above τ")) |>
+  ggplot(aes(share, fct_reorder(pos, share), colour = band)) +
+  geom_point(size = 2.2, position = position_dodge(width = 0.5)) +
+  facet_wrap(~set) +
+  scale_colour_manual(values = c(low = "#b2182b", mid = "#ef8a62", high = "#2166ac"),
+                      name = "Overall tertile") +
+  scale_x_continuous(labels = scales::percent) +
+  labs(x = "Share of tokens", y = NULL) +
+  theme_study1()
+save_fig(p, "premise_composition", 8, 4.5, dir = RESULTS)
+p
+```
+
+Thresholding shifts the token mix sharply toward content words. Nouns, verbs
+and adjectives make up about 39% of all scored tokens and between 67% and 70%
+of selected ones. Function words (determiners, adpositions, auxiliaries, particles) and
+punctuation are under-selected. The mix barely changes across tertiles, though.
+Proficiency changes how many tokens cross the threshold, not which parts of
+speech they are.
+
+# 3. What the delta vector encodes
+
+δ = e_pred − e_obs, where e_pred is the probability-weighted mean of the
+top-50 output embeddings and e_obs is the output embedding of the observed
+first subword. The rows below use a random 100,000 of the dev rows.
+
+```{r}
+#| label: variance
+var <- read_csv(file.path(RESULTS, "premise_variance.csv"))
+kable(var |> select(term, value), digits = 3,
+      caption = "Total variance (trace of the covariance) of δ and its two parts")
+v <- deframe(var |> select(term, value))
+```
+
+The variance of δ decomposes as tr Cov(e_obs) + tr Cov(e_pred) − 2 tr
+Cov(e_pred, e_obs). The observed-word term is `r sprintf("%.2f", v[["tr Cov(e_obs)"]])`
+of δ's `r sprintf("%.2f", v[["tr Cov(delta)"]])`
+(`r sprintf("%.0f%%", 100 * v[["tr Cov(e_obs)"]] / v[["tr Cov(delta)"]])`), and
+the prediction term is `r sprintf("%.2f", v[["tr Cov(e_pred)"]])`. This follows
+from the construction. A single vocabulary row varies about as much as the
+vocabulary does (`r sprintf("%.2f", v[["tr Cov(W_U rows, whole vocabulary)"]])`),
+while a 50-way probability-weighted average is pulled toward the centre of the
+embedding space and varies far less. The average cosine between δ and −e_obs
+is `r sprintf("%.2f", v[["mean cos(delta, -e_obs)"]])`.
+
+```{r}
+#| label: identity
+r2 <- read_csv(file.path(RESULTS, "premise_identity_r2.csv"))
+r2 |>
+  mutate(target = recode(target, delta = "δ", e_pred = "e_pred", e_obs = "e_obs")) |>
+  kable(digits = 3, col.names = c("Vector", "Grouped by", "Groups", "Between-group R²"),
+        caption = "Share of each vector's total sum of squares lying between groups")
+```
+
+The identity of the observed subword accounts for
+`r sprintf("%.0f%%", 100 * r2$r2[r2$target == "delta" & r2$grouping == "observed first subword"])`
+of δ's sum of squares. With that many small groups, some between-group variance
+arises by chance, and the permuted-label row puts chance at
+`r sprintf("%.0f%%", 100 * r2$r2[r2$grouping == "observed first subword, permuted"])`.
+The top-1 predicted subword accounts for
+`r sprintf("%.0f%%", 100 * r2$r2[r2$target == "delta" & r2$grouping == "top-1 predicted subword"])`.
+That is above what fewer than half as many groups would produce by chance, but
+it is small. Observed POS accounts for almost nothing.
+
+The implication for the decomposition is direct. An NMF of δ will mostly
+recover groupings of observed words, because that is where nearly all of δ's
+variance lies. An earlier pilot with ModernBERT found the same, so this is a
+property of the δ construction rather than of one model. Whether any error-type
+signal survives on top of it is an empirical question that the M vs. M_obs
+comparison in section 6 answers.
+
+# 4. Essay level
+
+```{r}
+#| label: essay
+es <- read_csv(file.path(RESULTS, "premise_essay.csv")) |> filter(split == "dev")
+tibble(
+  measure = c("rate of tokens above τ", "count of tokens above τ", "tokens scored (length)",
+              "mean surprisal"),
+  var = c("rate_high", "n_high", "n_scored", "mean_surprisal")
+) |>
+  mutate(rho = map_dbl(var, ~ cor(es[[.x]], es$overall, method = "spearman")),
+         rho_with_mean = map_dbl(var, ~ cor(es[[.x]], es$mean_surprisal, method = "spearman"))) |>
+  select(-var) |>
+  kable(digits = 3, col.names = c("Measure", "ρ with Overall", "ρ with mean surprisal"),
+        caption = "Dev essays (raw, not prompt-adjusted)")
+```
+
+The rate of high-surprisal tokens tracks proficiency almost as closely as mean
+surprisal does, and the two are close to redundant. The raw count barely
+tracks it, because longer essays are both better and have more tokens above
+τ. Any essay-level profile built from these tokens needs length in the model,
+which is why log length is in every model in the ladder.
+
+# 5. The δ components
+
+```{r}
+#| label: sweep
+sweep |>
+  group_by(k) |>
+  summarise(seeds = n(), median_matched_cos = paste(sprintf("%.3f", median_matched_cos), collapse = " / "),
+            rel_error = mean(rel_error), .groups = "drop") |>
+  kable(digits = 3, caption = "Split-half stability (two essay-level split seeds) and reconstruction error. k = 80 seed 1 did not converge, so the D4 rule selects k = 50")
+```
+
+```{r}
+#| label: taxonomy
+comps |>
+  count(class, level) |>
+  arrange(class, desc(n)) |>
+  kable(caption = "Taxonomy of the 50 δ components (D5/D10)")
+comps |>
+  filter(class != "lexeme feature") |>
+  select(component, class, level, label, top_observed, top_predicted, top_lemma_share) |>
+  kable(digits = 2, caption = "The ten components that are not single-word features")
+```
+
+Forty of the fifty components are a single observed word: a top-lemma share
+of ≥ .50 among the 200 highest-loading tokens, and usually 1.00. The
+decomposition recovers a vocabulary partition, which the premise checks
+predicted. Of the remaining ten, three are artifacts: subword continuation
+after a word fragment, punctuation spacing, and the corpus's anonymization
+placeholders. Seven were labelled error patterns, and every one of them is
+defined by what the model *expected* (*the*, *to*, *be*, *is*), not by what was
+written. Section 6 shows that at least two of those seven are better read as
+lexical range than as error.
+
+# 6. Components, proficiency and prediction
+
+## Association with Overall
+
+```{r}
+#| label: rq2
+ov <- cors_test |> filter(score == "overall")
+fig <- ov |>
+  mutate(name = sprintf("C%02d %s", component, str_trunc(label, 48)),
+         sig = if_else(q < .05, "q < .05", "n.s.")) |>
+  ggplot(aes(rho, fct_reorder(name, rho), colour = class, shape = sig)) +
+  geom_vline(xintercept = 0, colour = "grey60") +
+  geom_point(size = 2) +
+  scale_shape_manual(values = c(`q < .05` = 16, n.s. = 1), name = NULL) +
+  scale_colour_manual(values = c(`lexeme feature` = "grey50", `error pattern` = "#b2182b", artifact = "#56B4E9"), name = NULL) +
+  labs(x = "Spearman ρ with Overall (prompt-centred, test essays)", y = NULL) +
+  theme_study1(10)
+save_fig(fig, "rq2_components", 8, 9, dir = R3)
+```
+
+```{r}
+#| label: fig-rq2
+#| fig-width: 8
+#| fig-height: 9
+fig
+h2 <- fromJSON(file.path(R3, "h2_permutation_test.json"))
+```
+
+On test, `r sum(ov$q < .05)` of 50 components correlate with Overall at q <
+.05. The frozen H2 test compares mean |ρ| between the morphosyntactic error
+patterns and the content-word lexeme features: `r sprintf("%.3f", h2$mean_abs_rho_morphosyntactic)`
+vs `r sprintf("%.3f", h2$mean_abs_rho_lexical)`, permutation p =
+`r sprintf("%.3f", h2$p_one_sided)` (5 vs 27 components). It replicates the dev
+result (p = .019).
+
+The test passes, but H2 as worded is not supported. H2 says morphosyntactic
+components load disproportionately on *low*-proficiency essays, and |ρ|
+ignores direction. Three of the five morphosyntactic components correlate
+*positively* with Overall: C0, determiner expected before a noun, ρ = +.33;
+C4, *be* expected, +.13; and C12, *the* expected, +.10. Only C8
+(*have/do/make* for the copula, −.22) and C13 (*to* omitted, −.09) load on
+weak essays. C0's cards explain the reversal. Many of its tokens are correct
+zero-article generic plurals and rarer nouns (*about teenagers*, *freshmen*,
+*kidnapped*), which strong writers produce more often. The component marks
+lexical range at a position where the model expected a determiner, not
+omission. The labels were written blind to outcomes and stay as frozen, and
+this reading is reported as a post-hoc interpretation.
+
+## Prediction beyond mean surprisal
+
+```{r}
+#| label: rq3
+lad <- bind_rows(read_csv(file.path(R3, "ladder_devcv.csv")), read_csv(file.path(R3, "ladder_test.csv")))
+lad |>
+  mutate(est = if_else(str_detect(model, " - "), r2, delta_r2_vs_B0),
+         cell = sprintf("%.3f [%.3f, %.3f]", est, ci_lo, ci_hi),
+         cell = if_else(model == "B0", sprintf("R² = %.3f", r2), cell)) |>
+  select(model, mode, cell) |>
+  pivot_wider(names_from = mode, values_from = cell) |>
+  kable(caption = "ΔR² over B0 (mean surprisal + log length), within-prompt; contrast rows give the difference between the two named models. devcv = 10-fold prompt-grouped CV within dev; test = fit on dev, scored once on test, 2,000 bootstrap resamples")
+```
+
+```{r}
+#| label: fig-rq3
+#| fig-width: 8
+#| fig-height: 4
+p <- lad |>
+  filter(!str_detect(model, " - "), model != "B0") |>
+  mutate(model = fct_reorder(model, delta_r2_vs_B0)) |>
+  ggplot(aes(delta_r2_vs_B0, model, colour = mode)) +
+  geom_vline(xintercept = c(0, .05), colour = c("grey60", "grey80"), linetype = c(1, 2)) +
+  geom_pointrange(aes(xmin = ci_lo, xmax = ci_hi), position = position_dodge(width = 0.5), size = 0.3) +
+  scale_colour_manual(values = c(devcv = "#ef8a62", test = "#2166ac"), name = NULL) +
+  labs(x = "ΔR² over mean surprisal + length", y = NULL) +
+  theme_study1()
+save_fig(p, "rq3_ladder", 8, 4, dir = R3)
+p
+```
+
+Under the frozen rules:
+
+- **H3 is supported for the δ profile.** On test, ΔR² = .062 [.048, .076]:
+  the point estimate is above .05 and the lower bound above zero.
+- **The increment is not evidence of error types (D3).** The observed-word
+  profile M_obs does as well (M − M_obs = .001 [−.008, .010]). Whatever the
+  high-surprisal tokens add to mean surprisal is available from *which words*
+  were surprising.
+- **The repair profile does about as well.** R = .051 [.035, .066]. In dev it
+  edged ahead of δ (+.019), and on test it did not (−.011 [−.029, .006]).
+- **Both add a little to the Study 2 battery.** S2+M − S2 = .014 and S2+R − S2
+  = .012, with both lower bounds above zero.
+- **Distributional summaries add almost nothing** (B1: surprisal variance and
+  rate above τ).
+
+Prediction does not choose between the representations. Interpretation does.
+At equal predictive power, the repair profile's dimensions are named,
+directional edits (main report). The δ profile is mostly a vocabulary profile.
+
+# 7. Replication on TOEFL 11
+
+```{r}
+#| label: toefl
+tr <- fromJSON(file.path(R3, "toefl_transfer.json"))
+tibble(quantity = c("Relative reconstruction error, ELLIPSE dev", "… ELLIPSE test", "… TOEFL 11",
+                    "Median matched cosine, TOEFL-fitted vs ELLIPSE components"),
+       value = c(tr$rel_error_by_split$dev, tr$rel_error_by_split$test, tr$rel_error_by_split$toefl,
+                 tr$median_replication_cosine)) |>
+  kable(digits = 3, caption = "Transfer of the δ decomposition")
+enframe(unlist(tr$spearman_prediction_vs_level), "model", "rho_with_level") |>
+  kable(digits = 3, caption = "ELLIPSE-dev elastic nets applied unchanged to TOEFL 11: Spearman ρ of the prediction with level")
+```
+
+The δ components do not replicate. A separate NMF of TOEFL 11 deltas at the
+same k matches the ELLIPSE components at a median cosine of .46, which is
+consistent with components that are topic-bound words.
+
+# Summary for the write-up
+
+- The surprisal is Study 1's surprisal, exactly.
+- Close to 90% of δ's variance is observed-word identity, by construction,
+  since one vocabulary row varies far more than a 50-way average pulled toward
+  the centre.
+- The decomposition is stable (split-half matched cosine ≥ .99) and recovers a
+  vocabulary partition, in which 40 of 50 components are single observed
+  words.
+- The δ profile adds to mean surprisal (ΔR² = .062 on test), but the
+  observed-word profile adds the same (M − M_obs = .001 [−.008, .010]). What δ
+  adds is *which words* were surprising, not how the prediction failed.
+- The components point in both directions with proficiency, and they do not
+  replicate on TOEFL 11.
