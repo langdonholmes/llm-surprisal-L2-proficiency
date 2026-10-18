@@ -42,9 +42,9 @@ pass departs from it, the frozen choices, and the confirmatory results.
 | 8 | `8_repair.py` | The repair representation on real essays: `collect` (from lab caches), `check` (coded sample, label cards), `l1` (the pre-registered article test). |
 | 9 | `9_wi.py` | W&I+LOCNESS gold categories per token (ERR_TOK, ERR_INS, POST, OK) and the gold lab bench; base rates by CEFR level. |
 | 10 | `10_decompose.py` | Fits the acceptability model (`lab/reps/comb_rac`, GBM) on W&I train and applies it to ELLIPSE and TOEFL. Per-essay error and acceptable rates, the EM prior adjustment (D16), and the D15 tests. |
-| — | `lab/` | The representation lab: synthetic benchmark, evaluation battery, idea families, confirmation bench. See `lab/README.md`. |
+| — | `lab/` | The representation lab (synthetic benchmark, evaluation battery, confirmation bench) and the repair, attestation and context code the real-data stages use. See `lab/README.md`. |
 
-Reports: `premises.qmd`, `lab/representation-lab.qmd`, `results.qmd`.
+Reports: `premises.qmd`, `results.qmd`. The lab's results are in `lab/README.md`.
 
 ## Running
 

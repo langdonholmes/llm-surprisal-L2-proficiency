@@ -390,3 +390,15 @@ attested mass is the cleaner lexical index.
   - EM acceptable rate per 1,000 tokens: low 22, medium 46, high 71. Errors:
     171, 110, 65.
   The ELLIPSE pattern replicates.
+
+## 2026-10-18 · D18. Cleanup of exploration code (no analysis change)
+
+Langdon's direction: the write-up needs the δ result (appendix) and the repair
+method, not the exploration that led to it. Removed from the code, and kept in
+the git history before this date: `pilot/` (the earlier ModernBERT UMAP/HDBSCAN
+clustering of δ), the geometry and hidden-state representation families and
+their notes, the repair variants that lost to `rep_repair_subpos` and
+`rep_mdl_plus_pos`, the attestation and context sub-variants that only fed
+the sweep, `comb_ra` / `comb_rc`, and `lab/representation-lab.qmd`. No result
+reported in D1–D17 is changed. Every module that the real-data stages
+(`8_repair.py`, `10_decompose.py`) import is kept.

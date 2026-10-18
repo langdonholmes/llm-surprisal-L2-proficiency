@@ -16,8 +16,8 @@ enough to be decomposed and read.
 | `lm.py` | Shared model access (`LM.locate`, `LM.window`, `LM.score`) for representations that need extra forward passes. |
 | `harness.py` | `Ctx` (what a representation may read) and `evaluate` (the battery). |
 | `run.py` | `run.py <rep> [...]` featurizes, caches, evaluates, appends to the scoreboard. |
-| `reps/` | One module per representation. Baselines: `surprisal`, `e_obs`, `delta`, `e_pred`. Agent families: `geo_*` (geometry), `rep_*` (LM repair), `hid_*` (hidden states). |
-| `notes/` | One notebook-style log per idea family. |
+| `reps/` | One module per representation. Baselines: `surprisal`, `e_obs`, `delta`, `e_pred`. Repair: `rep_repair_subpos` (essay profiles), `rep_mdl_plus_pos` (acceptability model). Acceptability: `att_full_s`, `ctx_excess(_s4)`, `comb_rac`. |
+| `notes/` | Logs for the repair and attestation families, and the literature check. |
 
 Two benchmarks share the code. The development bench (default) is what ideas
 are iterated on. The **confirmation bench** (`LAB_BENCH=conf`) uses different
@@ -78,13 +78,15 @@ the four surprisal scalars beat δ at detection by a wide margin.
 | `rep_mdl_subpos_pos` | repair | 31 | .896 | .763 | .390 > .313 | **all four** |
 | `rep_mdl_plus_pos` | repair | 99 | .938 | .839 | .333 ≈ .332 | 1, 2 |
 | `geo_rel3` | geometry | 100 | .913 | .775 | .343 < .357 | 1, 2 |
-| `geo_scal` | geometry | 6 | .859 | .319 | .077 < .262 | 1 |
 | `hid_obs8c` | hidden | 2057 | .883 | .754 | .379 < .403 | 1, 2 |
-| `hid_obs8` | hidden | 2048 | .865 | .749 | .379 < .403 | 1, 2 |
 | `delta` (baseline) | — | 2048 | .678 | .613 | .318 < .467 | none |
 
 Every family improves on δ when a classifier is trained on top of it. Only the
 repair representations keep that improvement in an *unsupervised*
 decomposition, where components follow error type more than the observed word.
-They are also the only ones whose dimensions arrive with names. Family notes
-are in `notes/`.
+They are also the only ones whose dimensions arrive with names.
+
+The geometry family (relations among the stored top-k vectors) and the
+hidden-state family (probes on layer 2–16 residual states) were removed from
+the code on 2026-10-18 and remain in the git history before that date, with
+their notes. Their rows above are kept as the record of the comparison.

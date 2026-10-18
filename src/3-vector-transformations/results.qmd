@@ -21,15 +21,15 @@ what kind of unconventionality they contain. Two representations are reported.
   output space, decomposed by NMF (k = 50) on dev essays.
 - **LM repairs (added after the premise checks).** The language model scores
   about 23 minimal edits at each token, and the best edit, or NONE, names the
-  problem. It was chosen in `lab/representation-lab.qmd` as the only
+  problem. It was chosen in the representation lab (`lab/README.md`) as the only
   representation that meets all four pre-set criteria on a held-out synthetic
   benchmark.
 
 Everything that touches proficiency labels was fixed before the test set was
 read (`DECISIONS.md`, D11). Results are reported by research question.
 Companion reports are `premises.qmd` (what the selected tokens are, and why δ
-is mostly word identity) and `lab/representation-lab.qmd` (how the repair
-representation was found).
+is mostly word identity) and `lab/README.md` (how the repair representation
+was found).
 
 ```{r}
 #| label: setup
