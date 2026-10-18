@@ -116,7 +116,7 @@ cat("Held out:", if (is.null(drop_var)) "nothing (full battery)" else
                      paste(drop_var, collapse = ", "), "\n")
 cat("Predictability nodes retained:",
     if (has_focal) paste(pred_vars, collapse = ", ") else "none", "\n")
-cat("Figures ->", fig_path("*.pdf"), "| bootstrap cores:", n_cores, "\n")
+cat("Figures ->", fig_path("*.pdf"), "| bootEGA cores:", n_cores, "\n")
 ```
 
 ```{r}
@@ -549,6 +549,18 @@ relax_overlap <- function(co, vsize, iter = 600, pad = 1.10, radius_scale = 0.01
   co * max(1, scale)
 }
 
+# relax_overlap() assumes a square panel. In a panel `aspect` times as tall as
+# it is wide, qgraph squeezes the layout vertically while node size holds, so
+# nodes that cleared each other in a square can touch and hide the edge
+# between them. Relax in the panel's own proportions, then restore the
+# original vertical extent.
+relax_for_aspect <- function(co, vsize, aspect, pad = 1.4) {
+  out <- relax_overlap(cbind(co[, 1], co[, 2] * aspect), vsize,
+                       pad = pad, radius_scale = 0.019 * aspect)
+  out[, 2] <- out[, 2] / max(abs(out[, 2])) * max(abs(co[, 2]))
+  out
+}
+
 # Spring coordinates for one graph, already de-overlapped
 spring_coords <- function(graph, seed = 42) {
   set.seed(seed)
@@ -558,11 +570,26 @@ spring_coords <- function(graph, seed = 42) {
 
 # Legend in its own panel so it doesn't overlap the graph. Three blocks:
 # colour (the primary reading), shape (secondary), edge style (sign).
-draw_network_legend <- function(cex = 0.82, swatches = community_colors) {
+# `horizontal` lays the blocks side by side for a strip above stacked panels.
+draw_network_legend <- function(cex = 0.82, swatches = community_colors,
+                                horizontal = FALSE) {
   op <- par(mar = c(0, 0, 0, 0))
   on.exit(par(op))
   plot.new()
   plot.window(xlim = c(0, 1), ylim = c(0, 1))
+  if (horizontal) {
+    legend(0, 1, legend = names(community_colors), pch = 22,
+           pt.bg = unname(swatches), col = "grey45", pt.cex = 1.6, cex = cex,
+           bty = "n", title = "EGA community (colour)", title.adj = 0, ncol = 2)
+    legend(0.40, 1, legend = names(construct_shapes),
+           pch = unname(shape_pch[construct_shapes]), pt.bg = "grey92",
+           col = "grey10", pt.lwd = 1.4, pt.cex = 1.5, cex = cex, bty = "n",
+           title = "Construct (shape)", title.adj = 0, ncol = 2)
+    legend(0.78, 1, legend = c("positive", "negative"), lty = c(1, 2),
+           lwd = 2, col = "grey25", cex = cex, bty = "n",
+           title = "Partial correlation", title.adj = 0)
+    return(invisible(NULL))
+  }
   legend(0, 0.98, legend = names(community_colors), pch = 22,
          pt.bg = unname(swatches), col = "grey45", pt.cex = 1.8,
          cex = cex, bty = "n", title = "EGA community (colour)",
@@ -585,7 +612,9 @@ draw_network_legend <- function(cex = 0.82, swatches = community_colors) {
 plot_network <- function(graph, coords, title = "", legend = TRUE,
                          minimum = 0.05, cut = 0.10, color = node_colors,
                          posCol = "#2166AC", negCol = "#B2182B",
-                         swatches = community_colors, ...) {
+                         swatches = community_colors, vsize = node_vsize,
+                         title.cex = 1.2,
+                         mar = c(2, 2, 4, 2), ...) {
   if (legend) graphics::layout(matrix(1:2, nrow = 1), widths = c(1, 0.32))
   qg <- qgraph(graph,
                layout = coords,
@@ -594,7 +623,7 @@ plot_network <- function(graph, coords, title = "", legend = TRUE,
                color = color,
                shape = node_shapes,
                polygonList = shape_polygons,
-               vsize = node_vsize,
+               vsize = vsize,
                borders = TRUE,
                border.width = 2.6,
                border.color = "grey10",
@@ -608,10 +637,10 @@ plot_network <- function(graph, coords, title = "", legend = TRUE,
                posCol = posCol,
                negCol = negCol,
                title = title,
-               title.cex = 1.2,
+               title.cex = title.cex,
                # qgraph's `mar` pads the [-1, 1] box in tenths; keep it tight so
                # the graph fills the panel, with extra headroom for the title.
-               mar = c(2, 2, 4, 2),
+               mar = mar,
                ...)
   if (legend) {
     draw_network_legend(swatches = swatches)
@@ -887,17 +916,17 @@ if (mi_together) {
 #| label: boot-ega
 #| fig-cap: "Bootstrap EGA: stability of community assignments"
 
-# NOT REPRODUCIBLE ACROSS RENDERS, despite the seed. bootEGA and the two
-# bootnet calls below run their resampling in parallel worker processes, and
-# neither seeds those workers from the master's RNG state, so set.seed() here
-# fixes nothing that happens inside them.
-set.seed(42)
+# bootEGA resamples in parallel worker processes, which never see the
+# master's RNG state, so set.seed() alone fixes nothing. Its `seed` argument
+# instead derives one seed per iteration up front and hands each to its
+# worker, which makes the result reproducible at any core count.
 boot_ega <- bootEGA(df_net, iter = 500,
                     corr = "spearman",
                     model = "glasso",
                     algorithm = "walktrap",
                     na.data = "pairwise",
                     type = "parametric",
+                    seed = 42, ncores = n_cores,
                     verbose = FALSE)
 
 cat("Modal number of communities across bootstraps:",
@@ -988,11 +1017,10 @@ ega_nobridge <- EGA(df_nobridge, corr = "spearman", model = "glasso",
                     algorithm = "walktrap", na.data = "pairwise",
                     plot.EGA = FALSE)
 
-set.seed(42)
 boot_ega_nobridge <- bootEGA(df_nobridge, iter = 500, corr = "spearman",
                              model = "glasso", algorithm = "walktrap",
                              na.data = "pairwise", type = "parametric",
-                             verbose = FALSE)
+                             seed = 42, ncores = n_cores, verbose = FALSE)
 
 # $frequency is a two-column data frame of (# of Factors, Frequency).
 prop_dim <- function(b, k) {
@@ -1021,9 +1049,13 @@ cat(sprintf("\nStability of each battery's own solution:\n  full battery      P(
 #| fig-width: 12
 #| fig-height: 10
 
+# Single core on purpose. bootnet's parallel path starts a snow cluster and
+# never seeds its workers, and it has no seed argument and accepts no cluster
+# of our own, so the only way set.seed() reaches the resampling is to keep it
+# in this process. Same for the case-dropping bootstrap below.
 set.seed(42)
 boot_nonparam <- bootnet(network, nBoots = 1000, type = "nonparametric",
-                         nCores = n_cores,
+                         nCores = 1,
                          verbose = FALSE)
 
 plot(boot_nonparam, labels = net_labels,
@@ -1049,7 +1081,7 @@ save_base_fig("network_edge_bootstrap", width = 12, height = 10, draw = function
 set.seed(42)
 boot_case <- bootnet(network, nBoots = 1000, type = "case",
                      statistics = c("strength", "expectedInfluence"),
-                     nCores = n_cores,
+                     nCores = 1,
                      verbose = FALSE)
 
 plot(boot_case, statistics = c("strength", "expectedInfluence"))
@@ -1199,27 +1231,48 @@ print(sapply(nets_prof, function(n) sum(n$graph[upper.tri(n$graph)] != 0)))
 #|   Network comparison across three equal-bin proficiency groups. Colour =
 #|   full-sample EGA community, shape = theoretical construct; layout, edge
 #|   scaling and the |.05| display threshold are shared across panels.
-#| fig-width: 18
-#| fig-height: 6
+#| fig-width: 6.5
+#| fig-height: 8.2
+
+# Sized for a portrait page: 6.5 in is the text width of an APA student paper
+# (1 in margins on US Letter), and 8.2 in leaves room for the figure number,
+# title and note within the 9 in text block. The panels stack so each one gets
+# the full width; side by side, the node labels printed at about 3 pt.
+prof_fig_w <- 6.5
+prof_fig_h <- 8.2
+prof_legend_h <- 0.7
+prof_panel_aspect <- (prof_fig_h - prof_legend_h) / 3 / prof_fig_w
+prof_vsize <- node_vsize * 1.3
 
 # One layout and one edge-width scale for all three panels, so differences in
-# the pictures are differences in the networks.
-avg_layout <- relax_overlap(
-  do.call(averageLayout, lapply(nets_prof, function(n) n$graph)),
-  node_vsize
+# the pictures are differences in the networks. Each panel is about 2.6 times
+# as wide as it is tall, so the layout is relaxed for that shape: in the square
+# relaxation MTLD and CWO end up touching and their edge disappears. This is
+# the one place where a per-axis stretch is accepted, since the alternative is
+# panels too small to read.
+avg_layout <- relax_for_aspect(
+  relax_overlap(do.call(averageLayout, lapply(nets_prof, function(n) n$graph)),
+                node_vsize),
+  prof_vsize, prof_panel_aspect
 )
 prof_max <- max(abs(unlist(lapply(nets_prof, function(n) n$graph))))
 
+# Labels at a fixed size (about 7.5 pt at print scale) rather than shrunk to fit
+# the smallest node, which is what made them illegible; nodes are enlarged to
+# hold them.
 plot_proficiency_panels <- function() {
-  graphics::layout(matrix(1:4, nrow = 1), widths = c(1, 1, 1, 0.42))
+  graphics::layout(matrix(1:4, ncol = 1),
+                   heights = c(prof_legend_h, rep((prof_fig_h - prof_legend_h) / 3, 3)))
+  draw_network_legend(cex = 0.8, horizontal = TRUE)
   for (g in prof_levels) {
     plot_network(nets_prof[[g]]$graph, avg_layout,
                  title = paste0(g, " proficiency (n = ",
                                 format(nrow(df_prof[[g]]), big.mark = ","), ")"),
                  legend = FALSE,
-                 maximum = prof_max)
+                 maximum = prof_max, vsize = prof_vsize,
+                 title.cex = 0.95, mar = c(1, 1, 2.5, 1),
+                 label.scale = FALSE, label.cex = 0.62)
   }
-  draw_network_legend()
   graphics::layout(1)
 }
 
@@ -1230,7 +1283,7 @@ plot_proficiency_panels()
 #| label: save-group-plots
 #| include: false
 
-save_base_fig("network_group_comparison", width = 18, height = 6,
+save_base_fig("network_group_comparison", width = prof_fig_w, height = prof_fig_h,
               draw = plot_proficiency_panels)
 ```
 
