@@ -1,0 +1,51 @@
+component,label,class,level,top_lemma_share,labeller,date
+0,"model expected a determiner before a noun (teenagers, rare nouns)",error pattern,morphosyntactic,0.44,claude-opus-5-5,2026-10-17
+1,model expected the previous word to continue (fragment / subword continuation),artifact,other,0.1,claude-opus-5-5,2026-10-17
+2,punctuation spacing: comma or mark after a discourse marker with a space before it,artifact,orthographic,0.325,claude-opus-5-5,2026-10-17
+3,the observed word 'student',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+4,model expected 'be' after a modal or 'to'; the clause stops or the verb is wrong,error pattern,morphosyntactic,0.275,claude-opus-5-5,2026-10-17
+5,the observed word 'can',lexeme feature,function,1.0,claude-opus-5-5,2026-10-17
+6,the observed word 'school',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+7,"non-word misspellings (conclution, responsable, helf)",error pattern,orthographic,0.24,claude-opus-5-5,2026-10-17
+8,have/do/make where the copula 'is' was expected,error pattern,morphosyntactic,0.46,claude-opus-5-5,2026-10-17
+9,Generic_Name / Generic_City anonymization placeholders,artifact,other,0.96,claude-opus-5-5,2026-10-17
+10,the observed word 'curfew',lexeme feature,lexical,0.98,claude-opus-5-5,2026-10-17
+11,the observed word 'success',lexeme feature,lexical,0.96,claude-opus-5-5,2026-10-17
+12,model expected 'the': determiner omission before a noun phrase,error pattern,morphosyntactic,0.07,claude-opus-5-5,2026-10-17
+13,"model expected 'to': infinitive marker omitted (going talk, able attend)",error pattern,morphosyntactic,0.265,claude-opus-5-5,2026-10-17
+14,the observed word 'class',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+15,the observed word 'third',lexeme feature,lexical,0.73,claude-opus-5-5,2026-10-17
+16,the observed word 'career',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+17,the observed word 'i',lexeme feature,function,0.99,claude-opus-5-5,2026-10-17
+18,the observed word 'work',lexeme feature,lexical,0.995,claude-opus-5-5,2026-10-17
+19,the observed word 'thing',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+20,the observed word 'reason',lexeme feature,lexical,0.995,claude-opus-5-5,2026-10-17
+21,the observed word 'help',lexeme feature,lexical,0.97,claude-opus-5-5,2026-10-17
+22,the observed word 'do',lexeme feature,function,1.0,claude-opus-5-5,2026-10-17
+23,the observed word 'people',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+24,the observed word 'failure',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+25,the observed word 'they',lexeme feature,function,0.995,claude-opus-5-5,2026-10-17
+26,the observed word 'work',lexeme feature,lexical,0.98,claude-opus-5-5,2026-10-17
+27,the observed word 'technology',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+28,the observed word 'because',lexeme feature,function,1.0,claude-opus-5-5,2026-10-17
+29,the observed word 'always',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+30,the observed word 'accomplish',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+31,the observed word 'there',lexeme feature,function,1.0,claude-opus-5-5,2026-10-17
+32,the observed word 'online',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+33,the observed word 'some',lexeme feature,function,0.99,claude-opus-5-5,2026-10-17
+34,the observed word 'good',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+35,the observed word 'learn',lexeme feature,lexical,0.845,claude-opus-5-5,2026-10-17
+36,the observed word 'yourself',lexeme feature,function,0.995,claude-opus-5-5,2026-10-17
+37,the observed word 'everyone',lexeme feature,function,0.695,claude-opus-5-5,2026-10-17
+38,the observed word 'positive',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+39,the observed word 'like',lexeme feature,function,0.995,claude-opus-5-5,2026-10-17
+40,"bare 'be' in non-standard syntax, mixed with 'because' misspellings",error pattern,other,0.43,claude-opus-5-5,2026-10-17
+41,the observed comma,lexeme feature,other,1.0,claude-opus-5-5,2026-10-17
+42,the observed word 'impression',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+43,the observed word 'teacher',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+44,the observed word 'how',lexeme feature,function,1.0,claude-opus-5-5,2026-10-17
+45,the observed word 'go',lexeme feature,lexical,0.985,claude-opus-5-5,2026-10-17
+46,the observed word 'its',lexeme feature,function,0.785,claude-opus-5-5,2026-10-17
+47,the observed word 'life',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+48,the observed word 'finish',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17
+49,the observed word 'graduate',lexeme feature,lexical,1.0,claude-opus-5-5,2026-10-17

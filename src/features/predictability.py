@@ -210,6 +210,12 @@ class Predictor:
         self.model.to(device)
         self.model.eval()
 
+        # Optional callback ``on_score(spacy_idx, target_id, pred_logits)``,
+        # called for every scored token with the raw prediction (causal path
+        # only). Study 3 uses it to read the full next-token distribution at
+        # exactly the positions Study 1 scored.
+        self.on_score = None
+
         self.model_type = model_type.lower()
         if self.model_type not in ["masked", "causal"]:
             raise ValueError("model_type must be 'masked' or 'causal'")
@@ -477,6 +483,8 @@ class Predictor:
             loss = crossloss(pred_logits.unsqueeze(0), target).item()
             probs = torch.softmax(pred_logits, dim=-1)
             entropy = -torch.sum(probs * torch.log(probs + 1e-10)).item()
+            if self.on_score is not None:
+                self.on_score(spacy_idx, int(target_id), pred_logits)
             doc_predictability.add_token(
                 TokenPredictability(
                     spacy_idx=spacy_idx,

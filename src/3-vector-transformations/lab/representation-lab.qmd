@@ -1,0 +1,184 @@
+---
+title: "Study 3. Representation Lab"
+subtitle: "Which token representation describes the kind of error, not the word?"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Overview
+
+The premise checks showed that the delta vector δ = e_pred − e_obs is close to
+90% observed-word identity, by construction. This notebook reports the
+piloting framework built to look for a better representation, and the result.
+
+The framework is a synthetic benchmark with ground truth. Controlled errors
+of eight types are inserted into strong dev essays. For every error, a
+**lexeme-matched clean control** (the same word form, used correctly, in
+another essay) is added, together with surprising-but-unedited tokens. A fixed
+evaluation battery scores any representation on it. Three families of ideas
+were piloted against it in parallel (geometry of the stored vectors, the
+model's hidden states, and LM-scored minimal repairs), about 45
+representations in all. The finalist of each family was then scored once on a
+**confirmation benchmark** built from different host essays with a different
+seed, which no idea was tuned on. The success criteria were written down
+before any family reported (`lab/README.md`).
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(knitr)
+source("src/1-predictability-benchmark/_viz_helpers.R")
+LAB <- "results/study3/lab"
+dev <- read_csv(file.path(LAB, "scoreboard.csv")) |> distinct(rep, .keep_all = TRUE)
+conf <- read_csv(file.path(LAB, "scoreboard_conf.csv")) |> distinct(rep, .keep_all = TRUE)
+family <- function(r) case_when(
+  r %in% c("surprisal", "e_obs", "delta", "e_pred") ~ "baseline",
+  str_starts(r, "geo") ~ "geometry", str_starts(r, "hid") ~ "hidden state",
+  str_starts(r, "rep") ~ "repair", TRUE ~ "other")
+```
+
+# 1. The benchmark
+
+| Type | Edit | Where the error becomes observable |
+|---|---|---|
+| DET_DEL | delete *a/an/the* | the next word |
+| DET_SUB | *a/an* ↔ *the* | the determiner |
+| AGR | subject–verb agreement flipped | the verb |
+| VFORM | past → base, base after *to*/modal → *-ing*, participle → base | the verb |
+| NUM | noun number flipped | the noun |
+| PREP | preposition swapped | the preposition |
+| SPELL | one-character typo, content word of 5+ letters | the word |
+| HOMO | homophone or near-homophone swap (*their/there*, *its/it's*, *then/than*) | the word |
+| CLEAN_SURP | unedited token above τ | — |
+| MATCHED | unedited occurrence of the error's observed word form, another essay | — |
+
+1,200 instances per type, 8,025 matched controls (SPELL has almost none,
+since typos rarely occur naturally). Host essays are dev essays with Overall ≥
+4.0 (confirmation: Overall = 3.5).
+
+Building the benchmark was already informative. The share of injected errors
+that clears τ is 83–90% for agreement, verb form and spelling, but 61–63% for
+determiner deletion and noun number, 58% for homophones, 26% for preposition
+swaps and 3% for determiner substitutions. **The 90th-percentile threshold is
+largely blind to function-word substitution errors**, which limits what any
+decomposition of the selected tokens can find.
+
+# 2. The battery
+
+The headline metric is **detect AUC**. It measures how well a cross-validated
+classifier on the representation tells an error from a correct use of the
+same word form. Observed-word identity scores .5 here by construction. The
+others are **lexeme-disjoint F1** (error type, with test words never seen in
+training), the alignment of an **unsupervised NMF** with error type vs. with
+the observed word (NMI), and **word R²** (lexical leakage). Definitions are in
+`lab/harness.py`.
+
+# 3. Development scoreboard
+
+```{r}
+#| label: dev
+dev |>
+  mutate(family = family(rep)) |>
+  select(family, rep, dim, detect_auc, lexdis_f1, type_f1, nmf_nmi_type, nmf_nmi_word, word_r2) |>
+  arrange(family, desc(detect_auc)) |>
+  kable(digits = 3, caption = "Every representation piloted on the development bench")
+```
+
+```{r}
+#| label: fig-dev
+#| fig-width: 8
+#| fig-height: 5
+fam_col <- c(baseline = "grey40", geometry = "#E69F00", `hidden state` = "#56B4E9", repair = "#CC79A7")
+p <- dev |>
+  mutate(family = family(rep)) |>
+  ggplot(aes(detect_auc, lexdis_f1, colour = family)) +
+  geom_point(size = 2.4, alpha = 0.85) +
+  ggrepel::geom_text_repel(data = ~ filter(.x, rep %in% c("surprisal", "e_obs", "delta", "e_pred",
+                                                          "geo_rel3", "hid_obs8c", "rep_repair_subpos",
+                                                          "rep_mdl_plus_pos")),
+                           aes(label = rep), size = 3, show.legend = FALSE) +
+  scale_colour_manual(values = fam_col, name = NULL) +
+  labs(x = "Detect AUC (error vs. same word used correctly)",
+       y = "Error-type F1 on held-out words") +
+  theme_study1()
+save_fig(p, "lab_scoreboard", 8, 5, dir = LAB)
+p
+```
+
+Every family improves on δ once a classifier is trained on top. δ itself
+detects errors worse than the four surprisal scalars (.69 vs .87). Its type
+information is almost all word identity: the identity-only baseline gets the
+same 9-way type F1 (.80 vs .79).
+
+# 4. Confirmation
+
+```{r}
+#| label: conf
+conf |>
+  mutate(family = family(rep),
+         c1 = detect_auc >= .845, c2 = lexdis_f1 > .616,
+         c3 = nmf_nmi_type > nmf_nmi_word & nmf_nmi_type > .318,
+         passes = c1 & c2 & c3) |>
+  select(family, rep, dim, detect_auc, lexdis_f1, nmf_nmi_type, nmf_nmi_word, passes) |>
+  arrange(desc(passes), family, desc(detect_auc)) |>
+  kable(digits = 3, caption = "Finalists on the held-out confirmation bench. Criteria: detect ≥ .845 (surprisal), lexeme-disjoint F1 > .616 (identity), NMF type > word and > .318 (δ)")
+```
+
+Only the repair representations meet all four criteria. The geometry and
+hidden-state finalists detect errors and type them under supervision, but
+their unsupervised components still follow the observed word at least as much
+as the error type. Their dimensions also have no names.
+
+# 5. The repair representation
+
+At each token, the model scores about 23 minimal edits:
+
+- other inflections of the word;
+- real words within one or two characters;
+- its own top predictions as replacements;
+- deleting the word;
+- inserting one of its top predictions before the word.
+
+Each edit's gain is the change in log-probability (bits) of the edited word
+plus the next five subwords, given Study 1's 8-token left window. Edits are
+grouped into 29 named classes using closed word lists and simple string
+relations. Examples are *insert determiner*, *-s inflection*, *non-word
+spelling*, *real-word confusion*, *replace with a preposition*, *replace with
+punctuation*, and *delete a content word*.
+
+Two readouts are used:
+
+- **Gains vector.** The best gain per class (positive part), 29 dimensions.
+  It is used for essay profiles.
+- **Discrete label.** The best edit after a cost of one bit per character
+  changed (Shannon's estimate of English entropy, fixed in advance), or NONE
+  when no edit pays.
+
+The label is the explanation, and the winning edit is usually the correction
+itself.
+
+What it can and cannot see is set by its edit inventory and its window. It
+covers single-word substitutions, insertions and deletions within about
+thirteen subwords. Word order, multi-word errors and collocational
+infelicity land in the broad *replace content word* or *delete content word*
+classes, or in NONE.
+
+Cost: about 13 ms of GPU time per token on one A6000, plus candidate
+generation on CPU. ELLIPSE's 371k selected tokens took about 1.5 GPU-hours.
+
+# 6. Caveats
+
+- The benchmark's error types are the kinds of error the repair inventory
+  targets, so the benchmark favours repair. The real-data checks in the main
+  report test whether that advantage holds on learner writing.
+- CLEAN_SURP is noisy, since even strong host essays contain natural errors.
+- About 45 representations were compared on the development bench, so small
+  differences there can be selection noise. The confirmation bench exists for
+  this reason.

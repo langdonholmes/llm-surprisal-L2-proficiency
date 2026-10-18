@@ -7,7 +7,8 @@ import zipfile
 
 import pandas as pd
 
-from util.paths import ELLIPSE_DIR, ELLIPSE_DOCBINS_DIR, TOEFL_DIR, TOEFL_DOCBINS_DIR
+from util.paths import (ELLIPSE_DIR, ELLIPSE_DOCBINS_DIR, TOEFL_DIR, TOEFL_DOCBINS_DIR,
+                        WI_DIR, WI_DOCBINS_DIR)
 from util.process_docs import process_dataframe
 
 
@@ -128,15 +129,48 @@ def ingest_ellipse(force: bool = False):
     print(f"ELLIPSE DocBins saved to {docbin_dir}")
 
 
+def ingest_wi(force: bool = False):
+    """Read BEA-2019 W&I+LOCNESS (train + dev JSON) and save as DocBins.
+
+    Gold edits are kept as character offsets into the original text, in
+    meta["edits"] (a JSON string of [start, end, replacement] triples; a null
+    replacement marks an edit the annotator flagged without correcting).
+    """
+    import json
+
+    docbin_dir = WI_DOCBINS_DIR
+    if docbin_dir.exists() and any(docbin_dir.glob("*.spacy")) and not force:
+        print(f"W&I DocBins already exist at {docbin_dir}, skipping (use --force to regenerate)")
+        return
+    rows = []
+    for path in sorted((WI_DIR / "raw" / "wi+locness" / "json").glob("*.json")):
+        level, split = path.stem.split(".")
+        for line in path.read_text().splitlines():
+            r = json.loads(line)
+            edits = [e for ann in r["edits"][:1] for e in ann[1]]  # first annotator
+            rows.append({"full_text": r["text"], "meta": {
+                "corpus": "wi", "text_id": r["id"], "cefr": r.get("cefr", "N"),
+                "level": level, "split": split, "edits": json.dumps(edits)}})
+    df = pd.DataFrame(rows)
+    print(f"Processing {len(df)} W&I+LOCNESS essays...")
+    if docbin_dir.exists():
+        shutil.rmtree(docbin_dir)
+    process_dataframe(df=df, text_col="full_text", metadata_col="meta",
+                      output_dir=str(docbin_dir), model="en_core_web_lg",
+                      n_process=16, batch_size=256)
+    print(f"W&I DocBins saved to {docbin_dir}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ingest essay corpora into spaCy DocBins")
     parser.add_argument("--toefl", action="store_true", help="Ingest TOEFL 11 only")
     parser.add_argument("--ellipse", action="store_true", help="Ingest ELLIPSE only")
+    parser.add_argument("--wi", action="store_true", help="Ingest W&I+LOCNESS only (study 3 validation)")
     parser.add_argument("--all", action="store_true", help="Ingest all corpora")
     parser.add_argument("--force", action="store_true", help="Regenerate even if DocBins exist")
     args = parser.parse_args()
 
-    if not (args.toefl or args.ellipse or args.all):
+    if not (args.toefl or args.ellipse or args.wi or args.all):
         parser.print_help()
         sys.exit(1)
 
@@ -144,6 +178,8 @@ def main():
         ingest_toefl11(force=args.force)
     if args.ellipse or args.all:
         ingest_ellipse(force=args.force)
+    if args.wi or args.all:
+        ingest_wi(force=args.force)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,10 @@ ELLIPSE_DIR = DATA_DIR / "ellipse"            # studies 1, 2, 3
 ELLIPSE_DOCBINS_DIR = ELLIPSE_DIR / "docbins"
 TOEFL_DIR = DATA_DIR / "toefl11"              # studies 1, 3
 TOEFL_DOCBINS_DIR = TOEFL_DIR / "docbins"
+# BEA-2019 Write & Improve + LOCNESS (gold error edits; study 3 validation).
+# Licensed for non-commercial research only; see data/wi_locness/raw/.
+WI_DIR = DATA_DIR / "wi_locness"
+WI_DOCBINS_DIR = WI_DIR / "docbins"
 
 # Predictability benchmark (Study 1) — per-model surprisal outputs
 # Layout: predictability/{corpus}/{model_key}/{surprisal.parquet,manifest.json}
