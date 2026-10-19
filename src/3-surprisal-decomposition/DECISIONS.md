@@ -428,3 +428,31 @@ with one scored corpus and one gold-annotated corpus.
 Decided after the earlier results had been seen, which the write-up states.
 FCE (Yannakoudakis et al. 2011) was downloaded as a possible second gold corpus
 and has not been used.
+
+## 2026-10-19 · D20. Direct logit attribution pilot (null; code removed)
+
+Question: is a gold error *suppressed* (some component pushes against the
+observed word) while acceptable surprise is merely *unsupported*? The logit gap
+logit(obs) − E_p[logit] (which equals H − S, so only the shape of the split is
+new) was split exactly over 273 OLMo-2 1B components (embedding, 256 heads, 16
+MLPs), fp32, final and post-attention RMS scales frozen. Sample: 7,419 W&I
+tokens above τ, 1,000 per level × error/OK cell plus all 419 scored N errors.
+Statistics and reading rule were written before the gold contrast was computed.
+
+- Errors vs OK within surprisal quintiles: suppression share AUC .585 (bar
+  .60). Top-1 probability alone gives .580. Adding all eight split statistics
+  to surprisal, entropy, top-1 and word frequency gains +.006 AUC (bar +.02).
+- OK tokens by level, adjusted for S and H: every ρ with level has a CI that
+  includes 0, and A−C and N−C differences are under .1 SD (bar .2). Word
+  frequency does shift (ρ −.10), so the design could see a shift.
+- Post hoc, splitting logit(obs) alone: also null, and errors are *less* pushed
+  down than OK tokens.
+- Post hoc mean-ablation: per-head attributions are not causal. Removing the
+  top suppressing head (L15H10) was predicted to add +4.1 nats and added +0.06,
+  because the post-attention norm rescales the remaining heads (~15×). Per-head
+  DLA on OLMo-2 needs norm-aware or path-patching attribution.
+- The layer-14 MLP is the top suppressor for ~55% of tokens whatever the
+  category. No head is specific to agreement or determiners.
+
+Code, notes and tables are in commit 4ceb451 (`pilot_dla/`). Data in
+`data/study3/pilot_dla/` (unversioned).
