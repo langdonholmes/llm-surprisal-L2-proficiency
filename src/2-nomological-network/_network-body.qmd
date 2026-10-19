@@ -304,8 +304,8 @@ short_labels <- c(
   content_word_overlap = "CWO",
   connective_density = "ConnDen",
   sentence_similarity = "SentSim",
-  mean_loss = "Loss",
-  var_loss = "VarLoss"
+  mean_loss = "Surp",
+  var_loss = "SurpVar"
 )
 
 net_labels <- short_labels[node_order]
@@ -511,7 +511,7 @@ print(data.frame(
 #| label: plot-helpers
 
 # A spring layout places strongly connected nodes almost on top of each other.
-# With the full battery, Loss and VarLoss have a partial correlation near .7 and
+# With the full battery, Surp and SurpVar have a partial correlation near .7 and
 # land within a node width of each other. This nudges any overlapping pair apart
 # while holding every node `radius_scale` converts qgraph's `vsize` into
 # the half-width of a node in plot coordinates.
