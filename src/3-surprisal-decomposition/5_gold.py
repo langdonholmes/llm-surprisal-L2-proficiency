@@ -8,13 +8,18 @@ and the repair check are all counts against the gold edits.
 
 Per essay, with n the scored non-space tokens:
 
-    high_rate = #(above tau) / n
-    err_rate  = #(above tau, corrected: ERR_TOK or ERR_INS) / n
-    acc_rate  = #(above tau, left uncorrected: OK) / n
-    post_rate = #(above tau, right after a corrected token: POST) / n
+    high_rate   = #(above tau) / n
+    err_rate    = #(above tau, corrected: ERR_TOK or ERR_INS) / n
+    uncorr_rate = #(above tau, left uncorrected: OK or POST) / n
+    post_rate   = #(above tau, uncorrected, right after a corrected token: POST) / n
 
-so high_rate = err_rate + acc_rate + post_rate. POST tokens may owe their
-surprisal to the error before them and are kept out of both halves.
+so high_rate = err_rate + uncorr_rate, and post_rate is part of uncorr_rate.
+"Uncorrected" means only that the annotator left the token alone: it holds
+effective choices, awkward but not wrong phrasing and missed errors alike.
+POST tokens may owe some surprisal to the error before them, but they are the
+writer's own uncorrected words. Leaving them out of the uncorrected count, as
+an earlier version did, made it rise steeply with level, because POST is
+concentrated at A (DECISIONS D22).
 
 Token types (mutually exclusive, from stage 4; first match wins):
 nonword (unseen in both Dolma corpora), punctuation, proper noun or number,
@@ -27,7 +32,7 @@ Outputs (results/study3/):
     gold_by_level.csv         mean rate per 1,000 tokens by level
     gold_threshold.csv        how often tau catches each gold category, by level
     gold_tests.json           Spearman rho with level (A < B < C) and native - C differences
-    gold_types.csv            token types: share acceptable, by level
+    gold_types.csv            token types: share uncorrected, by level
     gold_repair.csv           repair labels against gold: share corrected, by label and level
 
     python src/3-surprisal-decomposition/5_gold.py
@@ -53,7 +58,7 @@ LEVELS = ["A", "B", "C", "N"]
 FUNCTION_POS = ["DET", "ADP", "AUX", "PRON", "CCONJ", "SCONJ", "PART"]
 CONTENT_POS = ["NOUN", "VERB", "ADJ", "ADV"]
 RARE_PER_MILLION = 1.0
-RATES = ["high_rate", "err_rate", "acc_rate", "post_rate", "acc_share", "rare_attested_acc_rate"]
+RATES = ["high_rate", "err_rate", "uncorr_rate", "post_rate", "uncorr_share", "rare_attested_uncorr_rate"]
 
 
 def token_types(att: pd.DataFrame) -> np.ndarray:
@@ -82,6 +87,7 @@ def high_tokens() -> pd.DataFrame:
     h = h.merge(lab, on="row_id", how="left")
     h["group"] = h.label.map(label_group)
     h["err"] = h.gold.isin(["ERR_TOK", "ERR_INS"])
+    h["uncorr"] = h.gold.isin(["OK", "POST"])
     return h
 
 
@@ -91,24 +97,24 @@ def essay_rates(h: pd.DataFrame) -> pd.DataFrame:
     g = h.groupby("text_id")
     e["n_high"] = g.size()
     e["n_err"] = g.err.sum()
-    e["n_ok"] = g.gold.apply(lambda s: (s == "OK").sum())
+    e["n_uncorr"] = g.uncorr.sum()
     e["n_post"] = g.gold.apply(lambda s: (s == "POST").sum())
-    e["n_rare_attested_ok"] = h[(h.gold == "OK") & (h.ttype == "rare content, attested")].groupby("text_id").size()
+    e["n_rare_attested_uncorr"] = h[h.uncorr & (h.ttype == "rare content, attested")].groupby("text_id").size()
     e = e.fillna(0)
     e["high_rate"] = e.n_high / e.n
     e["err_rate"] = e.n_err / e.n
-    e["acc_rate"] = e.n_ok / e.n
+    e["uncorr_rate"] = e.n_uncorr / e.n
     e["post_rate"] = e.n_post / e.n
-    e["acc_share"] = e.n_ok / (e.n_ok + e.n_err)
-    e["rare_attested_acc_rate"] = e.n_rare_attested_ok / e.n
+    e["uncorr_share"] = e.n_uncorr / (e.n_uncorr + e.n_err)
+    e["rare_attested_uncorr_rate"] = e.n_rare_attested_uncorr / e.n
     return e.reset_index()
 
 
 def tests(e: pd.DataFrame) -> dict:
-    learners = e[e.level != "N"].dropna(subset=["acc_share"])
+    learners = e[e.level != "N"].dropna(subset=["uncorr_share"])
     lv = learners.level.map({"A": 1, "B": 2, "C": 3})
     res = {"n_essays": e.level.value_counts().reindex(LEVELS).to_dict(),
-           "base_share_corrected": float(e.n_err.sum() / (e.n_err.sum() + e.n_ok.sum())),
+           "base_share_corrected": float(e.n_err.sum() / (e.n_err.sum() + e.n_uncorr.sum())),
            "rho_with_level": {}, "native_minus_C": {}}
     for r in RATES:
         rho, lo, hi = boot_spearman(learners[r], lv)
@@ -135,12 +141,11 @@ def threshold_table() -> pd.DataFrame:
 
 
 def by_cell(h: pd.DataFrame, col: str) -> pd.DataFrame:
-    """Share acceptable (gold OK) per value of `col`, pooled and by level (POST excluded)."""
-    d = h[h.gold != "POST"].assign(ok=lambda x: x.gold == "OK")
-    pooled = d.groupby(col).agg(n=("ok", "size"), share_ok=("ok", "mean"))
-    pooled["share_of_errors"] = d[d.err].groupby(col).size() / d.err.sum()
-    pooled["share_of_acceptable"] = d[d.ok].groupby(col).size() / d.ok.sum()
-    lv = d.pivot_table(index=col, columns="level", values="ok", aggfunc="mean").add_prefix("share_ok_")
+    """Share uncorrected (gold OK or POST) per value of `col`, pooled and by level."""
+    pooled = h.groupby(col).agg(n=("uncorr", "size"), share_uncorr=("uncorr", "mean"))
+    pooled["share_of_errors"] = h[h.err].groupby(col).size() / h.err.sum()
+    pooled["share_of_uncorrected"] = h[h.uncorr].groupby(col).size() / h.uncorr.sum()
+    lv = h.pivot_table(index=col, columns="level", values="uncorr", aggfunc="mean").add_prefix("share_uncorr_")
     return pooled.join(lv).reset_index().sort_values("n", ascending=False)
 
 
@@ -149,9 +154,9 @@ def main():
     h = high_tokens()
     e = essay_rates(h)
     e.to_csv(OUT / "gold_essays.csv", index=False)
-    by_level = (1000 * e.groupby("level")[["high_rate", "err_rate", "acc_rate", "post_rate",
-                                             "rare_attested_acc_rate"]].mean()).reindex(LEVELS)
-    by_level["acc_share"] = e.groupby("level").acc_share.mean().reindex(LEVELS)
+    by_level = (1000 * e.groupby("level")[["high_rate", "err_rate", "uncorr_rate", "post_rate",
+                                             "rare_attested_uncorr_rate"]].mean()).reindex(LEVELS)
+    by_level["uncorr_share"] = e.groupby("level").uncorr_share.mean().reindex(LEVELS)
     by_level["n_essays"] = e.level.value_counts().reindex(LEVELS)
     by_level.reset_index().to_csv(OUT / "gold_by_level.csv", index=False)
     print("per 1,000 tokens:\n", by_level.round(2).to_string())

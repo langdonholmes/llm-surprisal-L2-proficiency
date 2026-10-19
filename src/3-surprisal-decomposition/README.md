@@ -4,9 +4,9 @@ Studies 1 and 2 showed that the share of high-surprisal tokens tracks
 proficiency. Study 3 asks what those tokens are.
 
 - **How much is error.** On W&I+LOCNESS, which has expert corrections, every
-  token above τ is either corrected (an error) or left alone (acceptable). No
+  token above τ is either corrected (an error) or left alone (uncorrected). No
   model is involved.
-- **What acceptable surprise looks like.** Whether the word and its bigrams are
+- **What uncorrected surprise looks like.** Whether the word and its bigrams are
   attested in the Dolma reference corpora from Study 2.
 - **What the error is.** LM repairs: the same model scores about 23 minimal
   edits at each token, and the best edit that pays for itself names the problem.
@@ -17,14 +17,16 @@ is the appendix (`appendix/`). `DECISIONS.md` records the design decisions in
 date order.
 
 **Result in one paragraph.** On W&I+LOCNESS, errors fall steeply with
-proficiency (69 → 17 per 1,000 tokens from A to C) while acceptable surprise
-rises (59 → 83), so total surprise understates the error signal. Native writers
-have the most acceptable surprise, at a C-level error rate. Rare words in
-combinations attested in edited prose are the most reliably acceptable kind of
-high token. Grammatical repair labels (inflection, spelling, an inserted or
-deleted function word) lean towards corrected tokens, and the insertion,
-inflection and nonword labels are corrected 80–90% of the time; content-word
-substitutions and NONE are mostly acceptable. On ELLIPSE every frequent repair
+proficiency (69 → 17 per 1,000 tokens from A to C) while uncorrected surprise
+barely changes (77 → 87), so among learners the level signal in high surprisal
+is the errors, and total surprise understates it. Native writers have the most
+uncorrected surprise (113), at a C-level error rate, though LOCNESS also
+differs from W&I in prompts and genre. Rare words in combinations attested in
+edited prose are among the most reliably uncorrected kinds of high token.
+Grammatical repair labels (inflection, spelling, an inserted or deleted
+function word) lean towards corrected tokens, and the insertion, inflection and
+nonword labels are corrected about 80% of the time or more; content-word
+substitutions and NONE are mostly uncorrected. On ELLIPSE every frequent repair
 label but inserted punctuation falls with Overall.
 
 ## Files
@@ -35,9 +37,10 @@ label but inserted punctuation falls with Overall.
 | 2 | `2_select.py` | ELLIPSE dev/test split (`split.csv`), τ, the tokens above τ in every corpus, W&I gold categories, and one bench per corpus part for the repair pass. Checks per-essay agreement with the Study 1 table. |
 | 3 | `3_repair.py` | LM repairs per bench: `base` and `cands` (GPU), `labels` (CPU). |
 | 4 | `4_attestation.py` | Dolma attestation per bench (CPU). |
-| 5 | `5_gold.py` | W&I+LOCNESS: errors vs acceptable surprise by level, attestation types, and the repair labels against the corrections. |
+| 5 | `5_gold.py` | W&I+LOCNESS: errors vs uncorrected surprise by level, attestation types, and the repair labels against the corrections. |
 | 6 | `6_profiles.py` | Repair label rates as essay profiles: ELLIPSE vs Overall, W&I by level (`proficiency`); KWIC cards (`cards`); TOEFL 11 by L1 (`l1`, not in the report). |
 | — | `lib/` | Shared code: the model (`lm.py`), benches (`bench.py`), repair candidates and labels, attestation, statistics. |
+| — | `pilot_corrected/` | Pilot (D22): the W&I+LOCNESS essays with the gold corrections applied, rescored, and aligned with the originals. |
 | A1–A6 | `appendix/` | The δ-vector analysis: deltas, premise checks, NMF, component cards, the proficiency ladder, TOEFL 11 transfer. |
 
 Reports: `results.qmd` (main) and `appendix/appendix.qmd`.
@@ -85,7 +88,11 @@ the same stages when it is extracted; the main report does not use it.
 - τ misses most determiner and preposition *substitutions*, which rarely make a
   word very surprising. Omissions, agreement, verb form and spelling are caught.
 - W&I gold is one annotator's minimal corrections. It marks errors, not
-  quality, so "acceptable" is not evidence of effective writing.
+  quality, so "uncorrected" is not evidence of effective writing. It holds
+  effective choices, awkward but not wrong phrasing and missed errors alike.
+- Errors in the window raise the surprisal of the uncorrected words after them,
+  more at A than at C (D22). Counted on the original essays, uncorrected
+  surprise is slightly inflated at A.
 - The repair edit inventory is single words. Word order and phrasing errors get
   a content-word repair or NONE.
 - W&I+LOCNESS licence: non-commercial research only, published excerpts under
