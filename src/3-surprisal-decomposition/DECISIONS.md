@@ -613,3 +613,39 @@ Spearman ρ with level: total −.44, clean +.04, error tokens −.62, context �
 
 Code: `pilot_corrected/5_decompose.py` (commit ce6ef92). Tables:
 `data/study3/pilot_corrected/tables/decompose_*`.
+
+## 2026-10-19 · D25. The D24 split replicates on FCE
+
+Requested by Langdon. The same corrections, scoring, alignment and split as in
+D22/D24, applied to BEA-2019 FCE v2.1 (one annotator; Yannakoudakis, Briscoe &
+Medlock 2011). FCE has no CEFR level, so the criterion is the script score
+(`script-s`, 0–40, the score Yannakoudakis et al. model). n = 1,237 scripts
+(one score-0 script excluded), the two answers pooled. As a check, each answer
+was also run against `answer-s` (1–15 ordinal, n = 2,451), bootstrapping whole
+scripts. The reading rule was written before any share was computed: the
+result replicates if (a) the clean share has a CI that includes 0 or
+|share| < .15, and (b) the three correction parts take at least 85%.
+
+Share of cov(total, score), with W&I (cov with level) for comparison:
+
+| part | FCE mean | W&I mean | FCE high rate | W&I high rate |
+|---|---|---|---|---|
+| clean | 9% [3, 14] | −4% | −4% [−11, 3] | −19% |
+| omission | 12% | 8% | 16% | 11% |
+| context | 22% | 27% | 18% | 24% |
+| error tokens | 58% | 69% | 70% | 85% |
+| corrections, total | 91% [86, 97] | 104% | 104% [97, 111] | 119% |
+
+Spearman with score: total −.58, clean −.08 [−.14, −.03] (mean); total −.50,
+clean +.03 (high rate). Replicates on both measures; for the mean, (a) passes
+on size only, since the clean CI excludes 0. The answer-level analysis gives
+the same verdict. FCE part sizes are close to W&I B (total 5.93 vs 5.92 bits,
+clean 5.20 vs 5.29).
+
+Checks: exact sum holds; 99.99% of own tokens align; unchanged windows move
+< .05 bits in 99.2% of cases; json texts match M2 after whitespace
+normalisation, and corrected answers differ from M2 in 0.07% of characters
+(moved words, sentence joins). GPU 28 min.
+
+Code: `pilot_fce/`, `src/essays/ingest.py --fce` (commit c45226b). Tables:
+`data/study3/pilot_fce/tables/`.
