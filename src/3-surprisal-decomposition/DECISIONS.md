@@ -572,3 +572,44 @@ uncertainty is larger.
 
 Code and notes: `pilot_native_c/` (commit 3eed473). Data:
 `data/study3/pilot_native_c/` (unversioned).
+
+## 2026-10-19 · D24. Exact split of essay surprisal by the gold corrections
+
+Requested by Langdon after D22–D23; computed on the D22 alignment, no GPU.
+Per essay, mean surprisal over the n original tokens splits exactly into:
+
+- **clean**: the writer's own aligned words, scored in the corrected essay;
+- **omission**: the extra surprisal of own words with a word missing just
+  before them (ERR_INS);
+- **context**: the extra surprisal of other own words caused by errors
+  elsewhere in the window;
+- **error tokens**: the corrected tokens' excess over clean.
+
+Because the parts add up, their covariances with level (A = 1, B = 2, C = 3)
+split cov(total, level) exactly. Essay-bootstrap CIs.
+
+Mean surprisal (bits), A / B / C / N: total 6.36 / 5.92 / 5.56 / 5.94; clean
+5.25 / 5.29 / 5.28 / 5.66; omission .11 / .08 / .04 / .04; context .30 / .19
+/ .09 / .08; error tokens .69 / .37 / .15 / .16.
+
+Share of the learner proficiency signal (cov with level):
+
+| part | mean surprisal | high-token rate |
+|---|---|---|
+| clean | −4% [−10, 1] | −19% [−28, −11] |
+| omission | 8% [7, 9] | 11% [9, 12] |
+| context | 27% [25, 29] | 24% [21, 26] |
+| error tokens | 69% [65, 73] | 85% [78, 92] |
+
+Spearman ρ with level: total −.44, clean +.04, error tokens −.62, context −.52.
+
+- All of the learner proficiency signal in mean surprisal is in the part the
+  corrections remove. The clean part is flat for the mean, and for the
+  high-token rate it rises slightly against the total.
+- About a quarter of the signal is errors raising the surprisal of the
+  correct words *after* them, not the error tokens themselves.
+- N − C in mean surprisal (+.38 [.26, .50]) is entirely in the clean part
+  (+.38). N − C in high tokens (+28.6) is +25.0 clean.
+
+Code: `pilot_corrected/5_decompose.py` (commit ce6ef92). Tables:
+`data/study3/pilot_corrected/tables/decompose_*`.
