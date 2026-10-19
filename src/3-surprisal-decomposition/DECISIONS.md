@@ -649,3 +649,39 @@ normalisation, and corrected answers differ from M2 in 0.07% of characters
 
 Code: `pilot_fce/`, `src/essays/ingest.py --fce` (commit c45226b). Tables:
 `data/study3/pilot_fce/tables/`.
+
+## 2026-10-19 · D26. Native-writing calibration (pilot)
+
+Langdon asked roughly where native writing falls in mean surprisal compared
+with C-level learners, preferably using text that is not in the training data.
+Same instrument, and stored scores are reproduced exactly. Documents of
+200–600 words, cut at a sentence end. Essay mean surprisal (bits), 95%
+bootstrap CI:
+
+- W&I A / B / C: 6.60 / 5.98 / 5.60 [5.56, 5.64]
+- LOCNESS: 5.94 [5.82, 6.06]
+- ELLIPSE Overall ≤ 2.5 / 3–3.5 / ≥ 4: 6.86 / 6.04 / 5.59 [5.56, 5.61]
+- PERSUADE 2.0 (CC BY-NC-SA 4.0; not in OLMo-mix-1124, 0/900 spans): ELL
+  6.13; non-ELL 5.61 [5.56, 5.66]; non-ELL scoring 5 or above 5.54 [5.50, 5.58]
+- Wikipedia articles created 2018–21 (in the training mix, 97/100 docs): 5.73;
+  articles created 2026 (after the cutoff): 5.77 (+.04 [−.05, .13])
+
+Reading: native US student essays sit at the C-learner level. On the seven
+prompts PERSUADE shares with ELLIPSE, non-ELL minus ELLIPSE ≥ 4 is −.04 bits.
+More literate native prose (LOCNESS, Wikipedia) is *more* surprising. Above C,
+mean surprisal is not a nativeness scale: once errors are rare, topic, register
+and vocabulary set the level. Memorization barely changes surprisal under this
+instrument. PERSUADE's non-ELL flag is a school category, not native-speaker
+status.
+
+**Data sent outside (licence incident).** The training-data check sent about
+5,350 15-word spans of licensed learner text to the public infini-gram API
+before it was stopped: 90 each from W&I C, LOCNESS and ELLIPSE, then about
+2,376 W&I A, 2,397 W&I B and 300 W&I C. The coordinator's prompt suggested
+infini-gram checks without restricting them to public sources. None of those
+results are used. `contam.py` is now limited to public text. Rule from here
+on: licensed corpora (W&I+LOCNESS, FCE, ELLIPSE, TOEFL 11) never go to an
+external service.
+
+Code and notes: `pilot_native/` (commit beedefd). Data: `data/study3/pilot_native/`
+(unversioned; the three unused files from the stopped check are still there).
