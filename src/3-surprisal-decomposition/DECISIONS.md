@@ -533,3 +533,42 @@ acted on.
 
 Code and notes: `pilot_corrected/` (commit 31b9dba). Data:
 `data/study3/pilot_corrected/` (unversioned).
+
+## 2026-10-19 · D23. Native vs C under topic and register controls (pilot)
+
+After D22, the gap between native writers and C learners in uncorrected
+surprise is the main evidence that surprisal tracks something other than
+errors. LOCNESS (50 essays) differs from W&I in prompts and genre. This pilot
+reuses the D22 corrected-essay tokens (no GPU). The rule was written before any
+N − C contrast under a control was computed. Baseline N − C = +25.0 [16.0,
+33.9] per 1,000 of the writer's own tokens.
+
+N − C per 1,000 kept own tokens (N/C ratio):
+
+- names and numbers excluded: +25.8 [17.3, 34.5] (1.32)
+- lemmas used earlier in the essay excluded: +33.9 [23.4, 44.5] (1.29)
+- topic words (keyness against Dolma) excluded: +21.3 [14.1, 28.5] (1.31)
+- sentence and paragraph starts excluded: +21.8 [12.6, 30.7] (1.25)
+- all four excluded (58% of tokens): +36.8 [26.1, 48.4] (1.38). Per 1,000
+  of all own tokens, this is +12.0 [6.5, 17.9].
+
+Matched subsets (W&I has no prompt metadata, so these come from the texts),
+all four exclusions applied: expository genre +33.1 [21.0, 46.0]; the 5
+topic-nearest C essays per N essay +28.3 [15.1, 41.8]; top quartile of C on
+a register score (sentence length, nouns, passives) +21.3 [8.4, 33.8]. With
+no exclusions the register-matched gap is +9.3 [−0.9, 19.7]. Topic and genre
+matching cut the gap by 15–20%; register matching cuts most of it, although it
+may partly match on the construct itself.
+
+Mean surprisal per essay (corrected essays, all tokens): A 5.33, B 5.32,
+C 5.29 bits, flat across learners. N − C = +0.38 [0.26, 0.50], +0.54 with all
+exclusions, +0.19 [0.06, 0.33] against register-matched C.
+
+All of the excess is in content words (nouns 44%). Reweighting N to C's mix of
+Dolma frequency bands removes 32% of it. Reading: N > C survives topic,
+repetition and position controls, and is partly a matter of register. The
+bootstrap resamples essays, not the handful of LOCNESS prompts, so the real
+uncertainty is larger.
+
+Code and notes: `pilot_native_c/` (commit 3eed473). Data:
+`data/study3/pilot_native_c/` (unversioned).
