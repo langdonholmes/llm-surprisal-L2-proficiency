@@ -728,3 +728,44 @@ type.
 
 Code and notes: `pilot_shapley/` (commit d3728a8). Data:
 `data/study3/pilot_shapley/`.
+
+## 2026-10-19 · D28. Exact split of essay surprisal by ERRANT error type
+
+Requested by Langdon. The D24 split is refined to S_orig = clean +
+Σ_g (at_site_g + spill_g) + flagged + residual, over ERRANT groups g. At site
+covers a replacement or unnecessary edit's own tokens, or the word after a
+missing-word edit. Spill is the remaining Δ on own aligned tokens, split among
+the window's edits by edit-level Shapley with the correction as baseline (D27).
+Flagged is spans the annotator marked but did not correct (no type). Residual
+is instrument noise (0%). The sum holds in every essay and script (< 1e-9) and
+reproduces D24/D25. Error tokens downstream of an earlier error (61% W&I, 54%
+FCE) keep all their excess. Reassigning the earlier errors' part (−7% / −2%)
+moves no group by more than 0.9 points. About 42 GPU-min.
+
+Share of cov(total, level) in %, at site + spill = total; W&I CEFR A–C,
+FCE script score:
+
+| group | W&I | FCE |
+|---|---|---|
+| clean | −4 | 9 |
+| spelling/orthography | 18 + 3 = 21 | 14 + 3 = 17 |
+| verb form/SVA/tense | 10 + 2 = 12 | 8 + 2 = 10 |
+| determiner | 3 + 3 = 6 | 8 + 3 = 11 |
+| preposition | 2 + 3 = 5 | 3 + 3 = 6 |
+| punctuation | 5 + 1 = 6 | 1 + 1 = 2 |
+| noun number | 3 + 1 = 4 | 2 + 0 = 3 |
+| word order | 1 + 0 = 1 | 1 + 0 = 1 |
+| other lexical | 11 + 5 = 15 | 9 + 4 = 13 |
+| other (ERRANT OTHER rewrites) | 17 + 9 = 26 | 14 + 6 = 20 |
+| flagged | 7 | 9 |
+
+By operation (missing / replacement / unnecessary): W&I 17 / 75 / 5, FCE
+23 / 56 / 4. Error frequency explains 75–110% of the low-to-high gap for most
+groups. Spill per error is flat overall (replacements +.02 bits A→C) and per
+group on FCE except "other". On W&I it shifts per group in ways that cancel:
+it rises at C for spelling (+.80) and determiners (+.38) and falls for
+prepositions, noun number and punctuation. CEFR sublevels add little (total
+ρ −.46 vs −.44 with A/B/C). The 8-subword window caps spill, so spill shares
+are lower bounds.
+
+Code and notes: `pilot_types/` (commit 20eadb6). Data: `data/study3/pilot_types/`.
