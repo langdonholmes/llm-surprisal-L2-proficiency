@@ -20,6 +20,8 @@ TOEFL_DOCBINS_DIR = TOEFL_DIR / "docbins"
 # Licensed for non-commercial research only; see data/wi_locness/raw/.
 WI_DIR = DATA_DIR / "wi_locness"
 WI_DOCBINS_DIR = WI_DIR / "docbins"
+FCE_DIR = DATA_DIR / "fce"
+FCE_DOCBINS_DIR = FCE_DIR / "docbins"
 
 # Predictability benchmark (Study 1) — per-model surprisal outputs
 # Layout: predictability/{corpus}/{model_key}/{surprisal.parquet,manifest.json}

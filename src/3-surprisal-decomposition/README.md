@@ -40,7 +40,8 @@ label but inserted punctuation falls with Overall.
 | 5 | `5_gold.py` | W&I+LOCNESS: errors vs uncorrected surprise by level, attestation types, and the repair labels against the corrections. |
 | 6 | `6_profiles.py` | Repair label rates as essay profiles: ELLIPSE vs Overall, W&I by level (`proficiency`); KWIC cards (`cards`); TOEFL 11 by L1 (`l1`, not in the report). |
 | — | `lib/` | Shared code: the model (`lm.py`), benches (`bench.py`), repair candidates and labels, attestation, statistics. |
-| — | `pilot_corrected/` | Pilot (D22): the W&I+LOCNESS essays with the gold corrections applied, rescored, and aligned with the originals. |
+| — | `pilot_corrected/` | Pilot (D22): the W&I+LOCNESS essays with the gold corrections applied, rescored, and aligned with the originals; `5_decompose.py` splits essay surprisal by the corrections (D24). |
+| — | `pilot_fce/` | Pilot (D25): the D24 split replicated on FCE against the exam score (`ingest.py --fce`). |
 | A1–A6 | `appendix/` | The δ-vector analysis: deltas, premise checks, NMF, component cards, the proficiency ladder, TOEFL 11 transfer. |
 
 Reports: `results.qmd` (main) and `appendix/appendix.qmd`.
@@ -97,5 +98,5 @@ the same stages when it is extracted; the main report does not use it.
   a content-word repair or NONE.
 - W&I+LOCNESS licence: non-commercial research only, published excerpts under
   100 words, cite Yannakoudakis et al. (2018), credit CECL for LOCNESS. The data
-  are not redistributed. FCE (`data/fce/raw/`, downloaded, not yet used) has
+  are not redistributed. FCE (`data/fce/raw/`, used by `pilot_fce/`, D25) has
   the same terms and cites Yannakoudakis, Briscoe & Medlock (2011).

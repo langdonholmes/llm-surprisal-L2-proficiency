@@ -1,4 +1,4 @@
-"""Ingest TOEFL 11 and ELLIPSE essays into spaCy DocBins."""
+"""Ingest TOEFL 11, ELLIPSE, W&I+LOCNESS and FCE essays into spaCy DocBins."""
 
 import argparse
 import shutil
@@ -7,8 +7,8 @@ import zipfile
 
 import pandas as pd
 
-from util.paths import (ELLIPSE_DIR, ELLIPSE_DOCBINS_DIR, TOEFL_DIR, TOEFL_DOCBINS_DIR,
-                        WI_DIR, WI_DOCBINS_DIR)
+from util.paths import (ELLIPSE_DIR, ELLIPSE_DOCBINS_DIR, FCE_DIR, FCE_DOCBINS_DIR, TOEFL_DIR,
+                        TOEFL_DOCBINS_DIR, WI_DIR, WI_DOCBINS_DIR)
 from util.process_docs import process_dataframe
 
 
@@ -161,16 +161,59 @@ def ingest_wi(force: bool = False):
     print(f"W&I DocBins saved to {docbin_dir}")
 
 
+def ingest_fce(force: bool = False):
+    """Read BEA-2019 FCE v2.1 (train + dev + test JSON) and save as DocBins.
+
+    Yannakoudakis, Briscoe & Medlock (2011). Non-commercial research only; see
+    data/fce/raw/fce/licence.txt.
+
+    One doc per exam answer (each script has two). text_id is "<script id>_<q>".
+    Gold edits are kept as in ``ingest_wi``: character offsets into the original
+    text, in meta["edits"] (a JSON string of [start, end, replacement] triples
+    from the first and only annotator; null replacement = flagged, not
+    corrected). The FCE error codes go in meta["edit_types"], in the same order.
+    Scores are kept as written: "answer_s" (band.sub, e.g. "3.2", sometimes
+    with a trailing "T") and "script_s" (the script total, 0-40).
+    """
+    import json
+
+    docbin_dir = FCE_DOCBINS_DIR
+    if docbin_dir.exists() and any(docbin_dir.glob("*.spacy")) and not force:
+        print(f"FCE DocBins already exist at {docbin_dir}, skipping (use --force to regenerate)")
+        return
+    rows = []
+    for path in sorted((FCE_DIR / "raw" / "fce" / "json").glob("*.json")):
+        split = path.stem.split(".")[1]
+        for line in path.read_text().splitlines():
+            r = json.loads(line)
+            edits = [e for ann in r["edits"][:1] for e in ann[1]]  # first annotator
+            rows.append({"full_text": r["text"], "meta": {
+                "corpus": "fce", "text_id": f"{r['id']}_{r['q']}", "script_id": r["id"],
+                "q": r["q"], "l1": r.get("l1"), "age": r.get("age"), "answer_s": r.get("answer-s"),
+                "script_s": r.get("script-s"), "split": split,
+                "edits": json.dumps([e[:3] for e in edits]),
+                "edit_types": json.dumps([e[3] for e in edits])}})
+    df = pd.DataFrame(rows)
+    print(f"Processing {len(df)} FCE answers...")
+    if docbin_dir.exists():
+        shutil.rmtree(docbin_dir)
+    process_dataframe(df=df, text_col="full_text", metadata_col="meta",
+                      output_dir=str(docbin_dir), model="en_core_web_lg",
+                      n_process=16, batch_size=256)
+    print(f"FCE DocBins saved to {docbin_dir}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ingest essay corpora into spaCy DocBins")
     parser.add_argument("--toefl", action="store_true", help="Ingest TOEFL 11 only")
     parser.add_argument("--ellipse", action="store_true", help="Ingest ELLIPSE only")
     parser.add_argument("--wi", action="store_true", help="Ingest W&I+LOCNESS only (study 3 validation)")
+    parser.add_argument("--fce", action="store_true", help="Ingest FCE only (study 3 replication)")
     parser.add_argument("--all", action="store_true", help="Ingest all corpora")
     parser.add_argument("--force", action="store_true", help="Regenerate even if DocBins exist")
     args = parser.parse_args()
 
-    if not (args.toefl or args.ellipse or args.wi or args.all):
+    if not (args.toefl or args.ellipse or args.wi or args.fce or args.all):
         parser.print_help()
         sys.exit(1)
 
@@ -180,6 +223,8 @@ def main():
         ingest_ellipse(force=args.force)
     if args.wi or args.all:
         ingest_wi(force=args.force)
+    if args.fce or args.all:
+        ingest_fce(force=args.force)
 
 
 if __name__ == "__main__":
