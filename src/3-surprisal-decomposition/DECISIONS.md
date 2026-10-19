@@ -456,3 +456,37 @@ Statistics and reading rule were written before the gold contrast was computed.
 
 Code, notes and tables are in commit 4ceb451 (`pilot_dla/`). Data in
 `data/study3/pilot_dla/` (unversioned).
+
+## 2026-10-19 · D21. Tuned-lens and contextuality pilot (mostly null; code removed)
+
+Two ways to split surprisal, tested on 12,015 W&I tokens above τ (3,000 each
+from A, B, C, and all 3,015 LOCNESS), seed 42. Statistics and reading rule
+were written before the gold contrast was computed. Baseline for both
+questions: surprisal + entropy + Dolma word frequency (error vs OK AUC .664).
+
+- **Tuned lens** (Belrose et al. 2023), one untuned run of 1,500 steps on
+  ELLIPSE dev windows. The final layer reproduces the stored surprisal (median
+  gap .03 bits). The raw logit lens is unusable on OLMo-2 1B before the last
+  block. Errors vs OK: ΔAUC +.004 (late drop, layer 8 minus final) to +.008
+  (full trajectory). Errors are already improbable at early layers, so they do
+  not "look fine early".
+- **Contextuality.** Ondov, Attal & Demner-Fushman (NAACL 2024) score the
+  blank. The word-level ζ·log2(ζ/ψ) form is Holmes et al. (2026). Both were
+  implemented. Causal sentence→essay contrast +.002, Ondov's blank score
+  +.008. Full-essay surprisal alone gives +.047 causal and +.078
+  bidirectional, which repeats the D15 context views: a better surprisal, not
+  a new construct. Contextuality correlates .50 with an earlier mention of the
+  word in the essay.
+- **OK tokens by level**, adjusted for the baseline. Only the lens late drop
+  shifts (C − A +0.39 bits [.19, .60], .14 SD). Post hoc, it roughly halves
+  and loses significance when the 7 preceding tokens contain no gold error. The
+  share of OK high tokens with such clean windows rises from .32 at A to .69
+  at C. No measure separates LOCNESS from C.
+
+Consequence for the main analysis: errors within the window inflate the
+surprisal of the acceptable tokens that follow them, beyond the single POST
+token that 5_gold.py excludes. This is followed up with the corrected essays
+(D22).
+
+Code and notes are in commit a5926c9 (`pilot_lens/`). Data in
+`data/study3/pilot_lens/` (unversioned).
