@@ -685,3 +685,46 @@ external service.
 
 Code and notes: `pilot_native/` (commit beedefd). Data: `data/study3/pilot_native/`
 (unversioned; the three unused files from the stopped check are still there).
+
+## 2026-10-19 · D27. Shapley pilot: context-word attribution fails, edit-level attribution works
+
+Langdon asked for an explainability method for the spillover component (D24
+"context") that a committee would accept. W&I+LOCNESS only, all local. The
+rules were written before the results. 52,979 targets, ERRANT types for 98.8%
+of edits, about 1.8 GPU-hours.
+
+**Context words, removal baseline (the planned method): does not explain
+spillover.** Exact Shapley over the 7 context words of each target, removing
+words by attention masking with the original position ids kept. Efficiency
+holds to 3e-14 bits, and masking matches deletion (≤ 3e-5 bits). With no
+context the target costs about 23 bits, so almost every context word, error
+words included, *lowers* surprisal (mean φ of error words −2.4 bits). Removal
+compares a word with no word, but spillover compares an error with its
+correction. Positive attribution falls on errors no more than their positions
+predict (ratio 1.02 [0.97, 1.06]). It does not track the counterfactual Δ
+(ρ .006). Every ERRANT group gets negative attribution. Leave-one-out gives the
+same verdicts, and so does replacement with a separator token (ρ .53 with
+masking). Not to be reused: `2_targets.py`, `3_shapley.py`,
+`4_analyze.py`, `5_kwic.py` (`7_edit_analyze.py` imports helpers from
+`4_analyze.py`).
+
+**Edits, correction baseline (post hoc): an exact split of Δ.** The players are
+the gold edits in a target's window, and the baseline is the corrected text,
+so ψ splits the counterfactual Δ among the errors (Σψ vs Δ r = .9996, 5
+GPU-min). 69% of windows hold one edit, where ψ is just Δ. Multi-edit windows
+carry 51% of ΣΔ. There, leave-one-out picks the same top edit 95% of the time
+but leaves 54% of |Δ| unassigned, so Shapley is needed for an exact split by
+type.
+
+- Spillover per error is the same at every level: A 1.57, B 1.61, C 1.60,
+  N 1.62 bits. The error rate accounts for 102% of the A − C gap. The plain Δ
+  over all essays agrees (1.53 vs 1.44 bits per error at A vs C; the rate takes
+  95%).
+- Spillover roughly halves with each word (0.89 / 0.48 / 0.24 / 0.12 bits).
+  The 8-subword window caps the reach at a few words, so "gone after about 4
+  words" is partly the window.
+- By ERRANT group: lexical, preposition and determiner errors spread most
+  (2.0–2.7 bits per error), punctuation least (0.33).
+
+Code and notes: `pilot_shapley/` (commit d3728a8). Data:
+`data/study3/pilot_shapley/`.
