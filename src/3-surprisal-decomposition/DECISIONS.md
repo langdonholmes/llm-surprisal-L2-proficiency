@@ -490,3 +490,46 @@ token that 5_gold.py excludes. This is followed up with the corrected essays
 
 Code and notes are in commit a5926c9 (`pilot_lens/`). Data in
 `data/study3/pilot_lens/` (unversioned).
+
+## 2026-10-19 · D22. Corrected-essay pilot: the uncorrected-surprise trend is mostly counting
+
+Terminology from here on: a high token that the gold annotator left alone is
+**uncorrected**, not "acceptable". The category mixes effective choices,
+awkward but not wrong phrasing, missed errors, and names or sentence starts.
+
+The first annotator's edits were applied to every W&I+LOCNESS essay, the
+corrected essays were rescored with the stage 1 pipeline, and the writer's own
+tokens were aligned between versions (99.96%). The rescored originals match
+stage 1 exactly on all 708,020 tokens. GPU time 34 min.
+
+- **Context contamination (the D21 effect) is real but small.** The share of
+  uncorrected high tokens that fall below τ once the context is corrected is
+  .19 at A, .13 B, .06 C, .04 N, which is 10.6 per 1,000 tokens at A and 4.9
+  at C.
+- **The reported rise is mostly how 5_gold.py counts.** `acc_rate` leaves
+  out POST tokens (the writer's own word right after a corrected token) but
+  keeps every token in n. POST is common at A. Per 1,000 tokens, A / B / C / N:
+  - 5_gold.py `acc_rate`: 59 / 72 / 83 / 108
+  - `acc_rate + post_rate` from the same table: 77 / 83 / 87 / 113
+  - post-correction, the writer's own words: 81 / 86 / 89 / 114 (C − A +8
+    [5, 11], ρ .12)
+  - post-correction, the whole corrected essay: 87 / 89 / 90 / 116, flat
+    across learner levels
+- Post hoc breakdown of the A-to-C slope against 5_gold.py: error tokens
+  leaving n −8.5, correcting the context +4.4 [3.4, 5.3], putting the
+  post-error words back −10.8.
+- **LOCNESS still separates from C:** +25 [16, 34] per 1,000.
+- Corrections are mostly unsurprising (inserted words above τ 1.6%,
+  substitutions 14%, base rate 9.1%). A deleted article makes the following
+  bare noun phrase surprising (.10 → .23 above τ).
+- The intrinsically surprising uncorrected tokens are the same kind at every
+  level: topic nouns, names, sentence-initial adverbs, some missed errors.
+  Median Dolma frequency falls only from 32 to 26 per million from A to C.
+
+Consequence: the README and results.qmd claim that acceptable surprise rises
+steeply with level (59 → 83) overstates the trend. Among learners, uncorrected
+surprise is nearly flat. The robust contrast is native vs learner. Not yet
+acted on.
+
+Code and notes: `pilot_corrected/` (commit 31b9dba). Data:
+`data/study3/pilot_corrected/` (unversioned).
