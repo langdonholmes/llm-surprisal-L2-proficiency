@@ -816,3 +816,16 @@ only. Conditional on error rate it carries a modest positive level signal.
 Computed with a scratch script over `pilot_corrected/aligned.parquet`,
 `results/study3/gold_essays.csv` and `results/study3/decompose_wi_essays.csv`.
 To be rebuilt in the end-to-end run.
+
+## 2026-10-20 · D30. W&I and FCE are treated as not looked at in advance
+
+Langdon's decision. The study and its RQs are partly exploratory, and the
+committee does not expect a strictly confirmatory design. The design decisions
+relevant to the write-up (counterfactual correction and rescoring, the exact
+split, ERRANT grouping, edit-level Shapley with the correction as baseline,
+incremental validity over error counts) could have been made without seeing
+the data. The write-up therefore treats W&I+LOCNESS and FCE as not looked at
+in advance. Langdon writes the hypotheses as they would have been predicted
+before the pilots. The pilots (D20–D29) stay on record here and are not cited
+as prior looks. A fresh held-out test set is built only if the advisor asks
+for one.
