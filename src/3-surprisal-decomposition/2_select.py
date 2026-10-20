@@ -1,11 +1,10 @@
-"""Study 3, stage 2 — split, threshold, select the high-surprisal tokens, attach gold.
+"""Study 3, appendix input — split, threshold, select the high-surprisal tokens.
 
 CPU. Reads the stage 1 shards and writes:
 
     src/3-surprisal-decomposition/split.csv      ELLIPSE dev/test split (committed)
     data/study3/tokens_selected.parquet         ELLIPSE (and TOEFL 11) tokens above tau, keyed by row_id
     data/study3/essay_summary.parquet           per essay: n scored, mean/var surprisal, n_high
-    data/study3/wi/tokens_gold.parquet          every scored W&I+LOCNESS token, with its gold category
     data/study3/repair/bench_<name>.parquet     the tokens above tau, one bench per corpus part
     results/study3/threshold.json               tau, counts, the Study 1 reproduction check
 
@@ -17,13 +16,6 @@ Definitions
 * Excluded before thresholding: whitespace tokens (spaCy ``is_space``). The
   essay's first token is never scored under generative scoring. Punctuation is
   kept.
-* W&I gold, from the first annotator's edits (character offsets), per token:
-    ERR_TOK  the token overlaps an edited span (substitution or deletion)
-    ERR_INS  an insertion point lies between the previous token and this one,
-             i.e. a word is missing just before it
-    POST     the previous token is ERR_TOK (it may inherit surprisal)
-    OK       none of the above
-
     python src/3-surprisal-decomposition/2_select.py
 """
 
@@ -39,8 +31,7 @@ from transformers import AutoTokenizer
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from lib.bench import CACHE, S3  # noqa: E402
-from util.paths import PREDICTABILITY_DIR, RESULTS_DIR, WI_DOCBINS_DIR  # noqa: E402
-from util.process_docs import load_all_docbins  # noqa: E402
+from util.paths import PREDICTABILITY_DIR, RESULTS_DIR  # noqa: E402
 
 OUT = RESULTS_DIR / "study3"
 SPLIT_PATH = HERE / "split.csv"
@@ -111,48 +102,6 @@ def write_bench(name: str, high: pd.DataFrame, texts: dict) -> int:
     return len(h)
 
 
-def gold_for_doc(doc, edits):
-    """Gold category per spaCy token index."""
-    spans = [(s, e) for s, e, _ in edits if e > s]
-    ins = [s for s, e, _ in edits if e == s]
-    cat = {}
-    prev_end = 0
-    err_prev = False
-    for t in doc:
-        a, b = t.idx, t.idx + len(t.text)
-        if any(s < b and e > a for s, e in spans):
-            c = "ERR_TOK"
-        elif any(prev_end <= p <= a for p in ins):
-            c = "ERR_INS"
-        elif err_prev:
-            c = "POST"
-        else:
-            c = "OK"
-        cat[t.i] = c
-        if not t.is_space:
-            err_prev = c == "ERR_TOK"
-            prev_end = b
-    return cat
-
-
-def select_wi(tau: float) -> dict:
-    toks = pd.concat([pd.read_parquet(p) for p in sorted((S3 / "wi" / "shards").glob("*.parquet"))],
-                     ignore_index=True)
-    meta, gold = {}, []
-    for doc in load_all_docbins(WI_DOCBINS_DIR):
-        m = doc.user_data["meta"]
-        meta[m["text_id"]] = (m, doc.text)
-        for i, c in gold_for_doc(doc, json.loads(m["edits"])).items():
-            gold.append((m["text_id"], i, c))
-    g = pd.DataFrame(gold, columns=["text_id", "spacy_idx", "gold"])
-    toks = toks.merge(g, on=["text_id", "spacy_idx"], how="left")
-    toks["level"] = toks.text_id.map(lambda t: meta[t][0]["level"])
-    toks["high"] = (toks.surprisal_bits >= tau) & ~toks.is_space
-    toks = next_words(toks).reset_index(drop=True)
-    toks["row_id"] = np.arange(len(toks))
-    toks.drop(columns=["obs_id"]).to_parquet(S3 / "wi" / "tokens_gold.parquet", index=False)
-    n = write_bench("wi", toks[toks.high], {t: v[1] for t, v in meta.items()})
-    return {"n_scored": int(len(toks)), "n_space": int(toks.is_space.sum()), "n_selected": n}
 
 
 def main():
@@ -242,11 +191,6 @@ def main():
             parts = {f"{c}_p{i}": s[s.text_id.isin(ids[i::TOEFL_PARTS])] for i in range(TOEFL_PARTS)}
         for name, part in parts.items():
             report["benches"][name] = write_bench(name, part, texts)
-
-    # --- W&I+LOCNESS: gold labels and its bench ------------------------------
-    if (S3 / "wi" / "manifest.json").exists():
-        report["exclusions"]["wi"] = select_wi(tau)
-        report["benches"]["wi"] = report["exclusions"]["wi"]["n_selected"]
 
     (OUT / "threshold.json").write_text(json.dumps(report, indent=2, default=float))
     print(json.dumps({k: v for k, v in report.items() if k != "checks"}, indent=2, default=float))

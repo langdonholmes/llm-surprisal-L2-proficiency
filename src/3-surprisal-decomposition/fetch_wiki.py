@@ -1,4 +1,4 @@
-"""Pilot (native calibration), fetch — English Wikipedia articles, pre- and post-cutoff.
+"""Study 3, input to stage 8 — English Wikipedia articles, pre- and post-cutoff.
 
 Two samples drawn the same way: random page ids in a creation window (namespace 0):
 
@@ -17,7 +17,7 @@ are skipped.
 Output (data dir given as argument; one JSON line per kept article):
     wiki_old.jsonl, wiki_new.jsonl   title, pageid, revid, rev_timestamp, created, text
 
-    python -I fetch_wiki.py data/study3/pilot_native/dl_wiki
+    python -I src/3-surprisal-decomposition/fetch_wiki.py data/study3/main/calibration/dl_wiki
 """
 
 import json

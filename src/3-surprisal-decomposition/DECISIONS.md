@@ -1003,3 +1003,39 @@ directly, and reproduces D24–D33 as acceptance checks:
 Removed from the tree once the rebuild reproduces the results, with this entry
 and the commit hashes as the record: the repair and attestation stages, the
 old `5_gold.py` and `6_profiles.py`, and the `pilot_*` directories.
+
+## 2026-10-20 · D35. Rebuild accepted; pilots and old stages removed
+
+The rebuilt pipeline (stages 0–8, commit 6057d95) reproduces D24–D33.
+`REBUILD.md` holds the comparison table.
+- **Exact:** τ, corrections, ERRANT types, scores, alignment, the D24, D25,
+  D31 and D32 results, and the classic bucket shares.
+- **Within noise:** edit-level Shapley differs by ≤ 1.2e-4 bits, because of
+  fp32 batch composition. The surprisal shares move by ≤ 2.4e-9.
+- **Two small differences, explained in REBUILD.md:** single-relation
+  dependency MI ρ (≤ .0024; the mean of three is exact), and the D26 CIs
+  (≤ .007 bits; RNG stream).
+
+The coordinator re-ran the comparison independently before removal.
+
+Removed from the tree; recover them from git history if needed:
+- **pilots** (`pilot_assoc`, `pilot_buckets`, `pilot_corrected`, `pilot_fce`,
+  `pilot_native`, `pilot_native_c`, `pilot_rq3`, `pilot_shapley`,
+  `pilot_types`): last present in 6057d95.
+- **LM repair and attestation**, parked per D34: `3_repair.py`,
+  `4_attestation.py`, `lib/repair_candidates.py`, `lib/repair_core.py`,
+  `lib/repair_labels.py`, `lib/attestation.py`. The old `5_gold.py` and
+  `6_profiles.py` went too. To restore repair for an ELLIPSE extension, check
+  them out from 6057d95. They also need the W&I part of `2_select.py`
+  (`select_wi`, removed in this commit) and the `LM` class of `lib/lm.py`.
+- Also removed: `boot_spearman` and `weighted_d` from `lib/stats.py`.
+
+`pilot_native/fetch_wiki.py` moved to `fetch_wiki.py`, because stage 8's
+Wikipedia sample depends on it. `1_extract.py` and `2_select.py` stay as the δ
+appendix's inputs. Stage 0 reads `1_extract.py`'s ELLIPSE shards. Every module,
+the appendix's included, compiles and imports after the removal.
+
+Open:
+- `appendix/appendix.qmd` still discusses the LM repair profile, which D34
+  excludes from the write-up.
+- Untracked outputs of the removed stages remain in `results/study3/`.

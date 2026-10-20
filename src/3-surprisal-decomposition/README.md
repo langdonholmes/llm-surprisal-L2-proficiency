@@ -75,8 +75,8 @@ The calibration downloads are public: PERSUADE 2.0 (`persuade_train.bin`, the
 train CSV from github.com/scrosseye/persuade_corpus_2.0, CC BY-NC-SA 4.0) in
 `data/study3/main/calibration/dl_persuade_train/`, and two random samples of
 English Wikipedia (CC BY-SA 4.0) in `dl_wiki/`. The Wikipedia samples were
-drawn once by `pilot_native/fetch_wiki.py` (commit beedefd) and are reused,
-because a new draw would give different articles.
+drawn once by `fetch_wiki.py` and are reused, because a new draw would give
+different articles.
 
 ## Known issues
 
