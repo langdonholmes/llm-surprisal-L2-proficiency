@@ -867,3 +867,63 @@ is more surprising" holds on W&I only and should not be reported as a
 general finding.
 
 Code and notes: `pilot_rq3/` (commit 7be4e51). Data: `data/study3/pilot_rq3/`.
+
+## 2026-10-20 · D32. Association measures under correction: surprisal is not unique
+
+Langdon's questions. Is "explained by correctable errors" specific to
+surprisal, or shared by the phraseological and lexical measures of applied
+linguistics? And does treating surprisal as an association measure change
+that? W&I (level) and FCE (script score). Each measure is computed on the
+original and the corrected essays. Errors are controlled by the plain
+corrected-token share. The increment is over ERRANT error counts (D31
+framework) for the measure computed on corrected essays. The rule was written
+before the level analyses: a measure survives correction if its
+corrected-essay ρ keeps at least half of the original ρ with the same sign and
+its ΔR² over B has a CI excluding 0, on both corpora.
+
+Design revision R1 (Langdon, before the level analyses):
+- **Primary LLM measures:** LLM-PMI = log2 p(w|ctx) − log2 f(w) and ΔP-LLM =
+  p(w|ctx) − f(w), with f the corpus-a word relative frequency, over real
+  words that are one subword (98% of real words).
+- **Model marginal p̄** = mean softmax over 30M 7-subword Dolma contexts. It is
+  a sensitivity check: SE median .004 bits, and it agrees with the subword
+  relative frequency at r .997 and with word frequency at .93–.97. The corpus
+  b (unedited) p̄ differs by a median .7 bits (register). All denominators give
+  the same verdicts.
+- **Added variants:** attested-only (left bigram, or both bigrams, attested in
+  corpus a; unattested = n/a) and a surprisal cutoff (> τ excluded; it selects
+  on the outcome).
+
+Key rows, W&I / FCE (ΔR² in points of R²):
+
+| measure | ρ original | ρ corrected | share removed | ΔR² over B |
+|---|---|---|---|---|
+| surprisal | −.44 / −.58 | .04 / −.08 | 104% / 91% | n.s. |
+| LLM-PMI | .40 / .56 | .03 / .22 | 93% / 75% | n.s. |
+| ΔP-LLM | .43 / .53 | .14 / .24 | 73% / 62% | n.s. / 1.25 [.26, 2.29] |
+| ΔP-LLM, both bigrams attested | .41 / .49 | .15 / .25 | 70% / 57% | n.s. / 1.28 [.30, 2.32] |
+| bigram MI | .23 / .31 | .00 / .14 | 100% / 55% | n.s. |
+| bigram ΔP | .24 / .19 | .16 / .14 | 32% / 28% | .25 [.02, .46] / .71 [−.00, 1.42] |
+| content-word log frequency | −.18 / −.14 | −.19 / −.20 | none (grows) | .52 / .70 (both CIs exclude 0) |
+
+- **Q1.** The Study 2 dependency MI measures, bigram MI and t, the MI ≥ 3 and
+  t ≥ 2 shares, and the unattested-bigram share all lose 50–134% of their
+  association under correction and add nothing over B. Bigram ΔP survives on
+  W&I, and its FCE CI touches 0.
+- **Q2.** No LLM measure survives on both corpora (content-word,
+  frequency-adjusted, cutoff and attested-only variants included). ΔP-LLM
+  survives on FCE only.
+- Only content-word frequency (lexical sophistication) keeps its association
+  and adds over error counts on both corpora.
+- **Q3.** At the token level, surprisal tracks bigram ΔP (ρ −.62) and LLM-PMI
+  tracks bigram MI (.55). Tokens that bigram measures exclude by construction
+  carry 60% / 85% of surprisal's original-essay signal. The attested-only
+  filter removes 71% / 97% of that signal, yet the attested LLM-PMI still loses
+  94% / 69% to correction, through real-word errors and spillover. The W&I/FCE
+  sign flip of D31 recurs for post-correction LLM-PMI (−.12 / +.08 given the
+  corrected-token share).
+
+Study 2's measures reproduce `ellipse_metrics.csv` exactly. D24, D25 and D31
+reproduce. About 2.6 GPU-h for p̄.
+
+Code and notes: `pilot_assoc/` (commit 647d9c8). Data: `data/study3/pilot_assoc/`.
