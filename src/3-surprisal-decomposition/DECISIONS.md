@@ -976,3 +976,30 @@ Reading:
   edits from more than one bucket. Not measured.
 
 Code and notes: `pilot_buckets/` (commit baec5ff). Data: `data/study3/pilot_buckets/`.
+
+## 2026-10-20 · D34. Scope of the write-up, and the rebuild
+
+Langdon's decisions:
+- **Classic association measures** (D32, D33) go in the write-up as a
+  post-hoc follow-up, not as a new RQ, pending the advisor's view.
+- **The LLM association measures** (LLM-PMI, ΔP-LLM, p̄, attested-only
+  variants) are not reported.
+- **LM repair** is excluded from the write-up. It stays available, in git
+  history, in case the advisor wants ELLIPSE in Study 3.
+- **The main corpus** is now W&I+LOCNESS, with FCE as the replication. ELLIPSE
+  appears only through τ and the δ appendix. Pending the advisor.
+
+The rebuild replaces the exploratory pipeline with one that answers the RQs
+directly, and reproduces D24–D33 as acceptance checks:
+- corrections (first annotator, ERRANT types, buckets and groups);
+- scoring of original and corrected essays;
+- alignment;
+- edit-level Shapley spill (correction baseline);
+- the exact decomposition;
+- the increment over ERRANT error counts;
+- the classic measures with bucket attribution (post hoc);
+- the calibration table (PERSUADE, post-cutoff Wikipedia).
+
+Removed from the tree once the rebuild reproduces the results, with this entry
+and the commit hashes as the record: the repair and attestation stages, the
+old `5_gold.py` and `6_profiles.py`, and the `pilot_*` directories.
