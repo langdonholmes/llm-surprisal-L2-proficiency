@@ -829,3 +829,41 @@ in advance. Langdon writes the hypotheses as they would have been predicted
 before the pilots. The pilots (D20–D29) stay on record here and are not cited
 as prior looks. A fresh held-out test set is built only if the advisor asks
 for one.
+
+## 2026-10-20 · D31. RQ3: surprisal beyond ERRANT error counts; D29 corrected
+
+Requested by Langdon. The RQ3 baseline is the human error counts, not
+aggregate surprisal. B = the per-token rate of each ERRANT group, the
+flagged-span rate and log n. S compact = clean, mean at-site cost per error,
+mean spill per error. S full = per-group costs and spill. Ridge, alpha by
+inner CV, 10 × 10-fold CV, paired folds, 2,000 unit bootstraps. The rule was
+written before fitting: S adds information if Δ R² (B + S compact) − B has a
+CI that excludes 0 on W&I and is the same sign with a CI that excludes 0 on FCE.
+
+| model | W&I R² (level) | FCE R² (script score) |
+|---|---|---|
+| B (error counts) | .581 | .481 |
+| B + S compact | .585 (Δ +.0037 [.0007, .0068]) | .496 (Δ +.0152 [.0056, .0250]) |
+| B + S full | .582 (Δ +.0007 [−.0029, .0042]) | .504 (Δ +.0230 [.0087, .0382]) |
+| B + mean surprisal | .581 (Δ .0000) | .493 (Δ +.0119) |
+| mean surprisal alone | .183 | .329 |
+| S compact alone | .034 | .034 |
+
+The rule is met for S compact, narrowly. The increment is 0.4 points of R² on
+W&I and 1.5 on FCE, where plain mean surprisal gives most of the FCE gain.
+S full fails on W&I. The increment sits in the per-error cost and spill terms.
+At a fixed error count, more surprising errors go with a lower level or
+score. The clean term's sign differs between the corpora.
+
+**D29 correction.** D29's "gold error rate" was 5_gold.py's `err_rate`:
+corrected tokens *above τ* per token. That depends on surprisal, so it is not
+a plain error count. With the plain share of corrected tokens, the W&I
+partials of the clean part are .118 [.083, .153] (mean) and .135 [.101, .167]
+(high-token rate). **FCE does not replicate them.** Clean mean surprisal vs
+script score: ρ −.078 [−.135, −.025], partial given the corrected-token share
+−.076 [−.131, −.024]. High-token rate: ρ .032, partial −.009 [−.068, .043].
+D29's claim that "at a given error rate, higher-level writers' corrected text
+is more surprising" holds on W&I only and should not be reported as a
+general finding.
+
+Code and notes: `pilot_rq3/` (commit 7be4e51). Data: `data/study3/pilot_rq3/`.
