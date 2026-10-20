@@ -1,6 +1,6 @@
 ---
 title: "Study 3. Results"
-subtitle: "What the high-surprisal tokens are: errors, uncorrected surprise, and the repairs that name them"
+subtitle: "What the surprisal of learner writing is made of"
 format:
   html:
     toc: true
@@ -12,296 +12,733 @@ execute:
   message: false
 ---
 
-# Overview
-
-Studies 1 and 2 showed that the share of high-surprisal tokens tracks
-proficiency. Study 3 asks what those tokens are. A token is *high* when its
-surprisal under the Study 1 configuration (OLMo-2 1B, 8-token window) exceeds
-τ, the 90th percentile of token surprisal in the strongest third of ELLIPSE dev
-essays.
-
-Two corpora are used.
-
-- **W&I+LOCNESS** (BEA-2019; Yannakoudakis et al. 2018) has expert corrections.
-  It holds learner essays at CEFR levels A, B and C and 50 essays by native
-  student writers (LOCNESS, level N). Every high token is either corrected by
-  the annotator (an error) or left alone (uncorrected). This answers *how much*
-  of the surprisal is error, with no model involved. "Uncorrected" is not a
-  quality judgement. It holds effective word choices, awkward but not wrong
-  phrasing, errors the annotator missed, and names and sentence starts.
-- **ELLIPSE** is the corpus of Studies 1 and 2. It has no corrections, so it is
-  where the LM repairs are applied as essay profiles against the human scores.
-
-The LM repair method asks the same model which minimal edit would make the text
-expected, which names *what kind* of error a token is. It is checked against
-the W&I corrections before it is read on ELLIPSE. The proposal's δ-vector
-method, and why it does not answer the question, is in `appendix/appendix.qmd`.
-
 ```{r}
 #| label: setup
 library(tidyverse)
 library(jsonlite)
 library(knitr)
 source("src/1-predictability-benchmark/_viz_helpers.R")
-R3 <- "results/study3"
-TH <- fromJSON(file.path(R3, "threshold.json"))
-LEVELS <- c("A", "B", "C", "N")
-gt <- fromJSON(file.path(R3, "gold_tests.json"))
-lv <- read_csv(file.path(R3, "gold_by_level.csv")) |> mutate(level = factor(level, LEVELS))
-fmt_rho <- function(x) sprintf("%.2f [%.2f, %.2f]", x$rho, x$ci[1], x$ci[2])
+R3 <- "results/study3/main"
+rd <- function(f) read_csv(file.path(R3, f), show_col_types = FALSE)
+both <- function(stem) bind_rows(wi = rd(paste0(stem, "_wi.csv")), fce = rd(paste0(stem, "_fce.csv")), .id = "corpus")
+js <- function(f) fromJSON(file.path(R3, f))
+TH <- js("threshold.json")
+CK <- list(wi = js("decompose_wi.json"), fce = js("decompose_fce.json"))
+AL <- list(wi = js("align_wi.json"), fce = js("align_fce.json"))
+SP <- list(wi = js("spill_wi.json"), fce = js("spill_fce.json"))
+s4 <- both("split4")
+m4 <- both("split4_means")
+sh <- both("shares")
+rc <- both("rate_cost")
+dec <- both("spill_decay")
+ca <- rd("clean_assoc.csv")
+inc <- rd("increment.csv")
+cf <- rd("coefs.csv")
+cl <- both("classic")
+cal <- rd("calibration.csv")
+calc <- rd("calibration_contrasts.csv")
+CORP <- c(wi = "W&I", fce = "FCE")
+BUCKETS <- c("mechanical", "function word", "content-word choice", "multi-word / order")
+
+f2 <- function(x) sprintf("%.2f", x)
+r0 <- function(x, d = 0) round(x, d) + 0  # no negative zero
+pc <- function(x) sprintf("%.0f", r0(100 * x))
+pci <- function(v, lo, hi) sprintf("%.0f [%.0f, %.0f]", r0(100 * v), r0(100 * lo), r0(100 * hi))
+ci2 <- function(v, lo, hi, d = 2) sprintf(paste0("%.", d, "f [%.", d, "f, %.", d, "f]"), r0(v, d), r0(lo, d), r0(hi, d))
+S4 <- function(c, p, m = "mean_surprisal") filter(s4, corpus == c, measure == m, part == p)
+M4 <- function(c, g, p, m = "mean_surprisal") filter(m4, corpus == c, measure == m, group == g)[[p]]
+SH <- function(c, col, cut = "bucket") filter(sh, corpus == c, cut == !!cut, col == !!col)
+RC <- function(c, cat, comp = "total", cut = "bucket") filter(rc, corpus == c, cut == !!cut, cat == !!cat, comp == !!comp)
+INC <- function(c, m) filter(inc, corpus == c, model == m)
+CL <- function(c, m, s) filter(cl, corpus == c, measure == m, stat == s)
+CAL <- function(g) filter(cal, group == g)
+corr_part <- function(c, g) M4(c, g, "omission") + M4(c, g, "context") + M4(c, g, "error_tokens")
 ```
 
-τ = `r sprintf("%.2f", TH$tau_bits)` bits, which means the model gave the
-observed word a probability below about 1 in 2,500. It is fixed on ELLIPSE dev
-and applied unchanged to every corpus.
+# 1. Introduction
 
-# 1. How much of high surprisal is error
+Studies 1 and 2 showed that the mean surprisal of an essay under a small
+language model (OLMo-2 1B, 8-subword window) tracks writing proficiency.
+Study 3 asks what that signal is made of. The proposal posed three questions.
+
+- **RQ1.** Does the surprisal of learner writing decompose into interpretable
+  components?
+- **RQ2.** Are the components differentially associated with proficiency?
+- **RQ3.** Do the components carry information beyond simpler measures? The
+  simpler measure here is the count of errors that a human annotator marked.
+
+A component is defined counterfactually. It is the part of an essay's
+surprisal that would disappear if a given kind of error were corrected. Two
+learner corpora with expert corrections supply the counterfactual. Each essay
+is corrected, the corrected essay is scored with the same instrument, and the
+difference between the two versions is split exactly over the corrections and
+their ERRANT error types. What remains, the surprisal of the writer's own
+words in the corrected essay, is the *clean* part. Because the parts add up to
+the essay's mean surprisal, their covariances with proficiency add up too, so
+the proficiency signal splits exactly over the components.
+
+The proposal's δ-vector method, and why it describes words rather than
+errors, is reported in the appendix (`appendix/appendix.qmd`).
+
+# 2. Hypotheses
+
+::: {.callout-important}
+**Placeholder for Langdon.** The hypotheses are to be written as they would
+have been stated before the corrected corpora were analysed (D30). Nothing in
+this section is drafted.
+:::
+
+# 3. Method
+
+## 3.1 Corpora
+
+**W&I+LOCNESS** is the BEA-2019 release of the Cambridge English Write &
+Improve corpus with the LOCNESS essays (Yannakoudakis et al. 2018; Bryant et
+al. 2019; LOCNESS
+courtesy of the Centre for English Corpus Linguistics, Université catholique
+de Louvain). It holds `r format(CK$wi$n_units, big.mark = ",")` learner essays
+at CEFR levels A (`r format(CK$wi$n_by_group$A, big.mark = ",")`), B
+(`r format(CK$wi$n_by_group$B, big.mark = ",")`) and C
+(`r CK$wi$n_by_group$C`), and `r CK$wi$n_by_group$N` essays by native student
+writers (LOCNESS, level N). The criterion is the CEFR level (A = 1, B = 2,
+C = 3). LOCNESS has no criterion and is described separately. W&I+LOCNESS is
+the main corpus.
+
+**FCE** is the BEA-2019 release of the First Certificate in English exam
+scripts (Yannakoudakis, Briscoe & Medlock 2011). Each script holds two
+answers. The unit is the script, with both answers pooled, and the criterion
+is the script score (1–40). The one script scored 0 is left out, which leaves
+`r format(CK$fce$n_units, big.mark = ",")` scripts. FCE is the replication.
+
+Both corpora are used with the first annotator's corrections:
+`r format(CK$wi$n_corrections, big.mark = ",")` corrections in the W&I learner
+essays and `r format(CK$fce$n_corrections, big.mark = ",")` in FCE, plus
+`r format(CK$wi$n_flagged, big.mark = ",")` and
+`r format(CK$fce$n_flagged, big.mark = ",")` spans that the annotator flagged
+without correcting. Both corpora are licensed for research without
+redistribution, so no learner text is quoted.
+
+## 3.2 Instrument
+
+Surprisal is computed exactly as in Study 1. Each spaCy token is scored by
+the surprisal (bits) of its first subword under OLMo-2 1B base, given the 8
+subwords that end at that subword. An essay's mean surprisal is the mean over
+its scored tokens. The high-token rate counts tokens above τ =
+`r sprintf("%.2f", TH$tau_bits)` bits, the 90th percentile of token surprisal
+in the strongest third of the ELLIPSE development essays.
+
+## 3.3 Corrections and error types
+
+The gold edits are character spans with a replacement. Applying all of an
+essay's corrections gives the corrected essay. Whitespace is repaired locally
+where an edit meets the surrounding text, and flagged spans stay as written.
+The corrected essays are parsed with the same spaCy pipeline and scored with
+the same instrument.
+
+Each correction takes the ERRANT type (Bryant, Felice & Briscoe 2017) of the
+edit it overlaps in the released M2 files, whose tokens are walked back onto
+the original characters. All but
+`r sprintf("%.1f%%", 100 * CK$wi$unmapped_share)` (W&I) and
+`r sprintf("%.1f%%", 100 * CK$fce$unmapped_share)` (FCE) of the corrections
+receive a type. The types are grouped into four kinds of correction
+(Table 1), fixed before the analysis (D33). Unknown and untyped edits are
+*unclassified*. Nine finer ERRANT groups (D28) are reported as a supplement.
 
 ```{r}
-#| label: threshold
-thr <- read_csv(file.path(R3, "gold_threshold.csv")) |> mutate(level = factor(level, LEVELS)) |> arrange(level)
-thr |>
-  transmute(level, `tokens` = n_tokens, `above τ` = n_high,
-            `corrected token` = share_of_high_ERR_TOK, `word missing before it` = share_of_high_ERR_INS,
-            `uncorrected, after an error` = share_of_high_POST, `uncorrected, elsewhere` = share_of_high_OK) |>
-  kable(digits = 3, format.args = list(big.mark = ","),
-        caption = "W&I+LOCNESS: what the annotator did with the tokens above τ, as shares of those tokens")
+#| label: t-buckets
+tibble(`kind of correction` = BUCKETS,
+       `ERRANT categories (operation prefix dropped)` = c(
+         "SPELL, ORTH, PUNCT, VERB:FORM, VERB:SVA, VERB:INFL, VERB:TENSE, NOUN:NUM, NOUN:INFL, MORPH, ADJ:FORM, CONTR, NOUN:POSS",
+         "DET, PREP, PRON, CONJ, PART", "NOUN, VERB, ADJ, ADV", "OTHER, WO")) |>
+  kable(caption = "Table 1. Kinds of correction")
 ```
 
-A token counts as an error when the annotator changed it, or inserted a word
-just before it (an omission surfaces at the next word). Every other high token
-is uncorrected. The uncorrected tokens right after a corrected token are shown
-separately, since they may owe some surprisal to the error before them.
+## 3.4 Alignment
+
+An original token is the writer's *own* when none of its characters lies in a
+corrected or flagged span. An own token is *aligned* when the corrected essay
+has a scored token at the mapped position with the same text.
+`r sprintf("%.2f%%", 100 * AL$wi$aligned_of_own)` (W&I) and
+`r sprintf("%.2f%%", 100 * AL$fce$aligned_of_own)` (FCE) of own tokens align.
+As a check, aligned tokens whose 8-subword window is identical in both
+versions should keep their surprisal, and
+`r sprintf("%.1f%%", 100 * AL$wi$same_window_abs_delta_lt_0.05)` and
+`r sprintf("%.1f%%", 100 * AL$fce$same_window_abs_delta_lt_0.05)` of them move
+by less than .05 bits (bf16 batch noise).
+
+## 3.5 The exact split
+
+For a unit with n scored tokens, let O be the aligned own tokens, with
+surprisal s_orig in the original essay and s_corr in the corrected essay, and
+let clean be the mean of s_corr over O. Then
+
+S_orig = clean + omission + context + error tokens,
+
+where *omission* is the sum of s_orig − s_corr over own words that directly
+follow a missing word, divided by n; *context* is the same sum over the other
+own words; and *error tokens* is the excess over clean of every other token
+(the corrected tokens themselves). This four-part split (D24) holds exactly
+for every unit. The same split is applied to the high-token rate.
+
+The split by kind of correction refines it (D28):
+
+S_orig = clean + Σ_c (at site_c + spill_c) + flagged + residual.
+
+- **At site.** For a replacement or unnecessary-word correction, the excess
+  over clean of the tokens it covers. For a missing-word correction, the
+  surprisal change of the own word right after the gap.
+- **Spill.** The surprisal change of the other own words whose window holds
+  the correction. When a window holds several corrections, the change is
+  split among them by Shapley values (Shapley 1953) with the correction as
+  the baseline. The players are the corrections in the window, and each is
+  either as written or corrected, so the values add up to the word's
+  surprisal change exactly (D27). The partial versions are re-tokenised from
+  the text and scored in fp32. Each word's values are shifted equally so that
+  they add up to its stored change. The `r SP$wi$status$too_many` W&I words
+  with more than 7 corrections in the window split the change equally.
+- **Flagged.** The excess of tokens the annotator flagged without correcting.
+- **Residual.** The surprisal change of own words with no correction in the
+  window, and of own words that do not align. It is instrument noise.
+
+The split holds exactly (to 10⁻⁹ bits) in every unit.
+
+## 3.6 Statistics
+
+Because the parts add up to S_orig, the covariance of S_orig with the
+criterion is the sum of the parts' covariances. Each part's *share of the
+proficiency signal* is its covariance with the criterion divided by that of
+S_orig, among learners. Shares add up to 100%, can be negative, and come with
+95% CIs from 2,000 unit bootstraps. Spearman ρ is reported alongside.
+
+*Frequency and cost.* A component pooled over the units of one level is the
+error rate times the mean cost per error. The difference between the lowest
+and highest level (W&I A − C; FCE score 1–23 vs 32–40) splits into a rate
+part and a cost part by the midpoint rule.
+
+*The clean part.* The clean part's association with the criterion is
+reported raw and as a partial Spearman correlation given the plain share of
+corrected tokens (D31).
+
+*RQ3.* The error counts B are the rate of each of the nine ERRANT groups,
+the rate of flagged spans, and log n. The compact surprisal terms S are
+clean, mean at-site bits per error and mean spill bits per error. Ridge
+regression (imputation, scaling and the penalty fitted within folds) is
+evaluated by 10 × 10-fold cross-validation stratified by level or score band,
+with the same folds for every model. ΔR² compares B + S with B, with a
+2,000-resample unit bootstrap of the out-of-fold predictions.
+
+## 3.7 Calibration corpora
+
+To place learner writing among other writing, the same instrument scores
+public documents that the learner corpora's licences do not restrict:
+PERSUADE 2.0 essays by US secondary-school students (Crossley et al. 2024),
+split by the corpus's English-learner flag and by holistic score, and English
+Wikipedia articles created in 2018–21 (in the model's training data) or in
+2026 (after it). Every document, learner essays included, is cut to 200–600
+words at a sentence end, and 300 documents are sampled per external group.
+
+## 3.8 Classic measures (post hoc)
+
+The follow-up in Section 4.5 applies the same counterfactual to the
+phraseological and lexical measures of applied linguistics, computed against
+the Dolma reference corpora of Study 2: bigram MI and ΔP, the share of
+bigrams with MI ≥ 3, Study 2's dependency MI (amod, dobj, advmod), the mean
+log frequency of content words, and Study 2's lemma frequency. Each essay is
+rebuilt with every subset of its kinds of correction applied, re-parsed, and
+re-measured. Exact Shapley values over the kinds of correction then split
+each measure's original-minus-corrected difference.
+
+# 4. Results
+
+## 4.1 What surprisal is made of
 
 ```{r}
-#| label: fig-decomposition
-#| fig-width: 7
-#| fig-height: 3.5
-dec <- lv |>
-  transmute(level, Errors = err_rate, `Uncorrected, after an error` = post_rate,
-            `Uncorrected, elsewhere` = uncorr_rate - post_rate) |>
-  pivot_longer(-level, names_to = "part", values_to = "per_1000") |>
-  mutate(part = factor(part, c("Errors", "Uncorrected, after an error", "Uncorrected, elsewhere")))
-p <- ggplot(dec, aes(level, per_1000, fill = part)) +
+#| label: t-split4
+lab <- c(wi = "W&I", fce = "FCE")
+m4 |>
+  filter(measure == "mean_surprisal") |>
+  transmute(corpus = lab[corpus], group = recode(group, N = "N (LOCNESS)", learners = "all learners"),
+            units = n_units, total, clean, omission, context, `error tokens` = error_tokens,
+            `corrections` = omission + context + error_tokens) |>
+  kable(digits = 2, format.args = list(big.mark = ","),
+        caption = "Table 2. Mean surprisal per unit (bits) and its four parts, by CEFR level (W&I) and script-score band (FCE)")
+```
+
+```{r}
+#| label: fig-split4
+#| fig-cap: "What the corrections add to mean surprisal, by level. The clean part (about 5.2–5.7 bits) is not shown"
+#| fig-width: 8
+#| fig-height: 3.6
+d <- m4 |>
+  filter(measure == "mean_surprisal", group != "learners") |>
+  select(corpus, group, omission, context, `error tokens` = error_tokens) |>
+  pivot_longer(-c(corpus, group), names_to = "part", values_to = "bits") |>
+  mutate(corpus = factor(lab[corpus], c("W&I", "FCE")),
+         part = factor(part, c("error tokens", "context", "omission")))
+p <- ggplot(d, aes(group, bits, fill = part)) +
   geom_col(width = 0.7) +
-  scale_fill_manual(values = c(Errors = "#b2182b", `Uncorrected, after an error` = "#92c5de",
-                               `Uncorrected, elsewhere` = "#2166ac"), name = NULL) +
-  labs(x = "Level (N = native writers)", y = "High-surprisal tokens per 1,000") +
+  facet_grid(~corpus, scales = "free_x", space = "free_x") +
+  scale_fill_manual(values = c(`error tokens` = "#b2182b", context = "#ef8a62", omission = "#fddbc7"), name = NULL) +
+  labs(x = "CEFR level (N = LOCNESS) / script-score band", y = "Bits added to mean surprisal") +
   theme_study1()
-save_fig(p, "gold_decomposition", 7, 3.5, dir = R3)
+save_fig(p, "split4", 8, 3.6, dir = R3)
 p
 ```
 
-```{r}
-#| label: rates
-lv |>
-  transmute(level, essays = n_essays, `all above τ` = high_rate, errors = err_rate, uncorrected = uncorr_rate,
-            `of which after an error` = post_rate, `uncorrected share` = uncorr_share) |>
-  kable(digits = 2, caption = "Mean rate per 1,000 tokens by level. Uncorrected share is uncorrected / all above τ")
-tibble(rate = c("all above τ", "errors", "uncorrected", "uncorrected share"),
-       key = c("high_rate", "err_rate", "uncorr_rate", "uncorr_share")) |>
-  mutate(`ρ with level, learners (A < B < C)` = map_chr(key, ~ fmt_rho(gt$rho_with_level[[.x]])),
-         `native − C, per 1,000` = map_chr(key, ~ {
-           d <- gt$native_minus_C[[.x]]; k <- if (.x == "uncorr_share") 1 else 1000
-           sprintf("%.1f [%.1f, %.1f]", k * d$diff, k * d$ci[1], k * d$ci[2])
-         })) |>
-  select(-key) |>
-  kable(caption = "Essay-level Spearman ρ with CEFR level, and the native − C difference (95% bootstrap CIs over essays). The uncorrected-share row is a proportion, not a rate")
-```
+The clean part is nearly constant. It is
+`r f2(M4("wi", "A", "clean"))`, `r f2(M4("wi", "B", "clean"))` and
+`r f2(M4("wi", "C", "clean"))` bits at A, B and C, and between
+`r f2(min(filter(m4, corpus == "fce", measure == "mean_surprisal", group != "learners")$clean))`
+and
+`r f2(max(filter(m4, corpus == "fce", measure == "mean_surprisal", group != "learners")$clean))`
+bits across the FCE score bands. What the corrections add falls from
+`r f2(corr_part("wi", "A"))` bits at A to `r f2(corr_part("wi", "C"))` at C,
+and from `r f2(corr_part("fce", "1-23"))` to `r f2(corr_part("fce", "32-40"))`
+bits across the FCE bands (Figure 1). The error tokens' own excess is the
+largest part. The context part, the extra surprisal of correct words that
+follow an error, is about a quarter to a third of what the corrections add.
+At every level, most of an essay's surprisal is the clean part, but nearly
+all of the difference between levels is in the corrections.
 
-Among learners, the level signal in high surprisal is the errors.
-
-- **Errors fall steeply with proficiency**, from about
-  `r round(lv$err_rate[lv$level == "A"])` per 1,000 tokens at A to
-  `r round(lv$err_rate[lv$level == "C"])` at C.
-- **Uncorrected surprise barely changes**, from
-  `r round(lv$uncorr_rate[lv$level == "A"])` to
-  `r round(lv$uncorr_rate[lv$level == "C"])` per 1,000 (ρ with level
-  `r fmt_rho(gt$rho_with_level$uncorr_rate)`). An earlier version left the
-  uncorrected words right after an error out of this count. Those words are
-  most common at A, so the count appeared to rise steeply (DECISIONS D22).
-- **Errors in the context inflate it a little at A.** A pilot that applied the
-  corrections and rescored the essays (D22) found that 19% of the uncorrected
-  high tokens at A fall below τ once the context is corrected, against 6% at
-  C. Measured on the writer's own words in the corrected essays, uncorrected
-  surprise is 81, 86 and 89 per 1,000 at A, B and C, so it is still nearly flat.
-- **Total surprise falls because errors fall.** The total understates how
-  strongly errors track level (ρ =
-  `r sprintf("%.2f", gt$rho_with_level$err_rate$rho)` for errors against
-  `r sprintf("%.2f", gt$rho_with_level$high_rate$rho)` for the total).
-- **Native writers are more surprising than C learners, not less.** Their
-  error rate is at the C level, and the difference is uncorrected surprise.
-  LOCNESS differs from W&I in prompts and genre as well as in the writers,
-  so part of this gap may be topic.
-
-So the measure does not penalize uncorrected surprise in stronger learners,
-and it does not reward it either. Whether any of it is *effective* writing is
-beyond what the corrections can show, since they mark errors and not quality.
-
-# 2. What uncorrected surprise looks like
-
-Each high token is looked up in the Dolma reference corpora built for Study 2.
-A word counts as *attested* in context when both of its bigrams (with the
-previous word and with the next word) occur in edited Dolma prose, and as *rare*
-when it occurs fewer than once per million words there.
+LOCNESS has a C-level correction part (`r f2(corr_part("wi", "N"))` bits) and
+a higher clean part (`r f2(M4("wi", "N", "clean"))` bits). Native minus C is
+`r ci2(CK$wi$native_minus_C$mean_surprisal$total[1], CK$wi$native_minus_C$mean_surprisal$total[2], CK$wi$native_minus_C$mean_surprisal$total[3])`
+bits in total and
+`r ci2(CK$wi$native_minus_C$mean_surprisal$clean[1], CK$wi$native_minus_C$mean_surprisal$clean[2], CK$wi$native_minus_C$mean_surprisal$clean[3])`
+in the clean part.
 
 ```{r}
-#| label: types
-ty <- read_csv(file.path(R3, "gold_types.csv"))
-ty |>
-  transmute(type = ttype, n, `share uncorrected` = share_uncorr, A = share_uncorr_A, B = share_uncorr_B,
-            C = share_uncorr_C, N = share_uncorr_N, `share of all errors` = share_of_errors) |>
-  arrange(desc(`share uncorrected`)) |>
+#| label: t-calibration
+glab <- c(`W&I A` = "W&I A", `W&I B` = "W&I B", `W&I C` = "W&I C", LOCNESS = "LOCNESS (native student writers)",
+          `ELLIPSE <= 2.5` = "ELLIPSE, Overall ≤ 2.5", `ELLIPSE 3-3.5` = "ELLIPSE, Overall 3–3.5",
+          `ELLIPSE >= 4` = "ELLIPSE, Overall ≥ 4", persuade_ell = "PERSUADE, English learners",
+          persuade_native = "PERSUADE, not English learners",
+          persuade_native_hi = "PERSUADE, not English learners, score ≥ 5",
+          wiki_old = "Wikipedia, created 2018–21 (in training data)", wiki_new = "Wikipedia, created 2026 (after training)")
+cal |>
+  transmute(group = glab[group], documents = n, `mean surprisal` = mean, `95% CI` = sprintf("%.2f–%.2f", lo, hi), SD = sd) |>
   kable(digits = 2, format.args = list(big.mark = ","),
-        caption = "W&I+LOCNESS tokens above τ by type: share left uncorrected, overall and by level")
+        caption = "Table 3. Mean surprisal per document (bits), 200–600 words, cut at a sentence end")
 ```
+
+Table 3 places these values among other writing. C-level learners
+(`r f2(CAL("W&I C")$mean)`), the top ELLIPSE band (`r f2(CAL("ELLIPSE >= 4")$mean)`)
+and US students not classified as English learners
+(`r f2(CAL("persuade_native")$mean)`) fall within .03 bits of each other.
+PERSUADE essays scored 5 or 6 are slightly lower
+(`r f2(CAL("persuade_native_hi")$mean)`), and PERSUADE essays by English
+learners are higher (`r f2(CAL("persuade_ell")$mean)`). University essays
+(LOCNESS, `r f2(CAL("LOCNESS")$mean)`) and Wikipedia
+(`r f2(CAL("wiki_old")$mean)`–`r f2(CAL("wiki_new")$mean)`) are *more*
+surprising than the C-level essays. Wikipedia written after the model's
+training data was collected is only
+`r with(filter(calc, a == "wiki_new"), ci2(diff, lo, hi))` bits more
+surprising than Wikipedia it was trained on, so memorisation barely moves the
+statistic at this window.
+
+Lower mean surprisal is therefore not better writing once errors are rare.
+Among learners, the measure falls as errors become rarer. Above the C level,
+topic, register and vocabulary set its value, and more informative or more
+literate prose scores higher.
+
+## 4.2 Components by error type
 
 ```{r}
-#| label: rare-attested
-ra <- gt$rho_with_level$rare_attested_uncorr_rate
+#| label: t-bucket-cost
+mn <- bind_rows(wi = read_csv(file.path(R3, "means_wi.csv"), show_col_types = FALSE),
+                fce = read_csv(file.path(R3, "means_fce.csv"), show_col_types = FALSE), .id = "corpus") |>
+  rename(col = 2)
+rc |>
+  filter(cut == "bucket", cat %in% BUCKETS) |>
+  select(corpus, cat, comp, rate_all, cost_all) |>
+  pivot_wider(names_from = comp, values_from = cost_all) |>
+  left_join(mn |> filter(str_detect(col, "\\|total$")) |> transmute(corpus, cat = str_remove(col, "\\|total$"), bits = learners),
+            by = c("corpus", "cat")) |>
+  transmute(corpus = CORP[corpus], `kind of correction` = cat, `errors per 100 tokens` = rate_all,
+            `bits per error, at site` = at_site, `bits per error, spill` = spill, `bits per error, total` = total,
+            `bits added to mean surprisal` = bits) |>
+  kable(digits = 2, caption = "Table 4. Frequency and cost of each kind of correction, all learners pooled. The last column is the component's mean contribution to an essay's mean surprisal")
 ```
 
-- **Attestation separates uncorrected from corrected content words.** Rare
-  words attested on both sides are among the most reliably uncorrected types
-  of high token, and rare words in unattested combinations are close to a
-  coin flip.
-- **Nonwords, function words and punctuation lean towards error.** Proper nouns
-  and numbers are mostly left uncorrected.
-- **Rare, attested, uncorrected words rise with proficiency**, from
-  `r sprintf("%.1f", lv$rare_attested_uncorr_rate[lv$level == "A"])` per 1,000
-  tokens at A to `r sprintf("%.1f", lv$rare_attested_uncorr_rate[lv$level == "C"])`
-  at C and `r sprintf("%.1f", lv$rare_attested_uncorr_rate[lv$level == "N"])` for
-  native writers (ρ with level `r fmt_rho(ra)`). They are a small part of
-  uncorrected surprise, most of which is common words in attested combinations.
-- **Every type is more often uncorrected from A to C.** The same kind of word
-  is more likely to be used correctly by a stronger writer, so type alone is a
-  weak guide to whether a given token is an error.
-
-# 3. What the error is: LM repairs
-
-For each high token, about 23 minimal single-word edits are proposed:
-
-- another inflection of the word;
-- a near spelling (edit distance 1 or 2);
-- one of the model's top predictions in its place;
-- deleting it;
-- inserting one of the model's top predictions before it.
-
-Each edit is scored by how much it raises the log-probability of the word and
-the next five subwords, under the same model and window as the surprisal. An
-edit has to pay for itself at 1 bit per character changed, a cost fixed in
-advance from Shannon's estimate for English. The token's label is the best
-paying edit, subclassed by what it changes (for example `INS_DET` for an
-inserted determiner, `MORPH_S_V` for verb agreement, `FORM_NONWORD` for a
-misspelling), or NONE when no edit pays. This adapts LM-based error correction
-(Bryant & Briscoe 2018; Yasunaga et al. 2021) to explain the measure's own
-surprisal.
-
-Labels fall into three groups. *Grammatical* labels fix an inflection or a
-spelling, or insert, delete or replace a function word or punctuation.
-*Lexical* labels replace, delete or insert a content word. NONE means no edit
-paid.
+Table 4 gives each component's frequency and cost. Mechanical errors
+(spelling, punctuation, inflection) are the most frequent, at
+`r f2(RC("wi", "mechanical")$rate_all)` per 100 tokens in W&I, and they
+contribute the most surprisal. Content-word and multi-word corrections are
+rarer but the costliest per error (`r f2(RC("wi", "content-word choice")$cost_all)`
+and `r f2(RC("wi", "multi-word / order")$cost_all)` bits in W&I).
+Function-word errors cost little at their own site
+(`r f2(RC("wi", "function word", "at_site")$cost_all)` bits) but spill as much
+again onto the following words
+(`r f2(RC("wi", "function word", "spill")$cost_all)` bits). A missing article
+or a wrong preposition is cheap where it occurs and costly for the words
+after it.
 
 ```{r}
-#| label: repair-groups
-rep <- read_csv(file.path(R3, "gold_repair.csv"))
-rep |>
-  filter(level_of == "group") |>
-  transmute(group = label, n, `share corrected` = 1 - share_uncorr, `share of all errors` = share_of_errors,
-            A = 1 - share_uncorr_A, B = 1 - share_uncorr_B, C = 1 - share_uncorr_C, N = 1 - share_uncorr_N) |>
-  kable(digits = 2, format.args = list(big.mark = ","),
-        caption = "W&I+LOCNESS: share of tokens in each repair group that the annotator corrected, overall and by level")
+#| label: fig-decay
+#| fig-cap: "Mean spill onto an own word by its distance from the error, with 95% unit-bootstrap CIs"
+#| fig-width: 8
+#| fig-height: 3.4
+d <- dec |>
+  mutate(corpus = factor(CORP[corpus], c("W&I", "FCE")),
+         bucket = factor(bucket, c("all", BUCKETS)))
+p <- ggplot(d, aes(d, mean_spill, colour = bucket)) +
+  geom_line() + geom_point(size = 1.2) +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.1) +
+  facet_wrap(~corpus) +
+  scale_x_continuous(breaks = 1:5, labels = c(1:4, "5+")) +
+  scale_colour_manual(values = c(all = "black", mechanical = "#1b9e77", `function word` = "#d95f02",
+                                 `content-word choice` = "#7570b3", `multi-word / order` = "#e7298a"), name = NULL) +
+  labs(x = "Distance from the error (words)", y = "Mean spill per word (bits)") +
+  theme_study1()
+save_fig(p, "spill_decay", 8, 3.4, dir = R3)
+p
 ```
+
+Spill falls off quickly with distance (Figure 2). Over all corrections it
+roughly halves with each word, from
+`r f2(filter(dec, corpus == "wi", bucket == "all", d == 1)$mean_spill)` bits on
+the next word to `r f2(filter(dec, corpus == "wi", bucket == "all", d == 2)$mean_spill)`,
+`r f2(filter(dec, corpus == "wi", bucket == "all", d == 3)$mean_spill)` and
+`r f2(filter(dec, corpus == "wi", bucket == "all", d == 4)$mean_spill)` bits at
+distances 2–4 (W&I; FCE is nearly identical). Multi-word and order
+corrections spread the most, mechanical errors the least. The 8-subword
+window cuts the reach at a few words, so the decay beyond that is partly the
+window.
+
+## 4.3 Association with proficiency
 
 ```{r}
-#| label: repair-labels
-rep |>
-  filter(level_of == "label", n >= 200) |>
-  transmute(label, n, `share corrected` = 1 - share_uncorr, `share of all errors` = share_of_errors) |>
-  arrange(desc(`share corrected`)) |>
-  kable(digits = 2, format.args = list(big.mark = ","),
-        caption = "Share corrected by repair label (labels with at least 200 tokens)")
+#| label: t-split4-shares
+s4 |>
+  filter(part != "total") |>
+  transmute(corpus = CORP[corpus], measure = recode(measure, mean_surprisal = "mean surprisal", high_per_1000 = "high-token rate"),
+            part = recode(part, error_tokens = "error tokens"),
+            `share of the signal, % [95% CI]` = pci(share, lo, hi), `ρ with criterion` = ci2(rho, rho_lo, rho_hi)) |>
+  kable(caption = "Table 5. Each part's share of the covariance of the essay measure with the criterion (CEFR level, script score), learners only")
 ```
 
-- **Grammatical labels lean towards error.** The group is corrected
-  `r sprintf("%.0f%%", 100 * (1 - rep$share_uncorr[rep$level_of == "group" & rep$label == "grammatical"]))`
-  of the time, against `r sprintf("%.0f%%", 100 * gt$base_share_corrected)` for
-  all high tokens. Inserting a missing preposition or determiner, fixing a
-  nonword, and fixing an irregular form or verb agreement are corrected about
-  80% of the time or more. Swapping in a different function word is closer to
-  even.
-- **Lexical labels do not.** "The model expected a different content word" is
-  left uncorrected about two times in three, which is why a paying repair alone
-  cannot decide whether a token is an error.
-- **NONE is mostly uncorrected**, but it still holds a fifth of all errors.
-  These are errors with no single-word fix, such as word order or phrasing.
-- **The same label is more often an error at lower levels**, from A to C, as
-  with the token types.
-
-Examples of winning edits on ELLIPSE (the full set is in
-`results/study3/repair_cards.md`):
-
-- nonword spelling: *atitude → attitude*, *thier → their*;
-- real-word confusion: *thing → think*, *Specially → especially*;
-- inflection: *described → describes*, *a street that look → looks*,
-  *I have choose → chosen*;
-- omission: *have [a] sort of*, *as [a] result*, *never too late [to] fix*.
-
-# 4. Repairs as essay profiles (ELLIPSE)
-
-Per essay, the rate of each label per scored token.
+All of the learner proficiency signal in mean surprisal lies in what the
+corrections remove (Table 5). In W&I the clean part's share is
+`r with(S4("wi", "clean"), pci(share, lo, hi))`% and its correlation with level
+is `r f2(S4("wi", "clean")$rho)`. In FCE it is
+`r with(S4("fce", "clean"), pci(share, lo, hi))`%, so the corrections carry
+`r pc(1 - S4("fce", "clean")$share)`% of the FCE signal. The error tokens carry
+the most (`r pc(S4("wi", "error_tokens")$share)`% and
+`r pc(S4("fce", "error_tokens")$share)`%). About a quarter
+(`r pc(S4("wi", "context")$share)`% and `r pc(S4("fce", "context")$share)`%) is
+errors raising the surprisal of the correct words after them, and a tenth is
+the word after a missing word. The high-token rate of Studies 1 and 2 splits
+the same way, and on W&I its clean part runs against the total.
 
 ```{r}
-#| label: profiles
-pr <- read_csv(file.path(R3, "profiles_rho.csv"))
-pr |>
-  filter(str_starts(label, "group_")) |>
-  transmute(group = str_remove(label, "group_"), `share of high tokens` = share_of_high,
-            `ρ with Overall` = sprintf("%.2f [%.2f, %.2f]", rho_overall, lo, hi),
-            `low` = per_1000_low, `mid` = per_1000_mid, `high` = per_1000_high) |>
-  kable(digits = 2, caption = "ELLIPSE (all 6,482 essays): rate per 1,000 tokens by Overall band (below 3, 3, 3.5 and above) and Spearman ρ with Overall (95% bootstrap CI)")
+#| label: t-bucket-shares
+er <- sh |> filter(cut == "edit_rate")
+sh |>
+  filter(cut == "bucket", str_detect(col, "\\|") | col == "clean") |>
+  separate(col, c("cat", "comp"), sep = "\\|", fill = "right") |>
+  mutate(comp = replace_na(comp, "total"), v = pci(share, lo, hi)) |>
+  select(corpus, cat, comp, v) |>
+  pivot_wider(names_from = comp, values_from = v) |>
+  left_join(er |> transmute(corpus, cat = col, `share of edits` = sprintf("%.0f", 100 * share_of_edits),
+                            `share of the edit-rate signal` = pci(share, lo, hi)), by = c("corpus", "cat")) |>
+  mutate(cat = factor(cat, c("clean", BUCKETS, "unclassified", "flagged", "residual"))) |>
+  arrange(desc(corpus), cat) |>
+  transmute(corpus = CORP[corpus], component = cat, `at site` = at_site, spill, total,
+            `share of edits`, `share of the edit-rate signal`) |>
+  mutate(across(everything(), ~ replace_na(as.character(.x), ""))) |>
+  kable(caption = "Table 6. Each component's share of the proficiency signal in mean surprisal, % [95% CI]. For comparison, each kind's share of all edits and of the covariance of the edit rate with the criterion")
 ```
+
+By kind of correction (Table 6), mechanical corrections carry the largest
+share, `r pc(SH("wi", "mechanical|total")$share)`% in W&I and
+`r pc(SH("fce", "mechanical|total")$share)`% in FCE. Content-word choice and
+multi-word or order corrections together carry
+`r pc(SH("wi", "content-word choice|total")$share + SH("wi", "multi-word / order|total")$share)`%
+and
+`r pc(SH("fce", "content-word choice|total")$share + SH("fce", "multi-word / order|total")$share)`%,
+and function words `r pc(SH("wi", "function word|total")$share)`% and
+`r pc(SH("fce", "function word|total")$share)`%. These shares are close to each
+kind's share of the edit-rate signal, the covariance of the plain error rate
+with the criterion. Relative to the error counts, surprisal gives somewhat
+more weight to multi-word corrections and less to function words, which
+follows from their costs in Table 4. Spill is a fifth to a third of each
+kind's share, and close to half for function words on W&I.
 
 ```{r}
-#| label: fig-profiles
-#| fig-width: 7
-#| fig-height: 5
-pp <- pr |>
-  filter(!str_starts(label, "group_"), share_of_high >= .005) |>
-  mutate(group = if_else(str_ends(label, "_CONTENT"), "lexical", "grammatical")) |>
-  ggplot(aes(rho_overall, fct_reorder(label, rho_overall), colour = group)) +
-  geom_vline(xintercept = 0, colour = "grey60") +
-  geom_pointrange(aes(xmin = lo, xmax = hi), size = 0.3) +
-  scale_colour_manual(values = c(grammatical = "#b2182b", lexical = "#ef8a62"), name = NULL) +
-  labs(x = "Spearman ρ of the label's rate with Overall", y = NULL) +
-  theme_study1(10)
-save_fig(pp, "profiles_rho", 7, 5, dir = R3)
-pp
+#| label: t-rate-cost
+rc |>
+  filter(cut == "bucket", cat %in% BUCKETS, comp == "total") |>
+  transmute(`kind of correction` = cat,
+            `errors per 100 tokens, lowest → highest` = sprintf("%.1f → %.1f", if_else(corpus == "wi", rate_A, `rate_1-23`),
+                                                               if_else(corpus == "wi", rate_C, `rate_32-40`)),
+            `bits per error, lowest → highest` = sprintf("%.1f → %.1f", if_else(corpus == "wi", cost_A, `cost_1-23`),
+                                                         if_else(corpus == "wi", cost_C, `cost_32-40`)),
+            corpus = CORP[corpus],
+            `share of the gap due to error rate, %` = pci(rate_share, rate_share_lo, rate_share_hi),
+            `change in bits per error` = ci2(cost_change, cost_change_lo, cost_change_hi)) |>
+  relocate(corpus) |>
+  kable(caption = "Table 7. Frequency vs cost per error between the lowest and highest level (W&I A vs C; FCE score 1–23 vs 32–40)")
 ```
 
-- **Every frequent label except inserted punctuation is rarer in stronger
-  essays.** The grammatical group falls most steeply, and the lexical group
-  nearly as steeply.
-- **The rate of high tokens with no paying repair rises slightly with
-  Overall.** This matches the W&I result that NONE is mostly uncorrected.
-- **The W&I levels show the same pattern** (`profiles_wi_levels.csv`). Almost
-  every grammatical label falls from A to C, and native writers sit near the C
-  level, with somewhat more spelling labels.
+The components track proficiency mainly through how often the errors occur
+(Table 7). The fall in error rate accounts for
+`r pc(min(filter(rc, cut == "bucket", cat %in% BUCKETS, comp == "total")$rate_share))`–`r pc(max(filter(rc, cut == "bucket", cat %in% BUCKETS, comp == "total")$rate_share))`%
+of the low-to-high difference for every kind of correction in both corpora.
+The remainder is cost. In W&I, mechanical and multi-word errors cost about
+`r sprintf("%.1f", -RC("wi", "mechanical")$cost_change)`–`r sprintf("%.1f", -RC("wi", "multi-word / order")$cost_change)`
+bits less per error at C than at A, and content-word errors cost about the
+same at every level. Spill per function-word error does not change with level
+(`r with(RC("wi", "function word", "spill"), ci2(cost_change, cost_change_lo, cost_change_hi))`
+bits in W&I).
 
-# Summary for the write-up
+```{r}
+#| label: t-clean
+ca |>
+  filter(measure == "mean_surprisal") |>
+  transmute(corpus = CORP[corpus], statistic = recode(stat, rho_total = "ρ, mean surprisal", rho_clean = "ρ, clean part",
+                                                     partial_clean = "partial ρ, clean part | share of corrected tokens"),
+            value = ci2(value, lo, hi, 3)) |>
+  pivot_wider(names_from = corpus, values_from = value) |>
+  kable(caption = "Table 8. The clean part against the criterion, Spearman ρ [95% CI]")
+```
 
-- **Among learners, the level signal in high surprisal is the errors.** On
-  W&I+LOCNESS, errors fall steeply with proficiency while uncorrected surprise
-  barely changes, so total surprise understates the error signal. Native
-  writers have the most uncorrected surprise, at a C-level error rate, though
-  LOCNESS also differs from W&I in prompts and genre.
-- **Attestation characterizes uncorrected surprise.** Rare words in
-  combinations attested in edited prose are among the most reliably
-  uncorrected kinds of high token, and their rate rises with level.
-- **LM repairs name the error.** Grammatical repair labels lean towards
-  corrected tokens, and the insertion, inflection and nonword labels are
-  corrected about 80% of the time or more. Content-word substitutions and NONE
-  are mostly uncorrected.
-- **On ELLIPSE, repair profiles behave as error measures should.** Every
-  frequent label but inserted punctuation falls with Overall, and unrepaired
-  high tokens rise slightly.
+The clean part's own association with proficiency is small and not
+consistent across corpora (Table 8). In W&I it correlates slightly
+positively with level, and more so at a given share of corrected tokens
+(partial ρ `r with(filter(ca, corpus == "wi", measure == "mean_surprisal", stat == "partial_clean"), f2(value))`).
+In FCE it correlates slightly negatively with the score, with or without the
+control (partial ρ `r with(filter(ca, corpus == "fce", measure == "mean_surprisal", stat == "partial_clean"), f2(value))`).
+The high-token rate shows the same sign difference. The surprisal of the
+writer's corrected text is therefore not a stable proficiency signal of its
+own. It mixes surprise that rises with level (vocabulary, register) with what
+minimal corrections leave behind (awkward phrasing, missed errors), and the
+balance differs between the corpora.
+
+::: {.callout-note collapse="true"}
+## Supplement: the finer ERRANT groups
+
+```{r}
+#| label: t-groups
+sh |>
+  filter(cut == "group", str_detect(col, "\\|total$") | col == "clean") |>
+  transmute(corpus, group = str_remove(col, "\\|total$"), v = pci(share, lo, hi)) |>
+  pivot_wider(names_from = corpus, values_from = v) |>
+  left_join(rc |> filter(cut == "group", comp == "total") |>
+              transmute(corpus, group = cat, r = sprintf("%.1f / %.1f", rate_all, cost_all)) |>
+              pivot_wider(names_from = corpus, values_from = r, names_prefix = "rate / cost "), by = "group") |>
+  transmute(group, `W&I share, %` = wi, `FCE share, %` = fce,
+            `W&I errors per 100 tokens / bits per error` = `rate / cost wi`,
+            `FCE errors per 100 tokens / bits per error` = `rate / cost fce`) |>
+  mutate(across(everything(), ~ replace_na(.x, ""))) |>
+  kable(caption = "Share of the proficiency signal by ERRANT group (at site + spill), and frequency and cost per error")
+```
+:::
+
+## 4.4 Beyond error counts (RQ3)
+
+```{r}
+#| label: t-rq3
+inc |>
+  transmute(corpus = CORP[corpus], model, units = format(n, big.mark = ","), `R²` = sprintf("%.3f", r2),
+            `ΔR² over B [95% CI]` = if_else(is.na(delta_r2), "", ci2(delta_r2, lo, hi, 4))) |>
+  kable(caption = "Table 9. Predicting level (W&I) and script score (FCE) from the error counts B and the surprisal components S (cross-validated R²)")
+```
+
+The human error counts alone explain most of what surprisal does (Table 9).
+They reach R² = `r f2(INC("wi", "B")$r2)` on W&I and
+`r f2(INC("fce", "B")$r2)` on FCE, against `r f2(INC("wi", "mean surprisal")$r2)`
+and `r f2(INC("fce", "mean surprisal")$r2)` for mean surprisal alone. The
+compact surprisal terms add a small but reliable increment on both corpora,
+`r with(INC("wi", "B + S compact"), ci2(100 * delta_r2, 100 * lo, 100 * hi))`
+points of R² on W&I and
+`r with(INC("fce", "B + S compact"), ci2(100 * delta_r2, 100 * lo, 100 * hi))`
+on FCE. Plain mean surprisal adds nothing on W&I and most of the gain on FCE.
+
+```{r}
+#| label: t-coefs
+cf |>
+  filter(model == "B + S compact", feature %in% c("clean", "cost_mean", "spill_mean")) |>
+  transmute(corpus = CORP[corpus], term = recode(feature, cost_mean = "mean at-site bits per error",
+                                                 spill_mean = "mean spill bits per error"), coef_sd) |>
+  pivot_wider(names_from = corpus, values_from = coef_sd) |>
+  kable(digits = 3, caption = "Table 10. Standardised ridge coefficients of the surprisal terms in B + S (criterion units per SD), all units")
+```
+
+The cost terms have the same sign in both corpora (Table 10). At a given
+number of errors, errors that are more surprising, at their site and on the
+words after them, go with a lower level or score. The clean term has opposite
+signs in the two corpora, as in Table 8.
+
+## 4.5 Follow-up (*post hoc*): classic measures under correction
+
+This section was added after the results above had been seen. It asks
+whether the dependence on correctable errors is specific to surprisal or is
+shared by the phraseological and lexical measures of applied linguistics.
+
+```{r}
+#| label: t-classic
+mlab <- c(surprisal = "mean surprisal", bigram_mi = "bigram MI", bigram_dp = "bigram ΔP", share_mi3 = "share of bigrams with MI ≥ 3",
+          dep_mi = "dependency MI (amod, dobj, advmod)", content_freq = "content-word log frequency",
+          lemma_freq = "Study 2 lemma log frequency")
+cl |>
+  filter(measure %in% names(mlab), stat %in% c("rho_orig", "rho_corr", "removed", "dR2_corr"),
+         measure != "lemma_freq" | corpus == "fce") |>
+  mutate(v = case_when(stat == "removed" ~ pci(value, lo, hi),
+                       stat == "dR2_corr" ~ ci2(100 * value, 100 * lo, 100 * hi),
+                       TRUE ~ ci2(value, lo, hi))) |>
+  select(corpus, measure, stat, v) |>
+  pivot_wider(names_from = stat, values_from = v) |>
+  mutate(measure = factor(mlab[measure], mlab)) |>
+  arrange(desc(corpus), measure) |>
+  transmute(corpus = CORP[corpus], measure, `ρ, original` = rho_orig, `ρ, corrected` = rho_corr,
+            `removed by correction, %` = removed, `ΔR² over B, corrected essay (points)` = dR2_corr) |>
+  kable(caption = "Table 11. Each measure against the criterion on the original and the corrected essays. Removed = 1 − ρ corrected / ρ original (for mean surprisal, 1 − the clean part's share). Study 2's lemma frequency has no association with level on W&I and is shown for FCE only")
+```
+
+Correction removes most of the proficiency association of the
+phraseological measures too (Table 11). Bigram MI and the share of high-MI
+bigrams lose nearly all of it on W&I
+(`r pc(CL("wi", "bigram_mi", "removed")$value)`% and
+`r pc(CL("wi", "share_mi3", "removed")$value)`%) and about half on FCE
+(`r pc(CL("fce", "bigram_mi", "removed")$value)`% and
+`r pc(CL("fce", "share_mi3", "removed")$value)`%). Dependency MI loses
+`r pc(CL("wi", "dep_mi", "removed")$value)`% and
+`r pc(CL("fce", "dep_mi", "removed")$value)`%. Bigram ΔP keeps most of its
+association, and content-word frequency, a measure of lexical
+sophistication, keeps all of it. On the corrected essays, only content-word
+frequency adds to the error counts on both corpora. Bigram ΔP adds on W&I,
+and its FCE interval touches zero.
+
+```{r}
+#| label: t-classic-buckets
+cols <- c("corr", BUCKETS, "phraseological", "phraseological + function word")
+cl |>
+  filter(measure %in% names(mlab), str_starts(stat, "share\\|"), measure != "lemma_freq" | corpus == "fce") |>
+  mutate(part = str_remove(stat, "share\\|")) |>
+  filter(part %in% cols) |>
+  mutate(v = sprintf("%.0f", 100 * value)) |>
+  select(corpus, measure, part, v) |>
+  pivot_wider(names_from = part, values_from = v) |>
+  bind_rows(sh |> filter(cut == "edit_rate", col %in% BUCKETS) |>
+              select(corpus, col, share) |>
+              pivot_wider(names_from = col, values_from = share) |>
+              mutate(phraseological = `content-word choice` + `multi-word / order`,
+                     `phraseological + function word` = phraseological + `function word`,
+                     across(-corpus, ~ sprintf("%.0f", 100 * .x)), measure = "edit_rate", corr = "–")) |>
+  mutate(measure = factor(c(mlab, edit_rate = "reference: error rate")[measure], c(mlab, "reference: error rate"))) |>
+  arrange(desc(corpus), measure) |>
+  transmute(corpus = CORP[corpus], measure, corrected = corr, !!!syms(cols[-1])) |>
+  kable(caption = "Table 12. Share of each measure's proficiency signal (%) carried by the corrected essay and by each kind of correction. Phraseological = content-word choice + multi-word / order")
+```
+
+Table 12 splits each measure's signal by kind of correction. Mean
+surprisal's split follows the error mix, close to the reference row for the
+plain error rate. Its narrowly phraseological part (content-word choice and
+multi-word corrections) is
+`r pc(CL("wi", "surprisal", "share|phraseological")$value)`% on W&I and
+`r pc(CL("fce", "surprisal", "share|phraseological")$value)`% on FCE, and about
+half with function words added. Bigram MI and the high-MI share also carry a
+large mechanical part (`r pc(CL("wi", "bigram_mi", "share|mechanical")$value)`%
+and `r pc(CL("wi", "share_mi3", "share|mechanical")$value)`% on W&I), because
+misspellings and punctuation errors break bigrams. Dependency MI is the most
+phraseological measure, led by content-word choice
+(`r pc(CL("wi", "dep_mi", "share|content-word choice")$value)`% and
+`r pc(CL("fce", "dep_mi", "share|content-word choice")$value)`%). On FCE,
+Study 2's lemma frequency is a misspelling artifact. Its association with the
+score is positive on the original scripts
+(ρ = `r f2(CL("fce", "lemma_freq", "rho_orig")$value)`), mechanical corrections
+carry `r pc(CL("fce", "lemma_freq", "share|mechanical")$value)`% of it, and it
+turns negative after correction
+(ρ = `r f2(CL("fce", "lemma_freq", "rho_corr")$value)`). Misspelled words are
+unseen lemmas, which the measure counts at the frequency floor. On W&I the
+measure has no association with level
+(ρ = `r f2(CL("wi", "lemma_freq", "rho_orig")$value)`).
+
+# 5. Discussion
+
+**RQ1.** The surprisal of learner writing decomposes into a clean part and
+the contributions of the errors, and the error part splits exactly by error
+type. Each kind of error adds surprisal at its own site and spills onto the
+next few words. Function-word errors are cheap at their site and spill the
+most relative to it. Content-word and multi-word errors are the costliest per
+error. Mechanical errors are the most frequent.
+
+**RQ2.** Among learners, the proficiency signal in mean surprisal is the
+errors. The corrections remove all of it on W&I and about nine tenths on FCE.
+The components differ in how much of the signal they carry, but mostly
+because the errors differ in frequency. Each component's share is close to
+its share of the plain error-rate signal, and the fall in error rate explains
+most of every component's difference between low and high levels. About a
+quarter of the signal is spillover onto the correct words that follow an
+error.
+
+**RQ3.** Surprisal adds little to the human error counts. The increment is
+reliable but small, and its consistent part is the cost of the errors, not
+the clean text. Surprisal is better read as a model-based estimate of error
+density, weighted by how disruptive the errors are, than as a measure of
+something beyond errors.
+
+Two consequences for the measure follow. First, lower mean surprisal is not
+better writing above the C level. Native student essays sit at the C-learner
+level, and more literate native prose is more surprising. The scale runs
+from many errors to few, not from learner to native. Second, the
+phraseological measures of applied linguistics share this dependence on
+correctable errors. Bigram MI and the high-MI share lose most of their
+association once errors are corrected, and a large part of what they lose is
+spelling and punctuation. Study 2's lemma-frequency measure is, on FCE, an
+index of misspelling. Studies that use these measures as indices of lexical
+or phraseological knowledge should check how much of their signal survives
+correction.
+
+## Limitations
+
+- **Minimal corrections.** The annotators corrected errors with as small an
+  edit as possible. Awkward but grammatical phrasing is usually left alone
+  and stays in the clean part, so the error components are a lower bound on
+  what fluent rewriting would remove.
+- **One annotator.** Only the first annotator's corrections are used.
+  Annotators disagree on what counts as an error, and the split inherits that
+  uncertainty.
+- **The 8-subword window.** Spill is measured only within the window, so the
+  spill shares are lower bounds, and its decay with distance is partly the
+  window.
+- **Dolma as reference.** The classic measures depend on the Dolma reference
+  corpora (edited prose for the bigram measures), so their values reflect
+  that corpus's register.
+- **Untyped spans.** Flagged spans have no correction and no type
+  (`r pc(SH("wi", "flagged|total")$share)`% of the W&I signal and
+  `r pc(SH("fce", "flagged|total")$share)`% of the FCE signal).
+- **Calibration.** PERSUADE's English-learner flag is a school category, not
+  native-speaker status, and the calibration groups differ in topic, genre
+  and age.
+
+# References
+
+Bryant, C., Felice, M., & Briscoe, T. (2017). Automatic annotation and
+evaluation of error types for grammatical error correction. *Proceedings of
+ACL 2017*, 793–805.
+
+Bryant, C., Felice, M., Andersen, Ø. E., & Briscoe, T. (2019). The BEA-2019
+shared task on grammatical error correction. *Proceedings of BEA 2019*,
+52–75.
+
+Crossley, S. A., Tian, Y., Baffour, P., Franklin, A., Benner, M., &
+Boser, U. (2024). A large-scale corpus for assessing written argumentation:
+PERSUADE 2.0. *Assessing Writing, 61*, 100865.
+
+Granger, S. (1998). The computer learner corpus: A versatile new source of
+data for SLA research. In S. Granger (Ed.), *Learner English on Computer*
+(pp. 3–18). Longman. (LOCNESS: Centre for English Corpus Linguistics,
+Université catholique de Louvain.)
+
+Shapley, L. S. (1953). A value for n-person games. In H. W. Kuhn &
+A. W. Tucker (Eds.), *Contributions to the Theory of Games II* (pp. 307–317).
+Princeton University Press.
+
+Yannakoudakis, H., Briscoe, T., & Medlock, B. (2011). A new dataset and
+method for automatically grading ESOL texts. *Proceedings of ACL 2011*,
+180–189.
+
+Yannakoudakis, H., Andersen, Ø. E., Geranpayeh, A., Briscoe, T., &
+Nicholls, D. (2018). Developing an automated writing placement system for
+ESL learners. *Applied Measurement in Education, 31*(3), 251–267.
