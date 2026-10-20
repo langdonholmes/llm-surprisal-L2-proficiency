@@ -927,3 +927,52 @@ Study 2's measures reproduce `ellipse_metrics.csv` exactly. D24, D25 and D31
 reproduce. About 2.6 GPU-h for p̄.
 
 Code and notes: `pilot_assoc/` (commit 647d9c8). Data: `data/study3/pilot_assoc/`.
+
+## 2026-10-20 · D33. Which kinds of correction carry each measure's signal
+
+Langdon's question: how much of the error-driven signal is plausibly
+phraseological? Buckets, fixed before the run (ERRANT category):
+- mechanical: SPELL, ORTH, PUNCT, VERB:FORM/SVA/INFL/TENSE, NOUN:NUM/INFL,
+  MORPH, ADJ:FORM, CONTR, NOUN:POSS
+- function word: DET, PREP, PRON, CONJ, PART
+- content-word choice: NOUN, VERB, ADJ, ADV
+- multi-word / order: OTHER, WO
+
+**Surprisal:** the D28 split regrouped by bucket (per-edit Shapley within
+windows). **Classic measures:** exact Shapley over the four buckets per essay
+(16 partially corrected versions, re-parsed). Both use the correction as
+baseline. The sums are exact, and D28 and D32 reproduce. CPU only.
+
+Share of cov(original measure, level or score), %, W&I / FCE.
+"Phraseological" = content + multi-word, then with function words added:
+
+| measure | corrected | mechanical | function word | content | multi-word | phraseological |
+|---|---|---|---|---|---|---|
+| surprisal | −4 / 9 | 47 / 35 | 14 / 20 | 13 / 10 | 22 / 17 | 35–49 / 27–47 |
+| bigram MI | −1 / 31 | 38 / 27 | 22 / 10 | 12 / 10 | 29 / 21 | 41–63 / 31–41 |
+| share MI ≥ 3 | −3 / 38 | 39 / 27 | 23 / 5 | 14 / 10 | 28 / 20 | 42–64 / 30–35 |
+| bigram ΔP | 66 / 70 | 9 / 7 | 8 / 13 | 5 / 4 | 12 / 6 | 17–25 / 10–23 |
+| dependency MI (mean of 3) | 24 / 40 | 14 / 12 | 10 / 8 | 28 / 25 | 24 / 16 | 52–62 / 41–48 |
+| content-word frequency | 104 / 135 | 1 / −27 | 0 / 1 | −4 / −5 | −2 / −5 | ≈ 0 |
+| reference: edit-rate covariance | – | 50 / 44 | 21 / 29 | 10 / 12 | 16 / 15 | 27–48 / 27–56 |
+
+Reading:
+- Surprisal's signal follows the error mix itself. Its bucket shares are close
+  to the edit-rate covariance.
+- About a third to a half is phraseological (content-word choice and
+  multi-word), about half with function words. A third to a half is
+  mechanical.
+- Bigram MI and the MI ≥ 3 share also carry a large mechanical part (27–39%):
+  misspellings break bigrams.
+- Study 2's dependency MI is the most phraseological, led by content-word
+  choice, and keeps 24–40% after correction.
+- Bigram ΔP keeps most of its signal (66–70%), but in D32 its increment over
+  error counts was not reliable on FCE.
+- Content-word frequency is untouched by correction.
+- Side finding: on FCE, Study 2's lemma-frequency measure (unseen lemmas
+  counted as 1) is a misspelling artifact (96% mechanical). Its W&I signal is
+  null.
+- Caveat: the two Shapley granularities can differ only in windows holding
+  edits from more than one bucket. Not measured.
+
+Code and notes: `pilot_buckets/` (commit baec5ff). Data: `data/study3/pilot_buckets/`.
