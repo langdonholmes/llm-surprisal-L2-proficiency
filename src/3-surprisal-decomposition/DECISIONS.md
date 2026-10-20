@@ -769,3 +769,50 @@ prepositions, noun number and punctuation. CEFR sublevels add little (total
 are lower bounds.
 
 Code and notes: `pilot_types/` (commit 20eadb6). Data: `data/study3/pilot_types/`.
+
+## 2026-10-20 · D29. Reconciling the "null" clean part with the earlier gold correlations
+
+Langdon asked why the clean part (D24) looks null among learners when earlier
+gold results had the uncorrected high-token rate at ρ = +.32 with level, and
++.24 partialling out errors. W&I learners (n = 3,300). Spearman ρ with level,
+and partial ρ (Pearson on ranks after regressing out the control's ranks),
+1,000 essay bootstraps:
+
+| measure | ρ | partial ρ \| gold error rate |
+|---|---|---|
+| old OK-only rate (POST dropped; D15–D17 table) | .316 | .244 [.210, .279] |
+| uncorrected rate, OK + POST (5_gold.py since 7bdc91a) | .140 | .182 [.146, .215] |
+| clean high-token rate (D24, corrected essays) | .124 | .195 [.160, .228] |
+| clean mean surprisal (D24) | .045 | .162 [.125, .197] |
+
+The +.32 / +.24 are the old OK-only rate. Three things change between that
+figure and the clean part:
+
+1. **Counting (D22).** POST tokens are uncorrected but concentrated at A.
+   Dropping them made the rate rise with level (ρ .32 → .14 when counted).
+2. **Units.** The old rate counts high tokens per original token, so the
+   errors' own tokens are in the denominator and spillover stays in the
+   uncorrected words. The clean part is rescored in the corrected essay, per
+   own word, and the spillover moves to the errors (D24, D27).
+3. **Share of covariance vs partial correlation.** The share (−4% / −19%)
+   reflects the raw covariance, which is near zero. But the clean part
+   correlates *positively* with the error rate (ρ .13 for the mean, .05 for
+   the rate), and the error rate falls steeply with level (−.61). That masks
+   a positive association: at a given error rate, higher-level writers'
+   corrected text is more surprising (partial +.16 to +.20). A likely reason
+   is that the clean part mixes level-rising surprise (vocabulary, register)
+   with what minimal corrections leave behind (awkwardness, missed errors),
+   which tracks the error rate.
+
+Controlling the *surprisal* of the corrections (omission + context + error
+tokens) instead of the error count, the partial shrinks to .067 [.032, .102]
+for the rate and .027 [−.010, .065] for the mean. That control also removes
+essay-level predictability shared by the clean and error parts, such as topic,
+so the gold count is the cleaner control for "beyond errors". Both are to be
+reported. FCE replication pending (pilot_rq3).
+
+So "the clean part is null among learners" holds for its raw covariance
+only. Conditional on error rate it carries a modest positive level signal.
+Computed with a scratch script over `pilot_corrected/aligned.parquet`,
+`results/study3/gold_essays.csv` and `results/study3/decompose_wi_essays.csv`.
+To be rebuilt in the end-to-end run.
