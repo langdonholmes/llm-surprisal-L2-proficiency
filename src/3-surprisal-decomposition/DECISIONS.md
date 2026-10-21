@@ -1086,3 +1086,33 @@ render. Stage 0 and stage 9 still read the ELLIPSE token surprisal stored by
 `appendix/A0_extract.py`. When ELLIPSE runs through `2_score.py`, they will
 read that instead, and τ will be taken from all ELLIPSE essays rather than
 the dev split.
+
+## 2026-10-21 · D38. The corrector: Qwen3.5-9B with LoRA, five-fold cross-fitting
+
+- **Name.** `corrector/`, not GEC: the corrections are not only grammatical,
+  and that is part of the argument.
+- **Data and folds.** Whole W&I essays and FCE answers, original →
+  first-annotator correction, taken from stage 1. Five folds by unit,
+  stratified by corpus × level. Each fold's model corrects its own fold.
+  A sixth model, trained on everything, corrects ELLIPSE. No ensembling.
+- **Model.** Qwen3.5-9B-Base, with Qwen3.5-2B-Base as the small comparison;
+  no 27B. Gemma 4 12B was the alternative. Qwen trains 1.8× faster
+  (938 vs 525 tokens/s) and generates 1.2× faster on an A6000, and the Qwen
+  9B/2B pair differs only in size.
+- **Settings.** LoRA r 16, α 32, all linear layers; cosine, 10% warm-up,
+  batch 16, bf16, greedy decoding. Learning rate searched over
+  {5e-5, 1e-4, 2e-4} on fold 0's tuning split by ERRANT F0.5. Each value is
+  sourced in `corrector/README.md` (CoCoGEC; Adapting LLMs for Minimal-edit
+  GEC; LoRA Without Regret; QLoRA).
+- **Epochs.** Fixed at 2 in advance. A cosine schedule ties the whole LR path
+  to the epoch count, so early stopping inside a run is not clean. One
+  1-epoch run and one r 64 run at the chosen LR are the checks.
+- **Baseline.** The instruct model with the minimal-edit prompt, zero- and
+  few-shot, corrects fold 0 before any fine-tuning. It sets the agreement to
+  beat.
+- **Environment.** The corrector has its own uv environment (transformers 5,
+  PEFT, the flash-linear-attention and causal-conv1d kernels). The main
+  environment keeps transformers < 5 for the Study 1 instrument.
+- **Data handling.** Sending the corpora to model APIs (Anthropic, OpenAI) is
+  private, non-commercial dissertation use and within the licences (user,
+  2026-10-21). This loosens D26's rule. Redistribution is still out.

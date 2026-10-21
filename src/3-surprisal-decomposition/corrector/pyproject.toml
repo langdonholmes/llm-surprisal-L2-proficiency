@@ -1,0 +1,38 @@
+[project]
+name = "study3-corrector"
+version = "0.1.0"
+description = "Study 3: LoRA-fine-tuned corrector for ELLIPSE (own environment; the main venv pins transformers<5 for the Study 1 instrument)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "torch==2.10.0",
+    "transformers>=5.15,<6",
+    "peft>=0.20",
+    "trl>=1.10",
+    "accelerate>=1.12",
+    "datasets>=3.3",
+    "pandas>=2.2",
+    "pyarrow>=19",
+    "errant>=3.0",
+    "spacy>=3.8.4,<3.9",
+    "en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+    "flash-linear-attention>=0.5",
+    "causal-conv1d>=1.6",
+    "setuptools",
+    "wheel",
+    "ninja",
+    "packaging",
+]
+
+[tool.uv]
+package = false
+exclude-newer = "2026-10-07T00:00:00Z"
+# built against the env's torch (cu126); fetches the matching prebuilt wheel
+no-build-isolation-package = ["causal-conv1d"]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
