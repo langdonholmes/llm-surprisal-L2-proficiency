@@ -1134,3 +1134,10 @@ the dev split.
   .633 for 1e-4, .633 for 2e-4, with confidence intervals about .025 wide.
   The rule fixed in advance picks 5e-5. The result is reported as
   insensitivity to the learning rate, not as an optimum.
+- **Checks: a margin, set before their results (user, 2026-10-21).** The
+  rank-64 and 1-epoch runs replace the default (rank 16, 2 epochs) only if
+  their tuning-split F0.5 lies outside the default run's 95% bootstrap CI
+  (.623–.648 at 5e-5). A smaller difference keeps the default, so the
+  setting cannot flip on noise.
+- **2B learning rate.** The 2B search is flat as well: .589 for 5e-5,
+  .589 for 1e-4, .593 for 2e-4. The rule picks 2e-4.
