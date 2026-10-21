@@ -118,6 +118,8 @@ optimizer steps.
   NeurIPS. (LR 2e-4 for 7–13B models.)
 - Hu, E. et al. (2022). LoRA: Low-Rank Adaptation of Large Language Models.
   ICLR.
+- Le Scao, T. & Rush, A. M. (2021). How Many Data Points is a Prompt Worth?
+  NAACL.
 - Learning Rate Matters: Vanilla LoRA May Suffice for LLM Fine-tuning (2026).
   LoRA accuracy on Llama-2-7B peaks near LR 2e-4.
 - Unsloth LoRA hyperparameters guide:
