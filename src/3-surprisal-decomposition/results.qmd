@@ -18,7 +18,7 @@ library(tidyverse)
 library(jsonlite)
 library(knitr)
 source("src/1-predictability-benchmark/_viz_helpers.R")
-R3 <- "results/study3/main"
+R3 <- "results/study3"
 rd <- function(f) read_csv(file.path(R3, f), show_col_types = FALSE)
 both <- function(stem) bind_rows(wi = rd(paste0(stem, "_wi.csv")), fce = rd(paste0(stem, "_fce.csv")), .id = "corpus")
 js <- function(f) fromJSON(file.path(R3, f))

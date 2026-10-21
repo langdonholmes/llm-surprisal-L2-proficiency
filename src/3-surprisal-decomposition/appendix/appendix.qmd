@@ -26,7 +26,7 @@ rests on two premises, checked first.
    of δ will recover a vocabulary partition.
 
 The second premise fails, by construction, and the decomposition then does
-what that predicts. Inputs come from `1_extract.py`, `2_select.py` and
+what that predicts. Inputs come from `A0_extract.py`, `A0_select.py` and
 `appendix/A1`–`A6`. Every estimate uses ELLIPSE dev essays unless a table says
 otherwise. Units are bits. The analysis rules were frozen before the test set
 was read (`DECISIONS.md`, D11).
@@ -38,7 +38,7 @@ library(jsonlite)
 library(knitr)
 
 source("src/1-predictability-benchmark/_viz_helpers.R")
-RESULTS <- "results/study3"
+RESULTS <- "results/study3/appendix"
 R3 <- RESULTS
 TH <- fromJSON(file.path(RESULTS, "threshold.json"))
 BANDS <- c("low", "mid", "high")

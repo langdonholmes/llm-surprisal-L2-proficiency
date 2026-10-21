@@ -12,7 +12,7 @@ stratified by level (W&I) or score band (FCE), the same folds for every model.
 ΔR² = R²(B + S) − R²(B) with a CI from 2,000 unit bootstraps of the stored
 out-of-fold predictions (D31). Standardized coefficients refit on all units.
 
-Writes results/study3/main/increment.csv and coefs.csv.
+Writes results/study3/increment.csv and coefs.csv.
 
     python src/3-surprisal-decomposition/6_increment.py
 """

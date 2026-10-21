@@ -4,7 +4,7 @@ The Study 1 instrument (``lib.lm.instrument``): OLMo-2 1B base, 8-subword
 window ending at each word's first subword, ``features.predictability.Predictor``,
 batch 32, bf16 forward, fp32 softmax.
 
-Writes, under data/study3/main/<corpus>/:
+Writes, under data/study3/<corpus>/:
     tokens_orig.parquet, tokens_corr.parquet
         text_id, spacy_idx, idx, text, is_space, surprisal_bits
     manifest_score.json

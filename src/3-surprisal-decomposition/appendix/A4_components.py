@@ -13,21 +13,23 @@ Per component:
     lemmas needed to cover half of them), and the loading-weighted Overall
     tertile mix compared with the base rate of all dev high-surprisal tokens.
 
-    results/study3/components_<rep>.csv
-    results/study3/components_<rep>.md     cards with KWIC lines
+    results/study3/appendix/components_<rep>.csv
+    results/study3/appendix/components_<rep>.md     cards with KWIC lines
 
     python src/3-surprisal-decomposition/appendix/A4_components.py --rep delta
 """
 
 import argparse
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from util.paths import DATA_DIR, RESULTS_DIR
 
-S3 = DATA_DIR / "study3"
-OUT = RESULTS_DIR / "study3"
+S3 = DATA_DIR / "study3" / "appendix"
+OUT = RESULTS_DIR / "study3" / "appendix"
+HERE = Path(__file__).resolve().parent
 TOP_N = 200
 N_KWIC_TOP = 12
 N_KWIC_RANDOM = 12
@@ -54,7 +56,7 @@ def main():
     W = np.load(S3 / "nmf" / f"W_{args.rep}.npy")
     essays = pd.read_parquet(S3 / "ellipse" / "essays.parquet")
     texts = dict(zip(essays.text_id, essays.text))
-    split = pd.read_csv(DATA_DIR.parent / "src/3-surprisal-decomposition/split.csv")
+    split = pd.read_csv(HERE / "split.csv")
     dev_e = essays.merge(split).query("split == 'dev'")
     cuts = dev_e.overall.quantile([1 / 3, 2 / 3]).to_list()
     band_of = dict(zip(dev_e.text_id, pd.cut(dev_e.overall, [-np.inf, *cuts, np.inf],

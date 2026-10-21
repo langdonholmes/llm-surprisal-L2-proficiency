@@ -16,7 +16,7 @@ ELLIPSE-dev H (stage A3). Nothing here is fit on TOEFL except the replication NM
 3. Replication. A separate NMF on TOEFL deltas at the same k, matched to the
    ELLIPSE components by Hungarian assignment on the cosine of H rows.
 
-    results/study3/toefl_validity.csv, toefl_l1_d.csv, toefl_replication.csv,
+    results/study3/appendix/toefl_validity.csv, toefl_l1_d.csv, toefl_replication.csv,
     toefl_transfer.json
 
     python src/3-surprisal-decomposition/appendix/A6_toefl.py
@@ -33,8 +33,8 @@ from scipy.stats import spearmanr
 from util.paths import DATA_DIR, RESULTS_DIR
 
 HERE = Path(__file__).resolve().parent
-S3 = DATA_DIR / "study3"
-OUT = RESULTS_DIR / "study3"
+S3 = DATA_DIR / "study3" / "appendix"
+OUT = RESULTS_DIR / "study3" / "appendix"
 SEED = 42
 D_FLAG = 0.20
 LEVELS = {"low": 1, "medium": 2, "high": 3}

@@ -38,7 +38,6 @@ evaluates: dev in the default mode, test with --confirmatory.
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -51,12 +50,11 @@ from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from util.paths import DATA_DIR, ELLIPSE_DIR, RESULTS_DIR  # noqa: E402
+from util.paths import DATA_DIR, ELLIPSE_DIR, RESULTS_DIR
 
 HERE = Path(__file__).resolve().parent
-S3 = DATA_DIR / "study3"
-OUT = RESULTS_DIR / "study3"
+S3 = DATA_DIR / "study3" / "appendix"
+OUT = RESULTS_DIR / "study3" / "appendix"
 SEED = 42
 N_LEMMAS = 300
 N_BOOT = 2000
@@ -83,7 +81,7 @@ def build_features(corpus: str = "ellipse") -> tuple[pd.DataFrame, dict]:
     lab = pd.read_parquet(S3 / corpus / "essays.parquet").drop(columns="text")
     df = lab.merge(es.drop(columns="corpus"), on="text_id", how="left").set_index("text_id")
     if corpus == "ellipse":
-        df = df.join(pd.read_csv(HERE.parent / "split.csv").set_index("text_id"))
+        df = df.join(pd.read_csv(HERE / "split.csv").set_index("text_id"))
         m = pd.read_csv(ELLIPSE_DIR / "ellipse_metrics.csv").rename(columns={"text_id_kaggle": "text_id"})
         df = df.join(m.set_index("text_id")[STUDY2])
     else:

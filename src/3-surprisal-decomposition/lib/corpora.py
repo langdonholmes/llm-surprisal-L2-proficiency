@@ -11,8 +11,10 @@ import json
 from util.paths import DATA_DIR, FCE_DIR, FCE_DOCBINS_DIR, RESULTS_DIR, WI_DIR, WI_DOCBINS_DIR
 
 S3 = DATA_DIR / "study3"
-DATA = S3 / "main"
-RES = RESULTS_DIR / "study3" / "main"
+DATA = S3
+RES = RESULTS_DIR / "study3"
+# The ELLIPSE token surprisal stored by the appendix's GPU pass (appendix/A0_extract.py)
+ELLIPSE_APPX = S3 / "appendix" / "ellipse"
 CORPORA = ["wi", "fce"]
 DOCBINS = {"wi": WI_DOCBINS_DIR, "fce": FCE_DOCBINS_DIR}
 RAW = {"wi": WI_DIR / "raw" / "wi+locness", "fce": FCE_DIR / "raw" / "fce"}

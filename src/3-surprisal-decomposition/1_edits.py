@@ -6,14 +6,14 @@ the gold category of every original token, and parses the corrected texts with
 the spaCy model and settings of ``src/essays/ingest.py`` (en_core_web_lg, NER
 disabled).
 
-Writes, under data/study3/main/<corpus>/:
+Writes, under data/study3/<corpus>/:
     essays.parquet      text_id, unit, group, y, text, corrected, cmap
     edits.parquet       text_id, k (index in the json edit list), s, e, repl, kind,
                         errant, group, bucket, op
     gold.parquet        text_id, spacy_idx, gold (ERR_TOK / ERR_INS / POST / OK)
     docbins_corrected/processed_docs_00.spacy
 
-    python src/3-surprisal-decomposition/1_correct.py --corpus wi
+    python src/3-surprisal-decomposition/1_edits.py --corpus wi
 """
 
 import argparse

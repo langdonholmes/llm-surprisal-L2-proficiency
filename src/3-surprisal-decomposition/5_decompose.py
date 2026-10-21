@@ -28,10 +28,10 @@ part's share of cov(S_orig, criterion) splits the proficiency signal exactly
 (learners only; 2,000 unit-bootstrap CIs). Also: frequency vs cost per error,
 spill by distance, the clean part against the criterion, and the RQ3 features.
 
-Writes results/study3/main/: split4_<corpus>.csv, split4_means_<corpus>.csv,
+Writes results/study3/: split4_<corpus>.csv, split4_means_<corpus>.csv,
 shares_<corpus>.csv, means_<corpus>.csv, rate_cost_<corpus>.csv,
 spill_decay_<corpus>.csv, clean_assoc.csv, decompose_<corpus>.json; and
-data/study3/main/<corpus>/units.parquet.
+data/study3/<corpus>/units.parquet.
 
     python src/3-surprisal-decomposition/5_decompose.py
 """

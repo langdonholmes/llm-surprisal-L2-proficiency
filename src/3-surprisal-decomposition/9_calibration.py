@@ -1,7 +1,7 @@
-"""Study 3, stage 8 — where native and published writing fall on mean surprisal (D26).
+"""Study 3, stage 9 — where native and published writing fall on mean surprisal (D26).
 
 Public documents, downloaded once into their own directories under
-data/study3/main/calibration/ (dl_persuade_train/, dl_wiki/):
+data/study3/calibration/ (dl_persuade_train/, dl_wiki/):
     persuade_native     PERSUADE 2.0 train, independent task, ell_status "No"
     persuade_native_hi  the same with holistic score >= 5 (of 6)
     persuade_ell        PERSUADE 2.0, ell_status "Yes"
@@ -15,12 +15,12 @@ seed 42. The learner essays are cut the same way on their stored tokens (the
 Per document: mean surprisal over scored tokens, as in Study 1. Per group: the
 mean of the document means with a 2,000-resample bootstrap CI.
 
-    python -I src/3-surprisal-decomposition/8_calibration.py prep      # reads the downloads
-    CUDA_VISIBLE_DEVICES=1 python src/3-surprisal-decomposition/8_calibration.py score
-    python src/3-surprisal-decomposition/8_calibration.py table
+    python -I src/3-surprisal-decomposition/9_calibration.py prep      # reads the downloads
+    CUDA_VISIBLE_DEVICES=1 python src/3-surprisal-decomposition/9_calibration.py score
+    python src/3-surprisal-decomposition/9_calibration.py table
 
-Writes data/study3/main/calibration/{docs,tokens}.parquet and
-results/study3/main/calibration.csv, calibration_contrasts.csv.
+Writes data/study3/calibration/{docs,tokens}.parquet and
+results/study3/calibration.csv, calibration_contrasts.csv.
 """
 
 import json
@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import DATA, RES, S3, SEED, N_BOOT  # noqa: E402
+from lib.corpora import DATA, ELLIPSE_APPX, RES, SEED, N_BOOT  # noqa: E402
 
 CAL = DATA / "calibration"
 N_PER_GROUP = 300
@@ -108,10 +108,10 @@ def table():
     wi = pd.read_parquet(DATA / "wi" / "essays.parquet", columns=["text_id", "group", "text"])
     wi["group"] = wi.group.map({"A": "W&I A", "B": "W&I B", "C": "W&I C", "N": "LOCNESS"})
     wi = learner(wi, pd.read_parquet(DATA / "wi" / "tokens_orig.parquet", columns=["text_id", "idx", "surprisal_bits"]))
-    el = pd.read_parquet(S3 / "ellipse" / "essays.parquet", columns=["text_id", "overall", "text"])
+    el = pd.read_parquet(ELLIPSE_APPX / "essays.parquet", columns=["text_id", "overall", "text"])
     el["group"] = pd.cut(el.overall, [0, 2.5, 3.5, 5], labels=ORDER[4:7]).astype(str)
     el_tok = pd.concat([pd.read_parquet(p, columns=["text_id", "idx", "surprisal_bits"])
-                        for p in sorted((S3 / "ellipse" / "shards").glob("shard_*.parquet"))])
+                        for p in sorted((ELLIPSE_APPX / "shards").glob("shard_*.parquet"))])
     D = pd.concat([ext, wi, learner(el, el_tok)])
     rng = np.random.default_rng(SEED)
     rows, bs = [], {}

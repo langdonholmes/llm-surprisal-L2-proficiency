@@ -2,7 +2,7 @@
 
 Run before interpreting any component. Everything uses ELLIPSE dev rows only,
 except the token-composition table, which describes all ELLIPSE essays.
-Writes CSVs to results/study3/ for premises.qmd.
+Writes CSVs to results/study3/appendix/ for premises.qmd.
 
 1. What gets selected. Composition of the high-surprisal tokens by POS and by
    coarse form class (punctuation, non-alphabetic, proper noun, other), within
@@ -34,8 +34,8 @@ from scipy.stats import spearmanr
 from util.paths import DATA_DIR, RESULTS_DIR
 
 HERE = Path(__file__).resolve().parent
-S3 = DATA_DIR / "study3"
-OUT = RESULTS_DIR / "study3"
+S3 = DATA_DIR / "study3" / "appendix"
+OUT = RESULTS_DIR / "study3" / "appendix"
 
 
 def ss_total(X: np.ndarray) -> float:
@@ -61,7 +61,7 @@ def tertile(overall: pd.Series, cuts) -> pd.Series:
 def main():
     sel = pd.read_parquet(S3 / "tokens_selected.parquet")
     essays = pd.read_parquet(S3 / "ellipse" / "essays.parquet").drop(columns="text")
-    split = pd.read_csv(HERE.parent / "split.csv")
+    split = pd.read_csv(HERE / "split.csv")
     cuts = essays.merge(split).query("split == 'dev'").overall.quantile([1 / 3, 2 / 3]).to_list()
     essays["band"] = tertile(essays.overall, cuts)
 

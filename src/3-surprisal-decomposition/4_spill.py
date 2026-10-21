@@ -9,10 +9,10 @@ than 7 players are skipped (``too_many``) and later split Δ equally. ``gap_k``
 names insertions right before the target (a word is missing there), and
 ``dist`` is the distance of each player from the target in words.
 
-Writes data/study3/main/<corpus>/spill.parquet
+Writes data/study3/<corpus>/spill.parquet
     text_id, spacy_idx, status (ok / no_player / too_many / no_window), edit_k,
     gap_k, dist, v_none, v_all, psi
-and results/study3/main/spill_<corpus>.json (status counts, timing).
+and results/study3/spill_<corpus>.json (status counts, timing).
 
     CUDA_VISIBLE_DEVICES=0 python src/3-surprisal-decomposition/4_spill.py --corpus wi
 """

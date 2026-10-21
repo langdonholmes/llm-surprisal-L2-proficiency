@@ -2,12 +2,12 @@
 
 τ is the 90th percentile of token surprisal (bits, whitespace tokens excluded)
 among ELLIPSE dev essays (``split.csv``) whose Overall score is at least the
-dev 2/3 quantile, as in ``2_select.py``. Token surprisal is the Study 1
+dev 2/3 quantile, as in ``appendix/A0_select.py``. Token surprisal is the Study 1
 configuration (OLMo-2 1B, 8-subword window) as stored at token level by
-``1_extract.py --corpus ellipse`` (data/study3/ellipse/shards). τ is used here
+``appendix/A0_extract.py --corpus ellipse`` (data/study3/appendix/ellipse/shards). τ is used here
 for the high-token rate only.
 
-Writes results/study3/main/threshold.json.
+Writes results/study3/threshold.json.
 
     python src/3-surprisal-decomposition/0_threshold.py
 """
@@ -21,20 +21,20 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from lib.corpora import RES, S3  # noqa: E402
+from lib.corpora import ELLIPSE_APPX, RES  # noqa: E402
 
 TAU_PCT = 90
 
 
 def main():
     RES.mkdir(parents=True, exist_ok=True)
-    split = pd.read_csv(HERE / "split.csv", dtype={"text_id": str})
-    essays = pd.read_parquet(S3 / "ellipse" / "essays.parquet", columns=["text_id", "overall"])
+    split = pd.read_csv(HERE / "appendix" / "split.csv", dtype={"text_id": str})
+    essays = pd.read_parquet(ELLIPSE_APPX / "essays.parquet", columns=["text_id", "overall"])
     dev = essays.merge(split[split.split == "dev"], on="text_id")
     cut = float(dev.overall.quantile(2 / 3))
     ref = set(dev.text_id[dev.overall >= cut])
     toks = pd.concat([pd.read_parquet(p, columns=["text_id", "is_space", "surprisal_bits"])
-                      for p in sorted((S3 / "ellipse" / "shards").glob("shard_*.parquet"))])
+                      for p in sorted((ELLIPSE_APPX / "shards").glob("shard_*.parquet"))])
     s = toks.surprisal_bits[toks.text_id.isin(ref) & ~toks.is_space]
     tau = float(np.percentile(s, TAU_PCT))
     res = {"tau_bits": tau, "tau_percentile": TAU_PCT, "dev_top_tertile_overall_cut": cut,

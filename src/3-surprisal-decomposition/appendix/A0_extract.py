@@ -1,4 +1,4 @@
-"""Study 3, stage 1 — one forward pass per corpus, keep the top-k prediction.
+"""Study 3 appendix, stage A0 — one forward pass per corpus, keep the top-k prediction.
 
 Runs the Study 1 selected configuration (OLMo-2 1B base, 8-token window)
 through the same ``features.predictability.Predictor`` that produced the Study 1
@@ -9,10 +9,10 @@ tables, and records for **every** scored token:
 
 Nothing is thresholded here. Storing the top-K distribution for every token
 makes the threshold, the delta arithmetic and every top-k / threshold
-sensitivity a CPU step over these files (``2_deltas.py``), so the GPU pass runs
+sensitivity a CPU step over these files (``A0_select.py``, ``A1_deltas.py``), so the GPU pass runs
 once.
 
-Outputs, under ``data/study3/{corpus}/``:
+Outputs, under ``data/study3/appendix/{corpus}/``:
 
     shards/shard_XXX.parquet   token rows (spaCy attributes + surprisal + obs id)
     shards/shard_XXX.npz       topk_ids [n, K] int32, topk_probs [n, K] float32
@@ -20,12 +20,12 @@ Outputs, under ``data/study3/{corpus}/``:
     manifest.json
 
 Shards are written every SHARD_SIZE essays and skipped on re-run, so the pass is
-resumable. Batch size, dtype and windowing match Study 1, and ``check`` in
-``2_deltas.py`` verifies that the per-essay mean surprisal reproduces the Study 1
+resumable. Batch size, dtype and windowing match Study 1, and ``check_against_study1`` in
+``A0_select.py`` verifies that the per-essay mean surprisal reproduces the Study 1
 table.
 
-    CUDA_VISIBLE_DEVICES=0 python src/3-surprisal-decomposition/1_extract.py --corpus ellipse
-    CUDA_VISIBLE_DEVICES=1 python src/3-surprisal-decomposition/1_extract.py --corpus toefl11
+    CUDA_VISIBLE_DEVICES=0 python src/3-surprisal-decomposition/appendix/A0_extract.py --corpus ellipse
+    CUDA_VISIBLE_DEVICES=1 python src/3-surprisal-decomposition/appendix/A0_extract.py --corpus toefl11
 """
 
 import argparse
@@ -41,7 +41,7 @@ import pandas as pd
 import torch
 import transformers
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "1-predictability-benchmark"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "1-predictability-benchmark"))
 from models import MODEL_REGISTRY  # noqa: E402
 import run_surprisal  # noqa: E402
 from run_surprisal import load_essays, load_predictor, window_int  # noqa: E402
@@ -57,7 +57,7 @@ WINDOW = "8"
 TOP_K = 50
 BATCH_SIZE = 32  # Study 1's batch size, so the logits are the same ones
 SHARD_SIZE = 500
-OUT_ROOT = DATA_DIR / "study3"
+OUT_ROOT = DATA_DIR / "study3" / "appendix"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger("extract")

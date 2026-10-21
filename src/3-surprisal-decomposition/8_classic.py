@@ -1,4 +1,4 @@
-"""Study 3, stage 7 (CPU, post hoc) — classic measures under correction, by kind of correction.
+"""Study 3, stage 8 (CPU, post hoc) — classic measures under correction, by kind of correction.
 
 For every learner unit, the players are the correction buckets present among
 its edits (mechanical, function word, content-word choice, multi-word / order,
@@ -18,10 +18,10 @@ imputed in-fold), and each
 bucket's share of cov(original measure, criterion). Surprisal is added from
 stage 5 for comparison.
 
-Writes data/study3/main/<corpus>/versions.parquet, version_sums.parquet,
-classic_units.parquet, and results/study3/main/classic_<corpus>.csv.
+Writes data/study3/<corpus>/versions.parquet, version_sums.parquet,
+classic_units.parquet, and results/study3/classic_<corpus>.csv.
 
-    python src/3-surprisal-decomposition/7_classic.py
+    python src/3-surprisal-decomposition/8_classic.py
 """
 
 import sys

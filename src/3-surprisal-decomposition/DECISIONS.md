@@ -1040,10 +1040,10 @@ Open:
   excludes from the write-up.
 - Untracked outputs of the removed stages remain in `results/study3/`.
 
-## D36. 2026-10-21. LM repair dropped; ELLIPSE to be corrected by a fine-tuned GEC model
+## 2026-10-21 · D36. LM repair dropped; ELLIPSE to be corrected by a fine-tuned corrector model
 
 After the advisor meeting, LM repair is dropped, not parked. ELLIPSE comes
-back into Study 3 a different way. A GEC model is fine-tuned on the W&I and
+back into Study 3 a different way. A corrector model is fine-tuned on the W&I and
 FCE (original, corrected) pairs to produce minimal corrections of ELLIPSE.
 ERRANT types its output, so ELLIPSE gets the same edit format as the two gold
 corpora and runs through the same decomposition. ELLIPSE's analytic scores
@@ -1062,3 +1062,27 @@ Done here:
   apart from the appendix's, `rq4`–`rq6`, `lab/`), `data/study3/pilot_*`,
   `data/study3/repair/` (5.1 GB) and `data/study3/wi/tokens_gold.parquet`.
   The code that made them is in 6057d95. The appendix renders.
+
+## 2026-10-21 · D37. Repo reorganised around the current plan
+
+Restructure only; no analysis changed.
+- **Appendix self-contained.** `1_extract.py` → `appendix/A0_extract.py`,
+  `2_select.py` → `appendix/A0_select.py` (repair bench writing removed),
+  `split.csv` → `appendix/split.csv`. Its data and results moved to
+  `data/study3/appendix/` and `results/study3/appendix/`. `lib/bench.py` is
+  gone.
+- **Main outputs flattened.** `data/study3/main/` → `data/study3/`,
+  `results/study3/main/` → `results/study3/`.
+- **Stages renumbered to the final plan.** `1_correct.py` → `1_edits.py`,
+  `7_classic.py` → `8_classic.py`, `8_calibration.py` → `9_calibration.py`.
+  Stage 7 is reserved for the ELLIPSE analytic scores (D36).
+- `REBUILD.md` removed (D35 summarises it, and it is in 62bf690).
+  `notes/literature.md` lost its repair sections.
+
+Acceptance: stages 0, 1, 3, 5, 6, 8 and `9_calibration.py table` were re-run.
+All 30 non-figure outputs in `results/study3/` and the 12 rewritten unit,
+edit and alignment tables are identical to the pre-move copies. Both reports
+render. Stage 0 and stage 9 still read the ELLIPSE token surprisal stored by
+`appendix/A0_extract.py`. When ELLIPSE runs through `2_score.py`, they will
+read that instead, and τ will be taken from all ELLIPSE essays rather than
+the dev split.

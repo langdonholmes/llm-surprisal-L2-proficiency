@@ -10,32 +10,30 @@ The proposal's representation. For every token in tokens_selected.parquet
 W_U is OLMo-2's output (unembedding) matrix, which is untied from W_E. Only
 delta is stored, since e_obs is a row lookup and e_pred = delta + e_obs.
 
-    data/study3/delta.npy    [n_selected, 2048] float32, row i == row_id i
-    data/study3/W_U.npy      the output matrix (A2 needs e_obs = W_U[obs_id])
+    data/study3/appendix/delta.npy    [n_selected, 2048] float32, row i == row_id i
+    data/study3/appendix/W_U.npy      the output matrix (A2 needs e_obs = W_U[obs_id])
 
     python src/3-surprisal-decomposition/appendix/A1_deltas.py
 """
 
 import json
-import sys
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
 from transformers import AutoModelForCausalLM
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.bench import S3  # noqa: E402
-from util.paths import RESULTS_DIR  # noqa: E402
+from util.paths import DATA_DIR, RESULTS_DIR
+
+S3 = DATA_DIR / "study3" / "appendix"
 
 CHUNK = 4096
 
 
 def selected_topk() -> tuple[np.ndarray, np.ndarray]:
     """Top-K ids and probabilities of the selected tokens, in row_id order
-    (the same corpora, order and mask as 2_select.py)."""
-    tau = json.loads((RESULTS_DIR / "study3" / "threshold.json").read_text())["tau_bits"]
+    (the same corpora, order and mask as A0_select.py)."""
+    tau = json.loads((RESULTS_DIR / "study3" / "appendix" / "threshold.json").read_text())["tau_bits"]
     ids, probs = [], []
     for corpus in ["ellipse", "toefl11"]:
         d = S3 / corpus / "shards"

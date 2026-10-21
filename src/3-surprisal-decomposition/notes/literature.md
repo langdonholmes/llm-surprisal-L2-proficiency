@@ -1,19 +1,10 @@
-# Novelty review (2026-10-17, sub-agent report, abstracts verified, full texts mostly not read)
+# Literature notes (2026-10-17 novelty review, abstracts verified, full texts mostly not read; repair material removed per D36)
 
-## Closest prior art for the repair representation
+## Error annotation and correction
+- ERRANT, Bryant, Felice & Briscoe 2017 (ACL, P17-1074). The edit types and
+  the alignment used for every corpus.
 - Bryant & Briscoe 2018, LM-based GEC without annotated data, BEA. https://aclanthology.org/W18-0529/
-  Confusion sets (spelling, inflection, determiners, prepositions) scored by an
-  LM, with an edit applied only above a threshold. The generator, the scorer and
-  the NONE logic are all here.
 - Yasunaga, Leskovec & Liang 2021, LM-Critic, EMNLP. https://aclanthology.org/2021.emnlp-main.611
-  A sentence counts as grammatical when the LM prefers it to every nearby edit.
-  This is the "no edit pays" test.
-- Park & Levy 2011 (ACL, P11-1094) and Flachs, Lacroix & Søgaard 2019 (BEA,
-  W19-4420), noisy-channel GEC with edit costs.
-- Alikaniotis & Raheja 2019 (BEA, W19-4412), transformer LMs for the same.
-- ERRANT, Bryant, Felice & Briscoe 2017 (ACL, P17-1074). Map the 29 repair
-  classes onto ERRANT types.
-- GECToR, Omelianchuk et al. 2020. Token-level edit tags, supervised.
 - Graliński et al. 2024, "Oddballness" (arXiv 2409.03046). Raw low probability
   is a poor error detector.
 
@@ -46,19 +37,9 @@
   BLiMP 2020. No error-detector benchmark with lexeme-matched correct controls
   was found.
 
-## Assessment
+## Assessment (δ appendix)
 - **δ-NMF.** The components are prior art and the combination is new but
   weak. Report it as an explained negative result (gradient argument, Linzen
   2016).
-- **Repair as GEC.** Proposing and scoring edits, noisy-channel costs, the
-  threshold/NONE class and edit tags are all prior art.
-- **Plausibly new:**
-  - using the measure's own model to explain its own surprisal (faithful
-    explanation);
-  - splitting high-surprisal tokens into repairable vs. acceptable;
-  - unsupervised, surprisal-anchored essay-level edit profiles as proficiency
-    and L1 features.
-- **Framing:** "unsupervised LM-based correction repurposed as an
-  interpretation of surprisal", not a new correction method.
-- **Must cite and position against:** Bryant & Briscoe 2018; LM-Critic 2021;
-  Muñoz Sánchez et al. 2024 (plus Cong 2025); ERRANT for the taxonomy.
+- Muñoz Sánchez et al. 2024 (plus Cong 2025) are the closest work on what
+  drives surprisal in learner text.

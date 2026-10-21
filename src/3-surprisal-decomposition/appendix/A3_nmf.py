@@ -1,6 +1,6 @@
 """Study 3 appendix, stage A3 — NMF on the delta vectors: k sweep, final fit, comparisons.
 
-Input is the dev ELLIPSE rows of ``data/study3/delta.npy``, split into positive
+Input is the dev ELLIPSE rows of ``data/study3/appendix/delta.npy``, split into positive
 and negative parts, X = [max(delta, 0) | max(-delta, 0)] (2 x 2048 columns,
 unscaled). Test and TOEFL 11 rows are only ever projected onto the dev-fitted
 H (``transform``) and never refit.
@@ -9,9 +9,9 @@ H (``transform``) and never refit.
             (N_SEEDS seeds), match components across halves by Hungarian
             assignment on the cosine of H rows, and record the median matched
             cosine and the relative reconstruction error.
-            -> results/study3/nmf_ksweep_<k>.csv
+            -> results/study3/appendix/nmf_ksweep_<k>.csv
     fit     final fit at --k on all dev rows, transform every row.
-            -> data/study3/nmf/{H,W}_<rep>.npy
+            -> data/study3/appendix/nmf/{H,W}_<rep>.npy
     The --rep option selects the representation: ``delta`` (primary), or the
     two halves of delta on their own, ``obs`` (-e_obs, i.e. the observed word
     alone) and ``pred`` (e_pred, the prediction alone). The last two are
@@ -35,8 +35,8 @@ from sklearn.decomposition import NMF
 
 from util.paths import DATA_DIR, RESULTS_DIR
 
-S3 = DATA_DIR / "study3"
-OUT = RESULTS_DIR / "study3"
+S3 = DATA_DIR / "study3" / "appendix"
+OUT = RESULTS_DIR / "study3" / "appendix"
 NMF_DIR = S3 / "nmf"
 SEED = 42
 K_GRID = [10, 20, 30, 50, 80]

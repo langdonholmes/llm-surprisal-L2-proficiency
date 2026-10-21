@@ -11,8 +11,8 @@ which gives its ERRANT type through edits.parquet.
 Check: aligned tokens whose 8-subword window is identical in both versions
 should have the same surprisal (``same_window``).
 
-Writes data/study3/main/<corpus>/aligned.parquet (one row per non-space scored
-original token) and results/study3/main/align_<corpus>.json.
+Writes data/study3/<corpus>/aligned.parquet (one row per non-space scored
+original token) and results/study3/align_<corpus>.json.
 
     python src/3-surprisal-decomposition/3_align.py --corpus wi
 """
