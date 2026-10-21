@@ -1141,3 +1141,9 @@ the dev split.
   setting cannot flip on noise.
 - **2B learning rate.** The 2B search is flat as well: .589 for 5e-5,
   .589 for 1e-4, .593 for 2e-4. The rule picks 2e-4.
+- **Checks: the default stays.** Rank 64 scores .635 (.623–.648), identical
+  to rank 16. One epoch scores .631 (.618–.643): higher precision (.68 vs
+  .67), lower recall (.48 vs .53), fewer edits (6.8 vs 7.7 per 100 tokens).
+  Both are inside the default's interval. Final 9B settings: LR 5e-5,
+  r 16, 2 epochs. The 2B model uses 2e-4 and is run on fold 0 only, as the
+  size comparison.
