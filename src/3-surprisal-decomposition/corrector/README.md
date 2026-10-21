@@ -212,10 +212,9 @@ input and correction, and a stop token, that it already knows, with no
 made-up separator. It also matches the instruct checkpoint used for the
 prompting baseline.
 
-**The instruction.** Whether the instruction is kept in the fine-tuning input is
-open. With about 4,200 training pairs it is expected to make no difference: a
-prompt is worth on the order of a hundred to a few hundred training examples
+**The instruction.** The instruction stays in the fine-tuning input
+(DECISIONS D39). With about 4,200 training pairs it is not expected to matter:
+a prompt is worth on the order of a hundred to a few hundred training examples
 under full fine-tuning (Le Scao & Rush 2021, How Many Data Points is a Prompt
-Worth?, NAACL), and its advantage shrinks as the data grows. If it is dropped,
-the user turn is the original text alone and the chat delimiters stay. The
-learning-rate search (2026-10-21) was run with the instruction.
+Worth?, NAACL), and its advantage shrinks as the data grows. It is minimal and
+harmless, so it was not worth re-running the search without it.

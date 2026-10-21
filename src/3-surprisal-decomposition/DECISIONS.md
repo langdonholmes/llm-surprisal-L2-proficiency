@@ -1116,3 +1116,21 @@ the dev split.
 - **Data handling.** Sending the corpora to model APIs (Anthropic, OpenAI) is
   private, non-commercial dissertation use and within the licences (user,
   2026-10-21). This loosens D26's rule. Redistribution is still out.
+
+## 2026-10-21 · D39. The fine-tuning input keeps the instruction; LR 5e-5
+
+- **Instruction kept.** Each training pair is the chat template, with the
+  minimal-edit instruction plus the original text as the user turn and the
+  correction as the assistant turn (`corrector/README.md`, "Input format").
+  Dropping the instruction was considered, since a prompt is worth at most a
+  few hundred examples (Le Scao & Rush 2021) and we train on about 4,200. It
+  was not worth re-running the search for: the instruction is minimal and
+  harmless, so the runs proceed as they are (user, 2026-10-21).
+- **Chat format on the base model.** Qwen3.5-9B-Base has no post-training, but
+  its chat tokens are trained, and the untuned base model already answers in
+  the assistant turn and stops at `<|im_end|>`. The LoRA trains no embeddings,
+  so delimiters the model already knows are needed.
+- **Learning rate.** Tuning-split F0.5 is flat across the search: .635 for 5e-5,
+  .633 for 1e-4, .633 for 2e-4, with confidence intervals about .025 wide.
+  The rule fixed in advance picks 5e-5. The result is reported as
+  insensitivity to the learning rate, not as an optimum.
