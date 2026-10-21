@@ -19,13 +19,18 @@ run = <model>_f<fold>[_tune]_lr<lr>_r<r>_e<epochs>.
 
 import argparse
 import json
+import os
 import sys
 import time
 from importlib.metadata import version
 from pathlib import Path
 
-import pandas as pd
-import torch
+# the longest batches (2 x ~4,600 tokens) need ~8.5 GiB of logits; without this the
+# reserved memory fragments and epoch 2 runs out of memory on them
+os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
+
+import pandas as pd  # noqa: E402
+import torch  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # src/, for util
 sys.path.insert(0, str(Path(__file__).resolve().parent))
