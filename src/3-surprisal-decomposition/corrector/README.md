@@ -166,3 +166,54 @@ see the same text: the generation prompt, then the correction and the
 template's end-of-turn marker. Qwen3.5's thinking is switched off. Gemma 4's
 pretrained checkpoint has no chat template, so the instruct tokenizer's is
 used.
+
+## Input format
+
+Each training pair is written in Qwen's chat template (shipped with the base
+checkpoint's tokenizer), with the instruction from `common.py` and the original
+text as the user turn and the correction as the assistant turn. The loss is on
+the correction and `<|im_end|>` only:
+
+```
+<|im_start|>user
+{INSTRUCTION}
+
+{original}<|im_end|>
+<|im_start|>assistant
+<think>
+
+</think>
+
+{corrected}<|im_end|>
+```
+
+The empty `<think>` block is what the template writes with thinking off; it is
+kept so that training and generation see the same text.
+
+**Why the chat format on a base model.** Qwen3.5-9B-Base is not post-trained,
+but its pre-training evidently included chat-formatted text, so the chat
+delimiters already mean something to it:
+
+- The embedding and output rows of `<|im_start|>`, `<|im_end|>`, `<think>` and
+  `</think>` in the base checkpoint have the norms of ordinary trained tokens
+  (0.79–1.16, against medians of 0.93 and 1.01), nearly the same as in the
+  instruct checkpoint, not the near-zero norms of untrained rows.
+- Given the template with the instruction, the untuned base model (checked
+  on Qwen3.5-2B-Base, 2026-10-21) answers in the assistant turn, corrects
+  ("Yesterday I go … my freinds and we was" → "went … friends … were") and
+  stops at `<|im_end|>`.
+
+This matters for LoRA in particular: the adapter trains the linear layers only,
+not the embeddings or the output layer, so it could not repair untrained
+delimiter tokens. The chat format therefore gives the model a delimiter between
+input and correction, and a stop token, that it already knows, with no
+made-up separator. It also matches the instruct checkpoint used for the
+prompting baseline.
+
+**The instruction.** Whether the instruction is kept in the fine-tuning input is
+open. With about 4,200 training pairs it is expected to make no difference: a
+prompt is worth on the order of a hundred to a few hundred training examples
+under full fine-tuning (Le Scao & Rush 2021, How Many Data Points is a Prompt
+Worth?, NAACL), and its advantage shrinks as the data grows. If it is dropped,
+the user turn is the original text alone and the chat delimiters stay. The
+learning-rate search (2026-10-21) was run with the instruction.
