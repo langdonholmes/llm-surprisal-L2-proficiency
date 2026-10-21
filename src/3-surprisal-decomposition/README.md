@@ -38,6 +38,7 @@ records the design decisions in date order.
 | 8 | `8_classic.py` | Post hoc. Classic measures on every partially corrected version, Shapley by kind of correction, ρ, share removed, ΔR². |
 | 9 | `9_calibration.py prep\|score\|table` | Mean surprisal of PERSUADE, Wikipedia, W&I, LOCNESS and ELLIPSE documents of 200–600 words. `fetch_wiki.py` drew the Wikipedia samples. |
 | — | `lib/` | `corpora.py` (paths, units), `corrections.py` (applying edits, gold categories), `errant.py` (ERRANT types, groups, buckets), `shapley.py`, `classic.py`, `lm.py` (the instrument), `stats.py`. |
+| c0–c4 | `corrector/` | The fine-tuned corrector that will give ELLIPSE its corrections (D36, D38). Own environment and README. |
 | A0–A6 | `appendix/` | The δ-vector analysis. `A0_extract.py` is its GPU pass (top-k predictions for every ELLIPSE and TOEFL 11 token) and `A0_select.py` its threshold and selection. |
 
 Reports: `results.qmd` (main) and `appendix/appendix.qmd`.
