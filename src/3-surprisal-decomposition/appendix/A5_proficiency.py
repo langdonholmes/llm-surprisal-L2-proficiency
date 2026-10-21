@@ -13,9 +13,6 @@ inputs, l1_ratio and alpha tuned by 10-fold CV grouped by prompt within dev):
 
     B0      mean surprisal + log length
     B1      B0 + surprisal variance + rate of high-surprisal tokens
-    R       B0 + LM repair profile (stage 3): per-token rate of each edit
-            label + mean positive gain per edit class
-    S2+R    S2 + LM repair profile
     B2      B0 + share of each of the 300 most frequent dev lemmas among the
             essay's high-surprisal tokens ("which words were surprising")
     PCA     B0 + mean PCA score of delta, same number of components as M
@@ -55,7 +52,6 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.bench import CACHE, corpus_benches  # noqa: E402
 from util.paths import DATA_DIR, ELLIPSE_DIR, RESULTS_DIR  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -124,25 +120,6 @@ def build_features(corpus: str = "ellipse") -> tuple[pd.DataFrame, dict]:
         df = df.join(prof)
         blocks["pca"] = list(prof.columns)
 
-    # LM repair profile (stage 3): per-token rate of each paying edit label, and
-    # the mean positive gain per edit class over the high-surprisal tokens
-    rp = [CACHE / f"labels_{b}.parquet" for c in ["ellipse", "toefl11"] for b in corpus_benches(c)]
-    rp = [p for p in rp if p.exists()]
-    if rp:
-        rall = pd.concat([pd.read_parquet(p) for p in rp])
-        r = rall.merge(s[["row_id", "text_id"]], on="row_id")
-        r = r[r.scored]
-        labels = sorted(rall.label.unique())
-        rates = pd.crosstab(r.text_id, r.label).reindex(index=df.index, columns=labels, fill_value=0)
-        rates = rates.drop(columns="NONE", errors="ignore").div(df.n_scored, axis=0)
-        rates.columns = [f"rr_{c}" for c in rates.columns]
-        gcols = [c for c in r.columns if c.startswith("gain_")]
-        gm = r.groupby("text_id")[gcols].mean().reindex(df.index).fillna(0.0)
-        gm.columns = [f"rg_{c[5:]}" for c in gcols]
-        df = df.join(rates).join(gm)
-        blocks["repair"] = list(rates.columns) + list(gm.columns)
-        blocks["repair_rates"] = list(rates.columns)
-
     # lemma bag: top dev lemmas among high-surprisal tokens
     dev_lem = sel[sel.split == "dev"].lemma.str.lower()
     vocab = dev_lem.value_counts().index[:N_LEMMAS]
@@ -168,16 +145,13 @@ def prompt_center(df: pd.DataFrame, cols: list[str], fit_mask: np.ndarray) -> pd
 def ladder(blocks: dict) -> dict[str, list[str]]:
     b0 = blocks["base"]
     L = {"B0": b0, "B1": b0 + blocks["dist"], "B2": b0 + blocks["lemma"]}
-    for name, key in [("PCA", "pca"), ("M_obs", "obs"), ("M_pred", "pred"), ("M", "delta"),
-                      ("R", "repair")]:
+    for name, key in [("PCA", "pca"), ("M_obs", "obs"), ("M_pred", "pred"), ("M", "delta")]:
         if key in blocks:
             L[name] = b0 + blocks[key]
     if "study2" in blocks:
         L["S2"] = b0 + ["var_surprisal"] + blocks["study2"]
         if "delta" in blocks:
             L["S2+M"] = L["S2"] + blocks["delta"]
-        if "repair" in blocks:
-            L["S2+R"] = L["S2"] + blocks["repair"]
     return L
 
 
@@ -212,8 +186,6 @@ def main():
 
     df, blocks = build_features("ellipse")
     df.to_parquet(S3 / "profiles_ellipse.parquet")
-    keep = ["prompt", "split"] + SCORES + [c for c in df.columns if c.startswith("rr_")]
-    df[keep].to_csv(OUT / "profiles_ellipse_repair.csv.gz")  # for results.qmd (no arrow in R)
     dev = (df.split == "dev").to_numpy()
     feats = sorted({c for cols in ladder(blocks).values() for c in cols})
     Xc = prompt_center(df, feats, dev)
@@ -250,8 +222,7 @@ def main():
         bd = np.array([r2_score(y_ev[b], p[b]) - r2_score(y_ev[b], preds["B0"][b]) for b in boots])
         rows.append({"model": name, "n_predictors": len(L[name]), "r2": r2, "delta_r2_vs_B0": d,
                      "ci_lo": np.percentile(bd, 2.5), "ci_hi": np.percentile(bd, 97.5)})
-    for name, ref in [("M", "M_obs"), ("S2+M", "S2"), ("R", "M_obs"), ("R", "M"),
-                      ("S2+R", "S2")]:  # increments over the nearest comparison
+    for name, ref in [("M", "M_obs"), ("S2+M", "S2")]:  # increments over the nearest comparison
         if name in preds and ref in preds:
             d = r2_score(y_ev, preds[name]) - r2_score(y_ev, preds[ref])
             bd = np.array([r2_score(y_ev[b], preds[name][b]) - r2_score(y_ev[b], preds[ref][b])

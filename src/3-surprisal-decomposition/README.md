@@ -97,8 +97,6 @@ different articles.
   pilot's by up to 1e-4 bits (batch composition).
 - For the single dependency relations (amod, dobj, advmod), `7_classic.py`
   uses the units where the measure is defined in every partial version.
-- `appendix/appendix.qmd` still discusses the LM repair profile, which D34
-  excludes from the write-up.
 - Licences: W&I+LOCNESS and FCE are for non-commercial research only, without
   redistribution, and excerpts must be short. Cite Yannakoudakis et al.
   (2018) and credit CECL for LOCNESS; cite Yannakoudakis, Briscoe & Medlock

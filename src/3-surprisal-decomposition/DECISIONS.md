@@ -1039,3 +1039,26 @@ Open:
 - `appendix/appendix.qmd` still discusses the LM repair profile, which D34
   excludes from the write-up.
 - Untracked outputs of the removed stages remain in `results/study3/`.
+
+## D36. 2026-10-21. LM repair dropped; ELLIPSE to be corrected by a fine-tuned GEC model
+
+After the advisor meeting, LM repair is dropped, not parked. ELLIPSE comes
+back into Study 3 a different way. A GEC model is fine-tuned on the W&I and
+FCE (original, corrected) pairs to produce minimal corrections of ELLIPSE.
+ERRANT types its output, so ELLIPSE gets the same edit format as the two gold
+corpora and runs through the same decomposition. ELLIPSE's analytic scores
+then let the components be compared with rated dimensions, not only with an
+overall level. The model, the data handling and the check against gold on
+held-out W&I/FCE essays are still to be decided (the repo reorganisation
+plan).
+
+Done here:
+- `appendix/A5_proficiency.py` no longer builds the repair profile (R,
+  S2+R and their contrasts), and `appendix.qmd` no longer reports it. The
+  stored ladder still has the old R rows; the figure filters them, and the
+  next A5 run drops them.
+- Deleted the untracked outputs of the removed stages: the old
+  `results/study3/` files (`decompose_*`, `gold_*`, `repair_*`, `profiles_*`
+  apart from the appendix's, `rq4`–`rq6`, `lab/`), `data/study3/pilot_*`,
+  `data/study3/repair/` (5.1 GB) and `data/study3/wi/tokens_gold.parquet`.
+  The code that made them is in 6057d95. The appendix renders.

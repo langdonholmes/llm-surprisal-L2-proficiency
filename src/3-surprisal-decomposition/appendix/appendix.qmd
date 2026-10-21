@@ -330,7 +330,7 @@ lad |>
 #| fig-width: 8
 #| fig-height: 4
 p <- lad |>
-  filter(!str_detect(model, " - "), model != "B0") |>
+  filter(!str_detect(model, " - "), !model %in% c("B0", "R", "S2+R")) |>
   mutate(model = fct_reorder(model, delta_r2_vs_B0)) |>
   ggplot(aes(delta_r2_vs_B0, model, colour = mode)) +
   geom_vline(xintercept = c(0, .05), colour = c("grey60", "grey80"), linetype = c(1, 2)) +
@@ -350,16 +350,13 @@ Under the frozen rules:
   profile M_obs does as well (M − M_obs = .001 [−.008, .010]). Whatever the
   high-surprisal tokens add to mean surprisal is available from *which words*
   were surprising.
-- **The repair profile does about as well.** R = .051 [.035, .066]. In dev it
-  edged ahead of δ (+.019), and on test it did not (−.011 [−.029, .006]).
-- **Both add a little to the Study 2 battery.** S2+M − S2 = .014 and S2+R − S2
-  = .012, with both lower bounds above zero.
+- **It adds a little to the Study 2 battery.** S2+M − S2 = .014, with the
+  lower bound above zero.
 - **Distributional summaries add almost nothing** (B1: surprisal variance and
   rate above τ).
 
-Prediction does not choose between the representations. Interpretation does.
-At equal predictive power, the repair profile's dimensions are named,
-directional edits (main report). The δ profile is mostly a vocabulary profile.
+Prediction does not choose between δ and the observed word alone, and the δ
+profile is mostly a vocabulary profile.
 
 # 7. Replication on TOEFL 11
 
