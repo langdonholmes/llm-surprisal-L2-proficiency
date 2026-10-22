@@ -1411,6 +1411,53 @@ script resamples:
   displacement can be off by up to about .25 in either direction. Japanese and
   Korean, both TOEFL L1s, are among the flagged groups. Arabic, Hindi and
   Telugu cannot be checked.
+- The distortion follows the ratio of the corrector's to the annotator's
+  correction rate almost exactly in rank order (Spearman .95; ko 1.10 → +.24,
+  ja .88 → +.12, … de .77 → −.13, tr .76 → −.11; only it/zh and de/tr swap).
+  Where the model corrects relatively more than the annotator, the L1's errors
+  part grows. FCE has one annotator, so this is bias relative to that
+  annotator, not to a consensus of correctors (added 2026-10-22, user).
 - The TOEFL L1 analysis (D47 steps 3–5) waits for the user's decision on how to
   read it given this result. The TOEFL corrections and stages 1–5 go ahead,
   since they involve no L1 contrast.
+
+## 2026-10-22 · D49. RQ5: how the TOEFL split is read given D48 (amends D47)
+
+The user's decision after D48: D47's option 1, amended. D47 stays as written;
+these rules replace its reading rules where they differ. Fixed before the
+extended FCE check and before any TOEFL L1 contrast.
+
+- **Margins, not corrections.** The FCE distortions are margins only. They are
+  never subtracted from a TOEFL estimate; the tables show d, its CI, the
+  margin, and whether d clears it.
+  - Shared L1s (all eight, not only ja/ko): for part p, the FCE distortion's
+    CI [lo, hi] says how far the model could have moved p's d. Zero bias is
+    always allowed. p carries displacement if its TOEFL CI clears 0 after
+    widening by the margin in the direction the bias could go:
+    d_lo − max(hi, 0) > 0 or d_hi + max(−lo, 0) < 0. The clean part's
+    distortion is minus the errors part's (same totals).
+  - ARA, HIN, TEL (no FCE counterpart; direction unknown): a symmetric margin
+    m_p = the largest |distortion| point estimate of p over the eight shared
+    L1s (.24 for the errors part). p carries displacement if
+    d_lo > m_p or d_hi < −m_p.
+- **The FCE check extends to the error kinds** before step 3. The distortion
+  (model d minus re-cut gold d, same paired resamples) is computed for every
+  part: the four-part split, the four buckets plus unclassified (at site, spill,
+  total) and the nine ERRANT groups (total). Option 2 was not safer, because
+  the kinds come from the same corrections. *Where n allows* means that a
+  group's distortion is computed for an L1 only if that L1 has at least 50
+  corrections of the group under each source. Without one, the group has no
+  margin for that TOEFL L1 and is shown but not read. For ARA/HIN/TEL, m_p is
+  the maximum over the L1s where the group has a value.
+- **The total needs no margin.** The total displacement and the reproduction of
+  Study 1 do not depend on the corrector and are reported as they are.
+- **Step 5 at 21% (Chapter 3).** The reading rule ("within reach of residual
+  proficiency") is applied with r = .21. The 35% figure is a sensitivity
+  column with the same rule, reported beside it.
+- **Per band, balanced (Chapter 3).** Besides the all-essays per-band d, Study
+  1's balanced estimator: within each band, every L1 is subsampled to the
+  band's smallest cell (low 14, medium 371, high 176), d is computed for every
+  part (pooled SD of the subsample's total), and the result is averaged over
+  200 draws, with the 2.5–97.5% spread across draws as the band. It is
+  descriptive and carries no margins. The low band, at 14 per L1, is read with
+  caution, as in Chapter 3.
