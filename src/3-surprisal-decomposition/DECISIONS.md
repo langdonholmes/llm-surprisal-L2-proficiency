@@ -1204,3 +1204,28 @@ analytic scores separate grammar (morphology, word classes), conventions
   criterion partly counts errors, so part of the errors' share is built in;
   (2) FCE's lower errors' share (.81 vs W&I .97) fits a criterion that also
   rates task achievement and content.
+
+## 2026-10-22 · D43. OpenAI prompting comparison (no fine-tuning)
+
+Suggested by a reader of the in-progress results: how do OpenAI models do
+at the same correction task? OpenAI's fine-tuning platform is closing (no new
+users; jobs until 2027-01-06; only GPT-4.1 models, which shut down
+2027-01-14), so the comparison is prompting only and no OpenAI model is a
+corrector candidate.
+
+- Models: `gpt-6-luna`, then `gpt-6.1-sol`; `gpt-6-astra` (Batch API) only if
+  Sol's results warrant it.
+- Sample: the tuning split (462 texts), for every number in the comparison,
+  including Qwen's prompting baselines, which are rerun there (fine-tuned
+  Qwen on these texts: .635). Wider CIs than fold 0 (about 1.6x), and the
+  best setting is chosen and reported on the same texts; acceptable for a
+  side comparison, and the same holds for Qwen's chosen learning rate.
+- Input identical to Qwen's prompting baseline: the instruction and text as
+  one user turn, the same three few-shot pairs as earlier turns.
+- Matrix per model: (1) zero- vs few-shot at default settings; (2) with the
+  better prompt, lowest reasoning effort vs default (Luna: none vs default;
+  Sol and Astra accept no lower than low). No temperature comparison: the
+  GPT-6 models accept only temperature 1 (Luna accepts 0 only with
+  effort none). Defaults are not sent; the docs give medium effort.
+- Chat Completions, `store=False`, 8 requests at a time
+  (`corrector/c3_openai.py`). Cost is logged per run at list prices.

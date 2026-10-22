@@ -21,6 +21,7 @@ dependencies = [
     "wheel",
     "ninja",
     "packaging",
+    "openai>=2",
 ]
 
 [tool.uv]
