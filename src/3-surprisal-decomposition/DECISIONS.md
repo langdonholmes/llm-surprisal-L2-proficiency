@@ -1489,6 +1489,16 @@ on naturally spaced W&I/FCE text, so it corrects the essays detokenized.
   unchanged apart from whitespace. It takes 354,189 spaces out of the 11,000
   essays. Hyphens, slashes and dashes keep their spaces, because learners
   space them both ways.
+- The corpus is not spaCy's tokenization: spaCy would split "well-known",
+  "he/she", "cannot" and "dont", which the corpus leaves whole, and it
+  re-tokenizes 47% of the essays differently. The original spacing is not
+  in the release, so no detokenizer recovers it exactly. Against the Moses
+  detokenizer (sacremoses, with "n't" rejoined, which Moses leaves split),
+  10,276 of the 11,000 essays' lines are identical. The two differ at 1,838
+  places, 0.5% of the spaces removed, all where the learner's own typing is
+  ambiguous ("don' t", "his \ her", "people' minds"). A detokenizer's error
+  changes only the spacing the corrector sees. The edits map back exactly
+  either way.
 - c5 makes ERRANT's edits on the detokenized text and moves them onto the
   tokenized original (`common.map_edits`). Detokenizing only deletes spaces, so
   every character maps one to one. A span keeps any tokenization space inside
