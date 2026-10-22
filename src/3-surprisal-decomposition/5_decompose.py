@@ -28,15 +28,14 @@ part's share of cov(S_orig, criterion) splits the proficiency signal exactly
 (learners only; 2,000 unit-bootstrap CIs). Also: frequency vs cost per error,
 spill by distance, the clean part against the criterion, and the RQ3 features.
 
-Writes results/study3/: split4_<corpus>.csv, split4_means_<corpus>.csv,
-shares_<corpus>.csv, means_<corpus>.csv, rate_cost_<corpus>.csv,
-spill_decay_<corpus>.csv, clean_assoc.csv, decompose_<corpus>.json; and
-data/study3/<corpus>/units.parquet. With --corpus (any ids of
-``lib.corpora``, e.g. the corrector variants), the same per id, and
-clean_assoc_<id>.csv. With --validate (after the variants have run), the
-corrector check: the shares of the json gold, the ERRANT re-cut of gold and the
-model, and their paired differences (the same unit resamples for all three),
-in validation_shares.csv.
+Writes, per corpus id (``lib.corpora.results_dir``: results/study3/<id>/, or
+validation/<id>/ for the corrector-check variants), split4.csv, split4_means.csv,
+shares.csv, means.csv, rate_cost.csv, spill_decay.csv, clean_assoc.csv and
+decompose.json; and data/study3/<id>/units.parquet. --corpus takes any ids of
+``lib.corpora``. With --validate (after the variants have run), the corrector
+check: the shares of the json gold, the ERRANT re-cut of gold and the model,
+and their paired differences (the same unit resamples for all three), in
+results/study3/validation/shares.csv.
 
     python src/3-surprisal-decomposition/5_decompose.py
     python src/3-surprisal-decomposition/5_decompose.py --corpus wi_model fce_model
@@ -53,7 +52,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.corpora import (  # noqa: E402
-    ALL_IDS, CORPORA, GROUP_SLUGS, N_BOOT, RESULTS, SEED, bands, base_corpus, data_dir, tau)
+    ALL_IDS, CORPORA, GROUP_SLUGS, N_BOOT, RESULTS, SEED, bands, base_corpus, data_dir, results_dir, tau)
 from lib.errant import BUCKETS, GROUPS, UNCLASSIFIED  # noqa: E402
 from lib.stats import boot, cov_shares, partial_rank, spearman_cols  # noqa: E402
 
@@ -134,8 +133,8 @@ def run_split4(tokens, corpus):
                                               *map(float, np.percentile(boots, [2.5, 97.5]))]
         if name == "mean_surprisal":
             mean_units = units
-    pd.DataFrame(rows).to_csv(RESULTS / f"split4_{corpus}.csv", index=False)
-    pd.concat(means).to_csv(RESULTS / f"split4_means_{corpus}.csv", index=False)
+    pd.DataFrame(rows).to_csv(results_dir(corpus) / "split4.csv", index=False)
+    pd.concat(means).to_csv(results_dir(corpus) / "split4_means.csv", index=False)
     return mean_units, native_minus_c
 
 
@@ -340,14 +339,15 @@ def run(corpus):
     units = rq3_features(units)
     units.to_parquet(data_dir(corpus) / "units.parquet")
 
-    shares(units).to_csv(RESULTS / f"shares_{corpus}.csv", index=False)
+    out = results_dir(corpus)
+    shares(units).to_csv(out / "shares.csv", index=False)
     cols = list(dict.fromkeys(["total", "clean"] + [f"{c}|{p}" for by in CATS for c in CATS[by]
                                                     for p in COMP + ["total"]]))
     means = units.groupby("group")[cols].mean().T
     means["learners"] = learners(units)[0][cols].mean()
-    means.to_csv(RESULTS / f"means_{corpus}.csv")
-    rate_cost(units, corpus).to_csv(RESULTS / f"rate_cost_{corpus}.csv", index=False)
-    spill_decay(tokens, edits).to_csv(RESULTS / f"spill_decay_{corpus}.csv", index=False)
+    means.to_csv(out / "means.csv")
+    rate_cost(units, corpus).to_csv(out / "rate_cost.csv", index=False)
+    spill_decay(tokens, edits).to_csv(out / "spill_decay.csv", index=False)
     rated = learners(units)[0]
     rated_edits = edits[edits.text_id.map(unit_of_text).isin(rated.index)]
     corrections = rated_edits[rated_edits.kind != "flagged"]
@@ -360,9 +360,9 @@ def run(corpus):
               "v_none_vs_stored_median_abs": float((own.v_none - own.surprisal_bits).abs().median()),
               "v_all_vs_s_corr_median_abs": float((own.v_all - own.s_corr).abs().median()),
               "native_minus_C": native_minus_c}
-    (RESULTS / f"decompose_{corpus}.json").write_text(json.dumps(checks, indent=2, default=float))
+    (out / "decompose.json").write_text(json.dumps(checks, indent=2, default=float))
     print(corpus, json.dumps(checks, default=float), flush=True)
-    return clean_assoc(units, corpus)
+    pd.DataFrame(clean_assoc(units, corpus)).to_csv(out / "clean_assoc.csv", index=False)
 
 
 VALIDATION_SOURCES = {"gold": "", "errant": "_errant", "model": "_model"}
@@ -409,7 +409,8 @@ def validation():
                 row.update({f"{a}-{b}": row[a] - row[b], f"{a}-{b}_lo": lo, f"{a}-{b}_hi": hi})
             rows.append(row)
     table = pd.DataFrame(rows)
-    table.to_csv(RESULTS / "validation_shares.csv", index=False)
+    (RESULTS / "validation").mkdir(parents=True, exist_ok=True)
+    table.to_csv(RESULTS / "validation" / "shares.csv", index=False)
     print(table[["corpus", "col", "gold", "errant", "model", "model-errant", "model-errant_lo", "model-errant_hi",
                  "model-gold", "model-gold_lo", "model-gold_hi"]].round(3).to_string())
 
@@ -420,16 +421,11 @@ def main():
                     help="corpus ids (default: the main analysis, wi and fce)")
     ap.add_argument("--validate", action="store_true", help="the corrector check across sources only")
     args = ap.parse_args()
-    RESULTS.mkdir(parents=True, exist_ok=True)
     if args.validate:
         validation()
         return
-    if args.corpus == CORPORA:
-        rows = [r for c in CORPORA for r in run(c)]
-        pd.DataFrame(rows).to_csv(RESULTS / "clean_assoc.csv", index=False)
-        return
     for c in args.corpus:
-        pd.DataFrame(run(c)).to_csv(RESULTS / f"clean_assoc_{c}.csv", index=False)
+        run(c)
 
 
 if __name__ == "__main__":

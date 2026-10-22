@@ -13,7 +13,7 @@ partial   Spearman of each part with each analytic score, controlling overall
 2,000 essay bootstraps, the same resamples for every score, so the differences
 from overall are paired.
 
-Writes results/study3/analytic_shares_ellipse.csv and analytic_partial_ellipse.csv.
+Writes results/study3/ellipse/analytic_shares.csv and analytic_partial.csv.
 
     python src/3-surprisal-decomposition/7_analytic.py
 """
@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import RESULTS, data_dir  # noqa: E402
+from lib.corpora import data_dir, results_dir  # noqa: E402
 from lib.errant import BUCKETS, GROUPS  # noqa: E402
 from lib.stats import boot, partial_rank  # noqa: E402
 from util.paths import ELLIPSE_DIR  # noqa: E402
@@ -83,8 +83,8 @@ def partials(units):
 
 def main():
     units = load()
-    shares(units).to_csv(RESULTS / "analytic_shares_ellipse.csv", index=False)
-    partials(units).to_csv(RESULTS / "analytic_partial_ellipse.csv", index=False)
+    shares(units).to_csv(results_dir("ellipse") / "analytic_shares.csv", index=False)
+    partials(units).to_csv(results_dir("ellipse") / "analytic_partial.csv", index=False)
 
 
 if __name__ == "__main__":

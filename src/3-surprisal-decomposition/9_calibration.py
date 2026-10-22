@@ -20,7 +20,7 @@ mean of the document means with a 2,000-resample bootstrap CI.
     python src/3-surprisal-decomposition/9_calibration.py table
 
 Writes data/study3/calibration/{docs,tokens}.parquet and
-results/study3/calibration.csv, calibration_contrasts.csv.
+results/study3/calibration/calibration.csv and contrasts.csv.
 """
 
 import json
@@ -123,12 +123,13 @@ def table():
         rows.append({"group": g, "n": len(x), "mean": x.mean(), "sd": x.std(ddof=1),
                      "lo": np.percentile(boots[g], 2.5), "hi": np.percentile(boots[g], 97.5)})
     groups = pd.DataFrame(rows)
-    groups.to_csv(RESULTS / "calibration.csv", index=False)
+    (RESULTS / "calibration").mkdir(parents=True, exist_ok=True)
+    groups.to_csv(RESULTS / "calibration" / "calibration.csv", index=False)
     means = groups.set_index("group")["mean"]
     contrasts = pd.DataFrame([{"a": a, "b": b, "diff": means[a] - means[b],
                                "lo": np.percentile(boots[a] - boots[b], 2.5),
                                "hi": np.percentile(boots[a] - boots[b], 97.5)} for a, b in CONTRASTS])
-    contrasts.to_csv(RESULTS / "calibration_contrasts.csv", index=False)
+    contrasts.to_csv(RESULTS / "calibration" / "contrasts.csv", index=False)
     print(groups.round(3).to_string(index=False))
     print(contrasts.round(3).to_string(index=False))
 

@@ -20,35 +20,38 @@ library(knitr)
 source("src/1-predictability-benchmark/_viz_helpers.R")
 R3 <- "results/study3"
 rd <- function(f) read_csv(file.path(R3, f), show_col_types = FALSE)
-both <- function(stem) bind_rows(wi = rd(paste0(stem, "_wi.csv")), fce = rd(paste0(stem, "_fce.csv")), .id = "corpus")
 js <- function(f) fromJSON(file.path(R3, f))
+# one folder per corpus id; the corrector-check variants sit under validation/
+dir_of <- function(id) if (id %in% c("wi_model", "fce_model", "wi_errant", "fce_errant")) file.path("validation", id) else id
+both <- function(f) bind_rows(wi = rd(file.path("wi", f)), fce = rd(file.path("fce", f)), .id = "corpus")
+stacked <- function(f) bind_rows(rd(file.path("wi", f)), rd(file.path("fce", f)))  # files with their own corpus column
 TH <- js("threshold.json")
-CK <- list(wi = js("decompose_wi.json"), fce = js("decompose_fce.json"))
-AL <- list(wi = js("align_wi.json"), fce = js("align_fce.json"))
-SP <- list(wi = js("spill_wi.json"), fce = js("spill_fce.json"))
-s4 <- both("split4")
-m4 <- both("split4_means")
-sh <- both("shares")
-rc <- both("rate_cost")
-dec <- both("spill_decay")
-ca <- rd("clean_assoc.csv")
-inc <- rd("increment.csv")
-cf <- rd("coefs.csv")
-cl <- both("classic")
-cal <- rd("calibration.csv")
-calc <- rd("calibration_contrasts.csv")
+CK <- list(wi = js("wi/decompose.json"), fce = js("fce/decompose.json"))
+AL <- list(wi = js("wi/align.json"), fce = js("fce/align.json"))
+SP <- list(wi = js("wi/spill.json"), fce = js("fce/spill.json"))
+s4 <- both("split4.csv")
+m4 <- both("split4_means.csv")
+sh <- both("shares.csv")
+rc <- both("rate_cost.csv")
+dec <- both("spill_decay.csv")
+ca <- stacked("clean_assoc.csv")
+inc <- stacked("increment.csv")
+cf <- stacked("coefs.csv")
+cl <- both("classic.csv")
+cal <- rd("calibration/calibration.csv")
+calc <- rd("calibration/contrasts.csv")
 # the corrector and ELLIPSE (Sections 3.9, 4.6-4.8)
 MC <- c(wi = "wi_model", fce = "fce_model", ellipse = "ellipse")
-CKm <- map(MC, ~ js(paste0("decompose_", .x, ".json")))
-shm <- map_dfr(MC, ~ rd(paste0("shares_", .x, ".csv")), .id = "corpus")
-cam <- map_dfr(MC, ~ rd(paste0("clean_assoc_", .x, ".csv")) |> select(-corpus), .id = "corpus")
-rce <- rd("rate_cost_ellipse.csv")
-incm <- map_dfr(MC, ~ rd(paste0("increment_", .x, ".csv")) |> select(-corpus), .id = "corpus")
-cle <- rd("classic_ellipse.csv")
+CKm <- map(MC, ~ js(file.path(dir_of(.x), "decompose.json")))
+shm <- map_dfr(MC, ~ rd(file.path(dir_of(.x), "shares.csv")), .id = "corpus")
+cam <- map_dfr(MC, ~ rd(file.path(dir_of(.x), "clean_assoc.csv")) |> select(-corpus), .id = "corpus")
+rce <- rd("ellipse/rate_cost.csv")
+incm <- map_dfr(MC, ~ rd(file.path(dir_of(.x), "increment.csv")) |> select(-corpus), .id = "corpus")
+cle <- rd("ellipse/classic.csv")
 EL <- function(stat, m) filter(cle, measure == m, stat == !!stat)
-val <- rd("validation_shares.csv")
-anp <- rd("analytic_partial_ellipse.csv")
-ans <- rd("analytic_shares_ellipse.csv")
+val <- rd("validation/shares.csv")
+anp <- rd("ellipse/analytic_partial.csv")
+ans <- rd("ellipse/analytic_shares.csv")
 CS <- function(f) js(file.path("corrector", paste0("score_", f, ".json")))
 FOLDS <- map(0:4, ~ CS(sprintf("qwen9b_f%d_lr5e-05_r16_e2__fold%d", .x, .x)))
 POOL <- map(c(tp = "tp", fp = "fp", fn = "fn"), \(k) sum(map_dbl(FOLDS, k)))
@@ -339,7 +342,7 @@ p <- ggplot(d, aes(group, bits, fill = part)) +
   scale_fill_manual(values = c(`error tokens` = "#b2182b", context = "#ef8a62", omission = "#fddbc7"), name = NULL) +
   labs(x = "CEFR level (N = LOCNESS) / script-score band", y = "Bits added to mean surprisal") +
   theme_study1()
-save_fig(p, "split4", 8, 3.6, dir = R3)
+save_fig(p, "split4", 8, 3.6, dir = file.path(R3, "figures"))
 p
 ```
 
@@ -403,8 +406,7 @@ literate prose scores higher.
 
 ```{r}
 #| label: t-bucket-cost
-mn <- bind_rows(wi = read_csv(file.path(R3, "means_wi.csv"), show_col_types = FALSE),
-                fce = read_csv(file.path(R3, "means_fce.csv"), show_col_types = FALSE), .id = "corpus") |>
+mn <- both("means.csv") |>
   rename(col = 2)
 rc |>
   filter(cut == "bucket", cat %in% BUCKETS) |>
@@ -448,7 +450,7 @@ p <- ggplot(d, aes(d, mean_spill, colour = bucket)) +
                                  `content-word choice` = "#7570b3", `multi-word / order` = "#e7298a"), name = NULL) +
   labs(x = "Distance from the error (words)", y = "Mean spill per word (bits)") +
   theme_study1()
-save_fig(p, "spill_decay", 8, 3.4, dir = R3)
+save_fig(p, "spill_decay", 8, 3.4, dir = file.path(R3, "figures"))
 p
 ```
 
@@ -873,7 +875,7 @@ grammatical and lexical errors are rated slightly higher on cohesion. More
 surprising clean text goes with lower cohesion, syntax, phraseology and
 grammar, and only slightly with higher vocabulary
 (`r f2(filter(anp, cut == "bucket", col == "clean", score == "vocabulary")$partial)`).
-Shares of each analytic score's signal (`analytic_shares_ellipse.csv`) give
+Shares of each analytic score's signal (`ellipse/analytic_shares.csv`) give
 the same picture. The errors carry the most of conventions
 (`r pc(1 - filter(ans, cut == "bucket", col == "clean", score == "conventions")$share)`%)
 and the least of cohesion

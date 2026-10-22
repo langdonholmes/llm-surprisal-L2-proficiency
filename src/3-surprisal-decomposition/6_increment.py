@@ -13,9 +13,8 @@ folds for every model.
 ΔR² = R²(B + S) − R²(B) with a CI from 2,000 unit bootstraps of the stored
 out-of-fold predictions (D31). Standardized coefficients refit on all units.
 
-Writes results/study3/increment.csv and coefs.csv; with --corpus (other ids
-of ``lib.corpora``, e.g. ellipse, where B counts the corrector's edits),
-increment_<id>.csv and coefs_<id>.csv.
+Writes results/study3/<id>/increment.csv and coefs.csv per corpus id (--corpus:
+any ids of ``lib.corpora``, e.g. ellipse, where B counts the corrector's edits).
 
     python src/3-surprisal-decomposition/6_increment.py
     python src/3-surprisal-decomposition/6_increment.py --corpus ellipse
@@ -29,7 +28,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import ALL_IDS, CORPORA, ERROR_COUNTS, RESULTS, S_COMPACT, SEED, data_dir  # noqa: E402
+from lib.corpora import ALL_IDS, CORPORA, ERROR_COUNTS, S_COMPACT, SEED, data_dir, results_dir  # noqa: E402
 from lib.stats import delta_r2, oof, r2, ridge  # noqa: E402
 
 MODELS = {"B": ERROR_COUNTS, "B + S compact": ERROR_COUNTS + S_COMPACT, "B + mean surprisal": ERROR_COUNTS + ["total"],
@@ -62,12 +61,11 @@ def main():
                     help="corpus ids (default: the main analysis, wi and fce)")
     args = ap.parse_args()
     warnings.filterwarnings("ignore", category=FutureWarning)
-    jobs = [(CORPORA, "")] if args.corpus == CORPORA else [([c], f"_{c}") for c in args.corpus]
-    for corpora, suffix in jobs:
-        results = [run(c) for c in corpora]
-        table = pd.DataFrame([r for rows, _ in results for r in rows])
-        table.to_csv(RESULTS / f"increment{suffix}.csv", index=False)
-        pd.DataFrame([c for _, coefs in results for c in coefs]).to_csv(RESULTS / f"coefs{suffix}.csv", index=False)
+    for corpus in args.corpus:
+        rows, coefs = run(corpus)
+        table = pd.DataFrame(rows)
+        table.to_csv(results_dir(corpus) / "increment.csv", index=False)
+        pd.DataFrame(coefs).to_csv(results_dir(corpus) / "coefs.csv", index=False)
         print(table.round(4).to_string())
 
 

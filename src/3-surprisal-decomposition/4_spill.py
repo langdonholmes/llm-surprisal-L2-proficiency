@@ -12,7 +12,7 @@ names insertions right before the target (a word is missing there), and
 Writes data/study3/<corpus>/spill.parquet
     text_id, spacy_idx, status (ok / no_player / too_many / no_window), edit_k,
     gap_k, dist, v_none, v_all, psi
-and results/study3/spill_<corpus>.json (status counts, timing).
+and results/study3/<corpus>/spill.json (status counts, timing).
 
     CUDA_VISIBLE_DEVICES=0 python src/3-surprisal-decomposition/4_spill.py --corpus wi
 """
@@ -34,7 +34,7 @@ import pandas as pd  # noqa: E402
 import torch  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import ALL_IDS, RESULTS, data_dir  # noqa: E402
+from lib.corpora import ALL_IDS, data_dir, results_dir  # noqa: E402
 from lib.corrections import apply_edits  # noqa: E402
 from lib.shapley import BACK, load_model, shapley_matrix, subset_masks, surprisal, variants  # noqa: E402
 
@@ -131,8 +131,7 @@ def main():
             r.update(v_none=v[0], v_all=v[-1], psi=shapley_matrix(len(r["edit_k"])) @ (v[0] - v))
     pd.DataFrame(rows).to_parquet(out_dir / "spill.parquet", index=False)
     secs = time.time() - t0
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    (RESULTS / f"spill_{args.corpus}.json").write_text(json.dumps(
+    (results_dir(args.corpus) / "spill.json").write_text(json.dumps(
         {"seconds": secs, "build_seconds": t_build, "gpu_seconds": secs - t_build, "n_targets": len(rows),
          "windows": len(windows), "status": status, "gpu": torch.cuda.get_device_name(0)}, indent=2))
     print(f"done {len(rows)} targets, {len(windows)} windows, {secs:.0f} s", flush=True)

@@ -81,9 +81,23 @@ Stages 2–4 take any corpus id. A W&I/FCE variant copies its base corpus's
 scores of the original texts (and of the corrected texts, when they are the
 same) instead of rescoring them.
 
-Outputs go to `data/study3/{wi,fce,calibration}/` (large, not versioned) and
-`results/study3/` (tables and figures for `results.qmd`). The appendix's go to
-`data/study3/appendix/` and `results/study3/appendix/`.
+Outputs go to `data/study3/<corpus id>/` and `data/study3/calibration/`
+(large, not versioned) and `results/study3/` (tables and figures for
+`results.qmd`), laid out by corpus:
+
+```
+results/study3/
+├── wi/  fce/  ellipse/   per-corpus tables (shares.csv, rate_cost.csv, ...; ellipse/ adds the analytic scores)
+├── validation/           shares.csv (corrector vs annotators) and the variants wi_model/, fce_model/,
+│                         wi_errant/, fce_errant/, with the same per-corpus tables
+├── calibration/          calibration.csv, contrasts.csv
+├── figures/              written by results.qmd
+├── threshold.json        τ
+├── corrector/            the corrector's agreement scores (corrector/README.md)
+└── appendix/             the δ-vector appendix
+```
+
+The appendix's data go to `data/study3/appendix/`.
 
 The calibration downloads are public: PERSUADE 2.0 (`persuade_train.bin`, the
 train CSV from github.com/scrosseye/persuade_corpus_2.0, CC BY-NC-SA 4.0) in

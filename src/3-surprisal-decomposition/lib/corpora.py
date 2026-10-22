@@ -38,6 +38,7 @@ VARIANTS = {"wi_model": ("wi", "model"), "fce_model": ("fce", "model"),
             "wi_errant": ("wi", "gold"), "fce_errant": ("fce", "gold"),
             "ellipse": ("ellipse", "ellipse")}
 ALL_IDS = CORPORA + list(VARIANTS)
+VALIDATION_IDS = ["wi_model", "fce_model", "wi_errant", "fce_errant"]  # only the corrector check uses them
 DOCBINS = {"wi": WI_DOCBINS_DIR, "fce": FCE_DOCBINS_DIR, "ellipse": ELLIPSE_DOCBINS_DIR}
 RAW_DIRS = {"wi": WI_DIR / "raw" / "wi+locness", "fce": FCE_DIR / "raw" / "fce"}
 CEFR_SCORE = {"A": 1.0, "B": 2.0, "C": 3.0}
@@ -62,6 +63,13 @@ def base_corpus(corpus: str) -> str:
 def data_dir(corpus: str):
     """data/study3/<corpus id>/, created if missing."""
     path = DATA / corpus
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def results_dir(corpus: str):
+    """results/study3/<corpus id>/ (validation/<id>/ for the corrector check), created if missing."""
+    path = RESULTS / "validation" / corpus if corpus in VALIDATION_IDS else RESULTS / corpus
     path.mkdir(parents=True, exist_ok=True)
     return path
 

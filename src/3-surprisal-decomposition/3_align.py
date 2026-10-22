@@ -12,7 +12,7 @@ Check: aligned tokens whose 8-subword window is identical in both versions
 should have the same surprisal (``same_window``).
 
 Writes data/study3/<corpus>/aligned.parquet (one row per non-space scored
-original token) and results/study3/align_<corpus>.json.
+original token) and results/study3/<corpus>/align.json.
 
     python src/3-surprisal-decomposition/3_align.py --corpus wi
 """
@@ -27,7 +27,7 @@ import pandas as pd
 from transformers import AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import ALL_IDS, RESULTS, data_dir  # noqa: E402
+from lib.corpora import ALL_IDS, data_dir, results_dir  # noqa: E402
 from lib.lm import HF_ID, REVISION  # noqa: E402
 
 WIN = 8
@@ -111,8 +111,7 @@ def main():
            "same_window_of_aligned": float(aligned.same_window[aligned.aligned].mean()),
            "same_window_abs_delta_lt_0.05": float((delta < 0.05).mean()),
            "same_window_max_abs_delta": float(delta.max())}
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    (RESULTS / f"align_{args.corpus}.json").write_text(json.dumps(rep, indent=2))
+    (results_dir(args.corpus) / "align.json").write_text(json.dumps(rep, indent=2))
     print(json.dumps(rep, indent=1))
 
 

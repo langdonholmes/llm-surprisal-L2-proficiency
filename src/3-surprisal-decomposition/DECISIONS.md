@@ -1275,3 +1275,20 @@ highest for cohesion (.39) and lowest for conventions (.27); overall .34.
   validation), 4.7 ELLIPSE, 4.8 analytic scores, two discussion paragraphs
   (a third corpus; what the criteria rate, read cautiously per D42) and a
   limitation (model corrections).
+
+## 2026-10-22 · D46. results/study3/ laid out by corpus
+
+The flat `results/study3/` of D37 had grown to about 110 files named
+`<analysis>_<corpus id>`. It now mirrors `data/study3/`: one folder per
+corpus id (`wi/`, `fce/`, `ellipse/`) with plain file names inside, the
+corrector-check variants and the paired comparison under `validation/`,
+plus `calibration/`, `figures/`, `threshold.json`, and the unchanged
+`corrector/` and `appendix/`. `lib.corpora.results_dir(id)` gives the folder.
+Stages 5 and 6 now write one file per corpus (the combined W&I + FCE
+`clean_assoc.csv`, `increment.csv` and `coefs.csv` are gone; `results.qmd`
+stacks them). The existing files were moved, not recomputed; stages 5 and 6
+re-run on W&I/FCE write identical files, and both reports render.
+Also deleted from data/study3/ (user, 2026-10-22): the OpenAI smoke tests,
+the pre-renumbering logs, the unused W&I appendix extract, and the nine
+corrector adapters not used downstream (tuning runs and the 2B model; their
+corrections and scores are kept).

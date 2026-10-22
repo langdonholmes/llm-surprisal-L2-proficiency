@@ -19,7 +19,7 @@ bucket's share of cov(original measure, criterion). Surprisal is added from
 stage 5 for comparison.
 
 Writes data/study3/<corpus>/versions.parquet, version_sums.parquet,
-classic_units.parquet, and results/study3/classic_<corpus>.csv. With --corpus,
+classic_units.parquet, and results/study3/<corpus>/classic.csv. With --corpus,
 any ids of ``lib.corpora`` (e.g. ellipse, where the corrector's edits are the
 corrections).
 
@@ -41,7 +41,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.classic import MEASURES, Reference, doc_items, item_sums, measures  # noqa: E402
-from lib.corpora import ALL_IDS, CORPORA, ERROR_COUNTS, RESULTS, data_dir  # noqa: E402
+from lib.corpora import ALL_IDS, CORPORA, ERROR_COUNTS, data_dir, results_dir  # noqa: E402
 from lib.corrections import apply_edits  # noqa: E402
 from lib.errant import BUCKETS, UNCLASSIFIED  # noqa: E402
 from lib.stats import boot, cov_shares, delta_r2, oof, spearman_cols  # noqa: E402
@@ -197,7 +197,7 @@ def run(corpus):
     psi_units.to_parquet(out_dir / "classic_units.parquet")
     units = pd.read_parquet(out_dir / "units.parquet")
     table = summarise(psi_units, units)
-    table.to_csv(RESULTS / f"classic_{corpus}.csv", index=False)
+    table.to_csv(results_dir(corpus) / "classic.csv", index=False)
     print(corpus, f"exact sum gap {gap:.1e}, {time.time() - t0:.0f}s", flush=True)
     print(table[table.stat.isin(["rho_orig", "rho_corr", "removed", "dR2_corr"])].pivot(
         index="measure", columns="stat", values="value").round(3).to_string(), flush=True)
