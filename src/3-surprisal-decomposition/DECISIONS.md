@@ -1229,3 +1229,6 @@ corrector candidate.
   effort none). Defaults are not sent; the docs give medium effort.
 - Chat Completions, `store=False`, 8 requests at a time
   (`corrector/c3_openai.py`). Cost is logged per run at list prices.
+- 2026-10-22 update: Luna's matrix ran in full (zero .537, few .527, zero
+  with effort none .545; $0.71). Few-shot helped neither Qwen nor Luna, so
+  Sol runs zero-shot only, low vs default effort. Astra is not tested.
