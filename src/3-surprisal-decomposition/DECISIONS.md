@@ -1379,3 +1379,38 @@ L1s). The allowances add up over parts like everything else.
   proficiency slope (Study 3), so most of the allowance falls on the error
   parts. Displacement in the error parts is therefore the most open to this
   reading, and displacement in the clean part the least.
+
+## 2026-10-22 · D48. RQ5 step 1: the corrector's bias differs by L1 on FCE
+
+`10_l1.py --check` (D47 step 1; results/study3/validation/l1_check.csv,
+l1_split4.csv). The per-answer TP/FP/FN reproduce c4's fold scores exactly.
+For the eight L1s FCE shares with TOEFL 11, with 2,000 band-stratified paired
+script resamples:
+
+| L1 | scripts | F0.5 | F0.5 − rest | corrections /100 tokens, model / gold | errors d, model | errors d, gold | distortion |
+|---|---|---|---|---|---|---|---|
+| es | 200 | .648 | .003 [−.013, .019] | 8.6 / 10.4 | .08 | .08 | −.007 [−.045, .034] |
+| fr | 146 | .628 | −.021 [−.039, −.002] | 7.7 / 9.9 | −.14 | −.05 | −.093 [−.142, −.049] |
+| ko | 86 | .607 | −.041 [−.067, −.014] | 7.5 / 6.8 | −.31 | −.55 | **.240 [.195, .290]** |
+| ja | 80 | .629 | −.018 [−.043, .006] | 7.3 / 8.3 | −.14 | −.26 | **.115 [.052, .180]** |
+| it | 76 | .641 | −.006 [−.030, .017] | 7.3 / 9.1 | −.05 | .00 | −.048 [−.102, .004] |
+| de | 69 | .630 | −.017 [−.040, .005] | 7.5 / 9.8 | −.17 | −.04 | **−.131 [−.207, −.063]** |
+| tr | 74 | .666 | .022 [.001, .042] | 8.2 / 10.8 | .05 | .15 | **−.109 [−.166, −.055]** |
+| zh | 66 | .651 | .005 [−.016, .026] | 8.7 / 10.8 | −.07 | −.06 | −.008 [−.065, .053] |
+
+- Under D47's rule the bias differs by L1. Four of the eight L1s are flagged
+  (ko, ja, de, tr), and the distortions run from −.13 to +.24, on the scale of
+  Study 1's worst case (.42).
+- Edit agreement is nearly flat across L1s (F0.5 .61–.67). Agreement does not
+  carry the bias; how much gets corrected does. The corrector's rate varies
+  little by L1 (7.3–8.7 per 100 tokens), while the annotator's varies more
+  (6.8–10.8). Korean scripts get the fewest gold corrections, and the only
+  model rate above gold. Their errors part is therefore larger relative to the
+  other L1s under the model than under gold.
+- Consequence for TOEFL 11: the model-based errors-vs-clean split of an L1's
+  displacement can be off by up to about .25 in either direction. Japanese and
+  Korean, both TOEFL L1s, are among the flagged groups. Arabic, Hindi and
+  Telugu cannot be checked.
+- The TOEFL L1 analysis (D47 steps 3–5) waits for the user's decision on how to
+  read it given this result. The TOEFL corrections and stages 1–5 go ahead,
+  since they involve no L1 contrast.

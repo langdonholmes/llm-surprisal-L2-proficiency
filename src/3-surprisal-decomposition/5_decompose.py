@@ -328,6 +328,7 @@ def run(corpus):
     units = unit_table(tokens, credits(tokens, edits))
     assert np.allclose(units.clean, units4.clean.reindex(units.index))
     assert np.allclose(units.total, units4.total.reindex(units.index))
+    units[PARTS4[1:]] = units4[PARTS4[1:]].reindex(units.index)  # omission, context, error_tokens (RQ5)
     unit_of_text = tokens.groupby("text_id").unit.first()
     units = edit_counts(units, edits, unit_of_text)
     units["corr_share"] = tokens.gold.isin(["ERR_TOK", "ERR_INS"]).groupby(tokens.unit).mean().reindex(units.index)

@@ -5,6 +5,8 @@ criterion is CEFR level (A = 1, B = 2, C = 3; LOCNESS, level N, is described
 but has no criterion). FCE: the unit is the script (both answers pooled) and
 the criterion is the script score (1-40; the one script scored 0 is left out).
 ELLIPSE: the unit is the essay and the criterion the overall score (1-5).
+TOEFL 11: the unit is the essay and the criterion the band (low = 1, medium = 2,
+high = 3); L1 and prompt are carried in essays.parquet (RQ5, D47).
 
 A corpus id names the texts and where their edits come from. ``wi`` and
 ``fce`` take the first annotator's json edits (the main analysis). The other
@@ -14,7 +16,7 @@ corpus, c5 source):
     wi_errant, fce_errant the annotator's corrected texts, cut into edits by
                           ERRANT like the model's, so that model and gold differ
                           only in the corrections
-    ellipse               the final corrector's corrections
+    ellipse, toefl        the final corrector's corrections
 """
 
 import json
@@ -25,6 +27,7 @@ from util.paths import (
     FCE_DIR,
     FCE_DOCBINS_DIR,
     RESULTS_DIR,
+    TOEFL_DOCBINS_DIR,
     WI_DIR,
     WI_DOCBINS_DIR,
 )
@@ -36,12 +39,13 @@ ELLIPSE_APPENDIX = DATA / "appendix" / "ellipse"
 CORPORA = ["wi", "fce"]
 VARIANTS = {"wi_model": ("wi", "model"), "fce_model": ("fce", "model"),
             "wi_errant": ("wi", "gold"), "fce_errant": ("fce", "gold"),
-            "ellipse": ("ellipse", "ellipse")}
+            "ellipse": ("ellipse", "ellipse"), "toefl": ("toefl", "toefl")}
 ALL_IDS = CORPORA + list(VARIANTS)
 VALIDATION_IDS = ["wi_model", "fce_model", "wi_errant", "fce_errant"]  # only the corrector check uses them
-DOCBINS = {"wi": WI_DOCBINS_DIR, "fce": FCE_DOCBINS_DIR, "ellipse": ELLIPSE_DOCBINS_DIR}
+DOCBINS = {"wi": WI_DOCBINS_DIR, "fce": FCE_DOCBINS_DIR, "ellipse": ELLIPSE_DOCBINS_DIR, "toefl": TOEFL_DOCBINS_DIR}
 RAW_DIRS = {"wi": WI_DIR / "raw" / "wi+locness", "fce": FCE_DIR / "raw" / "fce"}
 CEFR_SCORE = {"A": 1.0, "B": 2.0, "C": 3.0}
+TOEFL_BANDS = ["low", "medium", "high"]  # y = 1, 2, 3
 FCE_BANDS = [(1, 23), (24, 27), (28, 31), (32, 40)]
 # overall score 1-5 in halves; the closest the nine values allow to quartiles (DECISIONS D41)
 ELLIPSE_BANDS = [(1.0, 2.5), (3.0, 3.0), (3.5, 3.5), (4.0, 5.0)]
@@ -96,4 +100,6 @@ def bands(corpus: str) -> list[str]:
         return ["A", "B", "C"]
     if base == "fce":
         return [f"{lo}-{hi}" for lo, hi in FCE_BANDS]
+    if base == "toefl":
+        return TOEFL_BANDS
     return [f"{lo:g}" if lo == hi else f"{lo:g}-{hi:g}" for lo, hi in ELLIPSE_BANDS]

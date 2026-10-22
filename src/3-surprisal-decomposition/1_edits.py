@@ -15,7 +15,7 @@ and settings of ``src/essays/ingest.py`` (en_core_web_lg, NER disabled).
 in use, whatever their source.)
 
 Writes, under data/study3/<corpus id>/:
-    essays.parquet      text_id, unit, group, y, text, corrected, cmap
+    essays.parquet      text_id, unit, group, y, text, corrected, cmap (TOEFL 11: + l1, prompt)
     edits.parquet       text_id, k (index in the text's edit list), s, e, repl, kind,
                         errant, group, bucket, op
     gold.parquet        text_id, spacy_idx, gold (ERR_TOK / ERR_INS / POST / OK)
@@ -35,7 +35,7 @@ from spacy.tokens import DocBin
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.corpora import (  # noqa: E402
-    ALL_IDS, CEFR_SCORE, DATA, DOCBINS, VARIANTS, base_corpus, data_dir, ellipse_band, fce_band)
+    ALL_IDS, CEFR_SCORE, DATA, DOCBINS, TOEFL_BANDS, VARIANTS, base_corpus, data_dir, ellipse_band, fce_band)
 from lib.corrections import apply_edits, gold_for_doc  # noqa: E402
 from lib.errant import bucket_of, edit_types, group_of, op_of  # noqa: E402
 from util.process_docs import load_all_docbins  # noqa: E402
@@ -51,6 +51,8 @@ def unit_group_y(corpus: str, meta: dict):
     if corpus == "fce":
         score = pd.to_numeric(meta["script_s"], errors="coerce")
         return meta["script_id"], fce_band(score), (score if score > 0 else None)
+    if corpus == "toefl":  # TOEFL 11: group is the band, y its rank
+        return text_id, meta["level"], float(TOEFL_BANDS.index(meta["level"]) + 1)
     y = float(meta["overall"])  # ELLIPSE: group is the score band
     return text_id, ellipse_band(y), y
 
@@ -98,7 +100,8 @@ def main():
         fixes += pd.Series(applied["fixes"])
         unit, group, y = unit_group_y(base, meta)
         essays.append({"text_id": text_id, "unit": unit, "group": group, "y": y, "text": doc.text,
-                       "corrected": applied["corrected"], "cmap": applied["cmap"].tolist()})
+                       "corrected": applied["corrected"], "cmap": applied["cmap"].tolist(),
+                       **({"l1": meta["l1"], "prompt": meta["prompt"]} if base == "toefl" else {})})
         gold += [(text_id, i, cat) for i, cat in gold_for_doc(doc, edit_list).items()]
         metas.append(meta)
         texts.append(applied["corrected"])

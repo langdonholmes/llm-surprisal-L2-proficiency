@@ -28,7 +28,7 @@ records the design decisions in date order.
 | Stage | File | What it does |
 |---|---|---|
 | 0 | `0_threshold.py` | τ from the ELLIPSE token surprisal stored by `appendix/A0_extract.py` and `appendix/split.csv`. |
-| 1 | `1_edits.py --corpus <id>` | Applies the corrections, types every edit with ERRANT (group, bucket), records each token's category relative to the edits, parses the corrected essays. `wi`, `fce`: the first annotator's json edits. `wi_model`, `fce_model`, `ellipse`: the corrector's; `wi_errant`, `fce_errant`: the annotator's corrected texts re-cut by ERRANT like the corrector's (both from `corrector/c5_edits.py`; `lib/corpora.py`, D40). |
+| 1 | `1_edits.py --corpus <id>` | Applies the corrections, types every edit with ERRANT (group, bucket), records each token's category relative to the edits, parses the corrected essays. `wi`, `fce`: the first annotator's json edits. `wi_model`, `fce_model`, `ellipse`: the corrector's; `toefl`: the final corrector's corrections of TOEFL 11 (RQ5), with L1 and prompt. `wi_errant`, `fce_errant`: the annotator's corrected texts re-cut by ERRANT like the corrector's (both from `corrector/c5_edits.py`; `lib/corpora.py`, D40). |
 | 2 | `2_score.py --corpus` (GPU) | Scores the original and the corrected essays with the Study 1 instrument. |
 | 3 | `3_align.py --corpus` | Aligns the writer's own tokens between the two versions. |
 | 4 | `4_spill.py --corpus` (GPU) | Edit-level Shapley split of each own word's surprisal change over the corrections in its window (correction as baseline). |
@@ -37,6 +37,7 @@ records the design decisions in date order.
 | 7 | `7_analytic.py` | ELLIPSE: the clean part and each ERRANT group against the six analytic scores (shares; partial ρ given overall; D44). |
 | 8 | `8_classic.py` | Post hoc. Classic measures on every partially corrected version, Shapley by kind of correction, ρ, share removed, ΔR². |
 | 9 | `9_calibration.py prep\|score\|table` | Mean surprisal of PERSUADE, Wikipedia, W&I, LOCNESS and ELLIPSE documents of 200–600 words. `fetch_wiki.py` drew the Wikipedia samples. |
+| 10 | `10_l1.py [--check]` | RQ5 (D47): Study 1's within-band L1 displacement and within-L1 slope on TOEFL 11, split exactly over the parts, with Cochran's residual-proficiency allowance per part. `--check`: the corrector by L1 on FCE (agreement, and the distortion of each L1's errors-part d, model minus re-cut gold). |
 | — | `lib/` | `corpora.py` (paths, units), `corrections.py` (applying edits, gold categories), `errant.py` (ERRANT types, groups, buckets), `shapley.py`, `classic.py`, `lm.py` (the instrument), `stats.py`. |
 | c0–c5 | `corrector/` | The fine-tuned corrector that gives ELLIPSE its corrections and is checked against the annotators on W&I/FCE (D36, D38–D40). Own environment and README. |
 | A0–A6 | `appendix/` | The δ-vector analysis. `A0_extract.py` is its GPU pass (top-k predictions for every ELLIPSE and TOEFL 11 token) and `A0_select.py` its threshold and selection. |
@@ -75,6 +76,16 @@ python $S/6_increment.py --corpus wi_model fce_model ellipse
 python $S/7_analytic.py                         # about 6 min
 python $S/8_classic.py --corpus ellipse         # CPU, about 40 min
 quarto render $S/results.qmd
+
+# RQ5: TOEFL 11 and L1 (D47)
+python $S/10_l1.py --check                      # the corrector by L1 on FCE, after the variants
+CUDA_VISIBLE_DEVICES=0 uv run --project $S/corrector python $S/corrector/c3_correct.py \
+    --model qwen9b --adapter qwen9b_fall_lr5e-05_r16_e2 --texts toefl   # about 4 h on one A6000
+uv run --project $S/corrector python $S/corrector/c5_edits.py --source toefl
+python $S/1_edits.py --corpus toefl; python $S/2_score.py --corpus toefl   # 2 on a GPU
+python $S/3_align.py --corpus toefl; python $S/4_spill.py --corpus toefl   # 4 on a GPU
+python $S/5_decompose.py --corpus toefl
+python $S/10_l1.py
 ```
 
 Stages 2–4 take any corpus id. A W&I/FCE variant copies its base corpus's
@@ -87,7 +98,7 @@ Outputs go to `data/study3/<corpus id>/` and `data/study3/calibration/`
 
 ```
 results/study3/
-├── wi/  fce/  ellipse/   per-corpus tables (shares.csv, rate_cost.csv, ...; ellipse/ adds the analytic scores)
+├── wi/  fce/  ellipse/  toefl/   per-corpus tables (toefl/ adds l1_*.csv) (shares.csv, rate_cost.csv, ...; ellipse/ adds the analytic scores)
 ├── validation/           shares.csv (corrector vs annotators) and the variants wi_model/, fce_model/,
 │                         wi_errant/, fce_errant/, with the same per-corpus tables
 ├── calibration/          calibration.csv, contrasts.csv

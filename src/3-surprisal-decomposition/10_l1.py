@@ -1,0 +1,361 @@
+"""Study 3, stage 10 (CPU) — RQ5: where TOEFL 11's L1 displacement sits (DECISIONS D47).
+
+Study 1's fairness statistic, split over the parts of stage 5. For L1 g in
+band s, against the other L1s in s:
+    d_gs(part) = (mean_gs(part) - mean_rest,s(part)) / sp_s
+    d_g(part)  = sum_s n_gs d_gs(part) / sum_s n_gs
+sp_s is the pooled within-band SD of the *total*, the same for every part, so
+the parts' d values add up to Study 1's d_g. Bands where g or the rest has
+fewer than two units are skipped, as in Study 1. "bits" is the same weighted
+mean difference, unstandardized.
+
+Slope (Study 1's within-L1 slope, proficiency-confound-sensitivity.qmd): each
+L1's band means regressed on the latent band positions θ̄_s (truncated-normal
+means between the cutpoints of the pooled band shares), weighted by cell size;
+bits per θ SD, and pooled over L1s by size. Linear in the part, so it splits too.
+
+Residual proficiency (Cochran 1968): three bands leave about 21% (35%
+conservative) of a normal confounder's bias. allowance = r × gap_g × β_part,
+with gap_g g's latent proficiency gap (a probit with a scale term; saturated
+with three bands, so in closed form) and β_part the pooled slope.
+
+CIs: 2,000 resamples of units stratified by band (Study 1), as resampling
+weights, so every statistic of one iteration uses the same draw.
+
+    --check   step 1, the corrector by L1 on FCE: agreement (ERRANT P/R/F0.5,
+              corrections per 100 tokens) per L1, and the distortion of each
+              shared L1's errors-part d, model minus the re-cut gold, paired.
+              -> results/study3/validation/l1_check.csv (per L1) and l1_split4.csv
+    (default) steps 2-5 on toefl: acceptance against Study 1, displacement split,
+              per band, slopes, gaps and allowances.
+              -> results/study3/toefl/l1_*.csv, l1_check.json
+
+    python src/3-surprisal-decomposition/10_l1.py --check
+    python src/3-surprisal-decomposition/10_l1.py
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from scipy import sparse
+from scipy.stats import norm, truncnorm
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib.corpora import (  # noqa: E402
+    DATA, N_BOOT, RAW_DIRS, RESULTS, SEED, TOEFL_BANDS, bands, data_dir, results_dir)
+from lib.errant import BUCKETS, GROUPS, UNCLASSIFIED  # noqa: E402
+
+from util.paths import RESULTS_DIR  # noqa: E402
+
+FLAG = 0.10  # Study 1's |d| flag (Williamson et al. 2012)
+COCHRAN, COCHRAN_CONSERVATIVE = 0.21, 0.35
+SHARED_L1 = {"es": "SPA", "fr": "FRE", "ko": "KOR", "ja": "JPN", "it": "ITA", "de": "GER", "tr": "TUR", "zh": "CHI"}
+SPLIT4 = ["clean", "omission", "context", "error_tokens"]
+CATS = {"bucket": BUCKETS + [UNCLASSIFIED, "flagged", "residual"], "group": GROUPS + ["flagged", "residual"]}
+
+
+def part_columns(units):
+    """total first, then clean, errors (= total - clean), the four-part split, and every
+    bucket and group part (at site, spill, total) that is not zero throughout."""
+    units = units.assign(errors=units.total - units.clean)
+    cols = ["total", "clean", "errors"] + SPLIT4[1:]
+    cols += [f"{c}|{p}" for cats in CATS.values() for c in cats for p in ["at_site", "spill", "total"]]
+    cols = list(dict.fromkeys(c for c in cols if units[c].abs().sum() > 0 or c in ("total", "clean", "errors")))
+    return units, cols
+
+
+# --------------------------------------------------------------------------- #
+# cell sums, and the statistics computed from them
+# --------------------------------------------------------------------------- #
+class Cells:
+    """Weighted sums of every part per (band, L1) cell, for any resampling weights."""
+
+    def __init__(self, X, band, l1, band_levels, l1_levels):
+        self.X = np.asarray(X, float)
+        self.n_band, self.n_l1 = len(band_levels), len(l1_levels)
+        b = pd.Categorical(band, band_levels).codes
+        g = pd.Categorical(l1, l1_levels).codes
+        assert (b >= 0).all() and (g >= 0).all()
+        cell = b * self.n_l1 + g
+        self.onehot = sparse.csr_matrix((np.ones(len(cell)), (cell, np.arange(len(cell)))),
+                                        shape=(self.n_band * self.n_l1, len(cell)))
+        self.band_rows = [np.flatnonzero(b == s) for s in range(self.n_band)]
+
+    def sums(self, w):
+        """n, sum of each part, and sum of the squared total, per cell: (S, G), (S, G, P), (S, G)."""
+        shape = (self.n_band, self.n_l1)
+        n = (self.onehot @ w).reshape(shape)
+        s = (self.onehot @ (w[:, None] * self.X)).reshape(*shape, -1)
+        q = (self.onehot @ (w * self.X[:, 0] ** 2)).reshape(shape)
+        return n, s, q
+
+    def weights(self, rng=None):
+        """All ones, or a bootstrap draw stratified by band (counts per unit)."""
+        if rng is None:
+            return np.ones(len(self.X))
+        w = np.zeros(len(self.X))
+        for rows in self.band_rows:
+            np.add.at(w, rng.choice(rows, len(rows)), 1.0)
+        return w
+
+
+def displacement(n, s, q):
+    """Study 1's d per L1 for every part, per band and size-weighted; and the same in bits.
+    Returns d (G, P), bits (G, P), d per band (S, G, P) with NaN in skipped bands."""
+    n_rest = n.sum(1, keepdims=True) - n
+    s_rest = s.sum(1, keepdims=True) - s
+    q_rest = q.sum(1, keepdims=True) - q
+    with np.errstate(invalid="ignore", divide="ignore"):
+        m_focal, m_rest = s / n[..., None], s_rest / n_rest[..., None]
+        # pooled within-band SD of the total: (SS_focal + SS_rest) / (n_focal + n_rest - 2)
+        ss = (q - n * m_focal[..., 0] ** 2) + (q_rest - n_rest * m_rest[..., 0] ** 2)
+        sp = np.sqrt(ss / (n + n_rest - 2))
+        diff = m_focal - m_rest
+        d_band = diff / sp[..., None]
+    use = (n >= 2) & (n_rest >= 2)
+    d_band[~use] = np.nan
+    w = np.where(use, n, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):  # an L1 with no usable band gives NaN
+        d = np.einsum("sg,sgp->gp", w, np.nan_to_num(d_band)) / w.sum(0)[:, None]
+        bits = np.einsum("sg,sgp->gp", w, np.where(use[..., None], diff, 0.0)) / w.sum(0)[:, None]
+    return d, bits, d_band
+
+
+def theta_bar(band_n):
+    """Latent band positions: the truncated-normal means between the cutpoints of the band shares."""
+    cuts = norm.ppf(np.concatenate([[0], np.cumsum(band_n) / band_n.sum()]))
+    return np.array([truncnorm.mean(lo, hi) for lo, hi in zip(cuts[:-1], cuts[1:])])
+
+
+def slopes(n, s):
+    """Each L1's slope of band means on θ̄ (bits per θ SD), weighted by cell size, and their
+    size-weighted pooled value: (G, P), (P,)."""
+    theta = theta_bar(n.sum(1))
+    use = n >= 2
+    w = np.where(use, n, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        y = np.where(use[..., None], s / n[..., None], 0.0)
+        x_mean = (w * theta[:, None]).sum(0) / w.sum(0)
+        y_mean = np.einsum("sg,sgp->gp", w, y) / w.sum(0)[:, None]
+        dx = theta[:, None] - x_mean
+        beta = np.einsum("sg,sgp->gp", w * dx, y - y_mean) / (w * dx ** 2).sum(0)[:, None]
+    ok = use.sum(0) >= 2
+    n_l1 = n.sum(0)
+    pooled = (n_l1[ok, None] * beta[ok]).sum(0) / n_l1[ok].sum()
+    beta[~ok] = np.nan
+    return beta, pooled
+
+
+def latent_gap(n):
+    """Each L1's latent proficiency location against the rest (θ SD; probit with a scale term).
+    With three ordered bands and two groups the model is saturated: the rest's cutpoints are
+    Φ⁻¹ of its cumulative shares, and the focal group's location and scale solve the two cutpoints."""
+    rest = n.sum(1, keepdims=True) - n
+    cum_rest = np.cumsum(rest, 0)[:-1] / rest.sum(0)
+    cum_focal = np.cumsum(n, 0)[:-1] / n.sum(0)
+    c, z = norm.ppf(cum_rest), norm.ppf(cum_focal)
+    scale = (c[1] - c[0]) / (z[1] - z[0])
+    return c[0] - scale * z[0], scale  # P(band ≤ j) = Φ((c_j - gap) / scale)
+
+
+def boot_ci(point, boots):
+    lo, hi = np.nanpercentile(boots, [2.5, 97.5], axis=0)
+    return point, lo, hi
+
+
+# --------------------------------------------------------------------------- #
+# TOEFL 11 (steps 2-5)
+# --------------------------------------------------------------------------- #
+def load_toefl():
+    units = pd.read_parquet(data_dir("toefl") / "units.parquet")
+    essays = pd.read_parquet(data_dir("toefl") / "essays.parquet", columns=["unit", "l1", "prompt"])
+    units = units.join(essays.set_index("unit"))
+    assert units.l1.notna().all() and len(units) == 11000
+    return units
+
+
+def acceptance(units, out):
+    """The stage 5 total against Study 1's olmo2-1b/8 essay means, and Study 1's d reproduced."""
+    study1 = pd.read_csv(RESULTS_DIR / "predictability" / "toefl_long.csv.gz")
+    study1 = study1[(study1.model == "olmo2-1b") & (study1.window.astype(str) == "8")].set_index("text_id")
+    both = units.join(study1.mean_surprisal_bits, how="inner")
+    gap = (both.total - both.mean_surprisal_bits).abs()
+    l1s = sorted(units.l1.unique())
+    d_ours = displacement(*Cells(units[["total"]], units.group, units.l1, TOEFL_BANDS, l1s).sums(np.ones(len(units))))[0][:, 0]
+    s1 = study1.loc[units.index]
+    d_s1 = displacement(*Cells(s1[["mean_surprisal_bits"]], s1.level, s1.l1, TOEFL_BANDS, l1s).sums(np.ones(len(s1))))[0][:, 0]
+    check = {"n_units": len(units), "n_matched": len(both),
+             "total_vs_study1_r": float(np.corrcoef(both.total, both.mean_surprisal_bits)[0, 1]),
+             "total_vs_study1_max_abs": float(gap.max()), "total_vs_study1_median_abs": float(gap.median()),
+             "d": {g: {"stage5": float(a), "study1": float(b)} for g, a, b in zip(l1s, d_ours, d_s1)},
+             "d_max_abs_diff": float(np.abs(d_ours - d_s1).max()),
+             "aligned": json.loads((results_dir("toefl") / "align.json").read_text())
+             if (results_dir("toefl") / "align.json").exists() else None}
+    (out / "l1_check.json").write_text(json.dumps(check, indent=2))
+    print(json.dumps({k: v for k, v in check.items() if k != "d"}, indent=2))
+
+
+def run_toefl():
+    out = results_dir("toefl")
+    units, cols = part_columns(load_toefl())
+    acceptance(units, out)
+    l1s = sorted(units.l1.unique())
+    cells = Cells(units[cols], units.group, units.l1, TOEFL_BANDS, l1s)
+
+    def stats(w):
+        n, s, q = cells.sums(w)
+        d, bits, d_band = displacement(n, s, q)
+        beta, pooled = slopes(n, s)
+        gap, scale = latent_gap(n)
+        allow = gap[:, None] * pooled[None, :]  # bits a whole proficiency gap would give, per part
+        return d, bits, d_band, beta, pooled, gap, scale, allow
+
+    point = stats(cells.weights())
+    rng = np.random.default_rng(SEED)
+    boots = [stats(cells.weights(rng)) for _ in range(N_BOOT)]
+    d, bits, d_band, beta, pooled, gap, scale, allow = (boot_ci(p, np.array([b[i] for b in boots]))
+                                                        for i, p in enumerate(point))
+
+    rows = []
+    for gi, g in enumerate(l1s):
+        for pj, part in enumerate(cols):
+            a = allow[0][gi, pj]
+            ab = bits[0][gi, pj]
+            reach = np.sign(ab) == np.sign(a) and abs(ab) <= COCHRAN_CONSERVATIVE * abs(a)
+            rows.append({"l1": g, "part": part, "d": d[0][gi, pj], "d_lo": d[1][gi, pj], "d_hi": d[2][gi, pj],
+                         "bits": ab, "bits_lo": bits[1][gi, pj], "bits_hi": bits[2][gi, pj],
+                         "allowance": COCHRAN * a, "allowance_conservative": COCHRAN_CONSERVATIVE * a,
+                         "residual_proficiency": "within reach" if reach else "beyond",
+                         "flagged": abs(d[0][gi, 0]) >= FLAG})
+    pd.DataFrame(rows).to_csv(out / "l1_displacement.csv", index=False)
+
+    rows = [{"l1": g, "band": b, "part": part, "d": d_band[0][si, gi, pj], "lo": d_band[1][si, gi, pj],
+             "hi": d_band[2][si, gi, pj], "n": int(((units.l1 == g) & (units.group == b)).sum())}
+            for si, b in enumerate(TOEFL_BANDS) for gi, g in enumerate(l1s) for pj, part in enumerate(cols)]
+    pd.DataFrame(rows).to_csv(out / "l1_displacement_band.csv", index=False)
+
+    rows = [{"l1": g, "part": part, "slope": beta[0][gi, pj], "lo": beta[1][gi, pj], "hi": beta[2][gi, pj]}
+            for gi, g in enumerate(l1s) for pj, part in enumerate(cols)]
+    rows += [{"l1": "pooled", "part": part, "slope": pooled[0][pj], "lo": pooled[1][pj], "hi": pooled[2][pj]}
+             for pj, part in enumerate(cols)]
+    pd.DataFrame(rows).to_csv(out / "l1_slopes.csv", index=False)
+
+    pd.DataFrame({"l1": l1s, "gap": gap[0], "gap_lo": gap[1], "gap_hi": gap[2], "scale": scale[0],
+                  "n": [int((units.l1 == g).sum()) for g in l1s]}).to_csv(out / "l1_gap.csv", index=False)
+    disp = pd.read_csv(out / "l1_displacement.csv")
+    print(disp[disp.part.isin(["total", "clean", "errors"])].pivot(index="l1", columns="part", values="d")
+          .round(3).to_string())
+
+
+# --------------------------------------------------------------------------- #
+# step 1: the corrector by L1 on FCE
+# --------------------------------------------------------------------------- #
+def fce_l1():
+    """FCE script id -> L1 (constant within a script)."""
+    rows = [json.loads(line) for path in sorted((RAW_DIRS["fce"] / "json").glob("*.json"))
+            for line in path.read_text().splitlines()]
+    l1 = pd.DataFrame([(r["id"], r.get("l1")) for r in rows], columns=["unit", "l1"]).drop_duplicates()
+    assert l1.unit.is_unique
+    return l1.set_index("unit").l1
+
+
+def text_agreement():
+    """TP, FP, FN per FCE answer, as c4_score.py counts them, from the five fold models' edits."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "corrector"))
+    from common import final_run
+    edits = pd.concat([pd.read_parquet(DATA / "corrector" / "edits" / f"{final_run(k)}__fold{k}.parquet")
+                       for k in range(5)])
+    key = ["text_id", "para", "o_start", "o_end", "c_str"]
+    match = edits[edits.side == "hyp"][key].merge(edits[edits.side == "ref"][key], on=key, how="outer",
+                                                  indicator=True)
+    return pd.DataFrame({"tp": match[match._merge == "both"].groupby("text_id").size(),
+                         "fp": match[match._merge == "left_only"].groupby("text_id").size(),
+                         "fn": match[match._merge == "right_only"].groupby("text_id").size()}).fillna(0)
+
+
+def prf(tp, fp, fn, beta=0.5):
+    p, r = tp / (tp + fp), tp / (tp + fn)
+    return p, r, (1 + beta ** 2) * p * r / (beta ** 2 * p + r)
+
+
+def run_check():
+    model = pd.read_parquet(data_dir("fce_model") / "units.parquet")
+    errant = pd.read_parquet(data_dir("fce_errant") / "units.parquet")
+    model, errant = model[model.y.notna()], errant[errant.y.notna()]
+    assert model.index.equals(errant.index) and np.allclose(model.total, errant.total)
+    model, _ = part_columns(model)
+    errant, _ = part_columns(errant)
+    split = ["total", "clean", "errors"] + SPLIT4[1:]
+    l1 = fce_l1().reindex(model.index)
+    assert l1.notna().all()
+    l1s = sorted(l1.unique())
+    shared = [l1s.index(g) for g in SHARED_L1]
+
+    # per script: agreement counts and edit counts, so everything resamples with the same weights
+    essays = pd.read_parquet(data_dir("fce_model") / "essays.parquet", columns=["text_id", "unit"])
+    agree = text_agreement().join(essays.set_index("text_id").unit).groupby("unit")[["tp", "fp", "fn"]].sum()
+    agree = agree.reindex(model.index).fillna(0)
+    X = np.column_stack([model[split], errant[split], agree, model.n_edits, errant.n_edits, model.n])
+    cells = Cells(X, model.group, l1, bands("fce"), l1s)
+    k = len(split)
+
+    def stats(w):
+        n, s, q = cells.sums(w)
+        d_model = displacement(n, s[..., :k], q)[0]
+        d_errant = displacement(n, s[..., k:2 * k], q)[0]
+        by_l1 = s.sum(0)  # (G, columns)
+        rest = by_l1.sum(0) - by_l1
+        tp, fp, fn = (by_l1[:, 2 * k + i] for i in range(3))
+        p, r, f = prf(tp, fp, fn)
+        p_rest, r_rest, f_rest = prf(*(rest[:, 2 * k + i] for i in range(3)))
+        tokens = by_l1[:, -1]
+        m_l1 = n.sum(0)
+        return np.column_stack([
+            p, r, f, r - r_rest, f - f_rest,
+            100 * by_l1[:, 2 * k + 3] / tokens, 100 * by_l1[:, 2 * k + 4] / tokens,
+            by_l1[:, 2] / m_l1, by_l1[:, k + 2] / m_l1, (by_l1[:, 2] - by_l1[:, k + 2]) / m_l1,
+            d_model[:, 0], d_model[:, 2], d_errant[:, 2], d_model[:, 2] - d_errant[:, 2]])[shared]
+
+    names = ["precision", "recall", "f05", "recall_minus_rest", "f05_minus_rest",
+             "edits_per_100_model", "edits_per_100_errant", "errors_bits_model", "errors_bits_errant",
+             "errors_bits_model_minus_errant", "d_total", "d_errors_model", "d_errors_errant", "distortion"]
+    with np.errstate(invalid="ignore", divide="ignore"):  # FCE's two Dutch scripts leave empty cells
+        point = stats(cells.weights())
+        rng = np.random.default_rng(SEED)
+        boots = np.array([stats(cells.weights(rng)) for _ in range(N_BOOT)])
+    lo, hi = np.nanpercentile(boots, [2.5, 97.5], axis=0)
+    rows = []
+    for i, g in enumerate(SHARED_L1):
+        row = {"l1": g, "toefl_l1": SHARED_L1[g], "n_scripts": int((l1 == g).sum())}
+        for j, name in enumerate(names):
+            row.update({name: point[i, j], f"{name}_lo": lo[i, j], f"{name}_hi": hi[i, j]})
+        row["flag"] = bool((lo[i, -1] > 0 or hi[i, -1] < 0) and abs(point[i, -1]) >= FLAG)
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    out = RESULTS / "validation"
+    table.to_csv(out / "l1_check.csv", index=False)
+
+    # the four-part split per L1 under each source (bits per token)
+    means = []
+    for source, units in [("model", model), ("errant", errant)]:
+        m = units.assign(l1=l1).groupby("l1")[split].mean().loc[list(SHARED_L1)]
+        means.append(m.assign(source=source).reset_index())
+    pd.concat(means).to_csv(out / "l1_split4.csv", index=False)
+    show = ["l1", "n_scripts", "recall", "f05", "f05_minus_rest", "edits_per_100_model", "edits_per_100_errant",
+            "d_total", "d_errors_model", "d_errors_errant", "distortion", "distortion_lo", "distortion_hi", "flag"]
+    print(table[show].round(3).to_string())
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--check", action="store_true", help="step 1: the corrector by L1 on FCE")
+    args = ap.parse_args()
+    run_check() if args.check else run_toefl()
+
+
+if __name__ == "__main__":
+    main()
