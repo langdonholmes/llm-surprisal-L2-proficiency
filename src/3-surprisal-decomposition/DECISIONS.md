@@ -1292,3 +1292,90 @@ Also deleted from data/study3/ (user, 2026-10-22): the OpenAI smoke tests,
 the pre-renumbering logs, the unused W&I appendix extract, and the nine
 corrector adapters not used downstream (tuning runs and the 2B model; their
 corrections and scores are kept).
+
+## 2026-10-22 · D47. RQ5 (TOEFL 11 and L1): statistics and reading rules, fixed before any L1 contrast
+
+RQ5 (new in the Chapter 5 outline, 2026-10-22) asks where Study 1's
+within-band L1 displacement sits: in the errors (different error rates or
+mixes at the same band, or residual proficiency inside the bands) or in the
+clean text. Study 1: for olmo2-1b/8, worst-case |d| = .42 (Telugu), largest in
+the low band, and every configuration over |d| = .10. The handoff planned
+these entries from D45; D45 and D46 were already used, so RQ5 starts here.
+Nothing below has been computed yet. Exploratory, no hypotheses (D-018):
+everything is reported with intervals, and the rules only fix what a
+sentence in the write-up may say.
+
+**Step 1. The corrector by L1, on FCE (before any TOEFL analysis).**
+- L1s: the eight FCE shares with TOEFL 11 (es, fr, ko, ja, it, de, tr, zh;
+  64–200 scripts each). Arabic, Hindi and Telugu have no FCE counterpart, so
+  Telugu, Study 1's worst case, cannot be checked.
+- Agreement per L1: precision, recall and F0.5 of the cross-fitted corrector
+  against the first annotator, computed as `c4_score.py` does (ERRANT,
+  span-based, pooled over the L1's answers); corrections per 100 scored
+  tokens for the model (`fce_model`) and the re-cut gold (`fce_errant`).
+- Decomposition per L1: the errors part (total − clean, bits per token) under
+  both sources, and the four-part split.
+- The contrast RQ5 relies on: Study 1's d (below) on FCE, with the four FCE
+  bands as strata and each shared L1 against all other FCE learners, for the
+  errors part under each source. The distortion is
+  d_errors(model) − d_errors(errant). The totals are the same texts, so the
+  clean part's d moves by the same amount in the other direction.
+- CIs: 2,000 script resamples stratified by FCE band, the same resample for
+  both sources (paired).
+- Reading rule: the corrector's bias differs by L1 if some L1's distortion
+  has a CI excluding 0 and |distortion| ≥ .10, Study 1's flag on the same d
+  scale. Recall and F0.5 differences (L1 minus the other learners) are
+  descriptive. If an L1 is flagged, the TOEFL errors-vs-clean split is
+  reported with that distortion beside it. The three TOEFL L1s without an
+  FCE counterpart are read with the range of the eight distortions as the
+  only guide.
+
+**Step 2. TOEFL 11 through stage 5.** Corpus id `toefl`: the final (all-data)
+corrector's corrections, cut by c5 as for ELLIPSE. Unit = essay, group =
+band (low / medium / high), y = 1 / 2 / 3 as for CEFR A / B / C, with l1 and
+prompt carried in `essays.parquet`. Acceptance: the splits hold exactly
+(stage 5 asserts this); the alignment rate is reported (stage 3); the
+stage 5 total matches Study 1's olmo2-1b/8 essay means
+(`results/predictability/toefl_long.csv.gz`), and Study 1's 11 d values are
+reproduced (maximum absolute difference reported).
+
+**Step 3. Displacement split (`10_l1.py`).** For L1 g in band s, with the
+other L1s in s as the rest:
+d_gs(part) = (mean_gs(part) − mean_rest,s(part)) / sp_s, where sp_s is the
+pooled within-band SD of the *total* for g and the rest. Then
+d_g(part) = Σ_s n_gs d_gs(part) / Σ_s n_gs, weighting each band by g's
+size there. The denominator is the total's for every part, so the parts' d
+values add up to Study 1's d_g exactly.
+- Parts: the four-part split (clean, omission, context, error tokens); clean
+  plus the buckets (at site, spill, total), unclassified and residual; clean
+  plus the nine ERRANT groups. Also per band, and in bits.
+- CIs: 2,000 essay resamples stratified by band, as in Study 1; percentile.
+- Reading rule: an L1's split is read only if |d_total| ≥ .10 in this sample
+  (Study 1's flag). For those L1s, the errors part (total − clean) and the
+  clean part each carry displacement if their CI excludes 0. The errors'
+  share of d (errors / total) is a descriptive proportion. Within the
+  errors, a bucket or group is named only if its CI excludes 0.
+
+**Step 4. Slope split.** Study 1's within-L1 slope
+(`proficiency-confound-sensitivity.qmd`, step 3), per part: each L1's band
+means regressed on the latent band positions θ̄_s, weighted by cell size.
+θ̄_s is the truncated-normal mean between the cutpoints given by the pooled
+band shares. Bits per θ SD. The slope is linear in the outcome, so the parts'
+slopes add up to the total's. Same bootstrap as step 3. Figure 5.3 shows the
+slopes by L1, split over clean and the error buckets.
+
+**Step 5. Residual proficiency (Cochran 1968, as in Study 1).** Three
+strata leave about 21% of a normal confounder's bias (35% as the
+conservative figure for unequal bands). For L1 g and each part:
+allowance = r × gap_g × β_part. gap_g is g's latent proficiency gap against
+the rest: a probit with a scale term, which with three bands and two groups
+is saturated and has a closed form equal to Study 1's `ordinal::clm` fit.
+β_part is the part's pooled within-L1 slope (step 4, size-weighted over
+L1s). The allowances add up over parts like everything else.
+- Reading rule: a part's displacement for an L1 is *within reach of residual
+  proficiency* if it has the sign residual proficiency would give
+  (sign of gap_g × β_part) and |observed bits| ≤ the conservative allowance.
+  Otherwise it is *beyond residual proficiency*. The errors carry most of the
+  proficiency slope (Study 3), so most of the allowance falls on the error
+  parts. Displacement in the error parts is therefore the most open to this
+  reading, and displacement in the clean part the least.

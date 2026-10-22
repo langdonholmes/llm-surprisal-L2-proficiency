@@ -11,6 +11,7 @@ Texts (--texts):
     fold:<k>   the held-out fold k of pairs.parquet
     tune       fold 0's tuning split
     ellipse    every ELLIPSE essay
+    toefl      every TOEFL 11 essay
 
 Greedy decoding, batched by length, at most 1.5 x the input length + 64 new
 tokens. Thinking is off for Qwen3.5. Resumable: finished batches are kept in
@@ -50,6 +51,9 @@ def load_texts(spec: str) -> pd.DataFrame:
         return p[p.tune][["text_id", "text"]]
     if spec == "ellipse":
         return pd.read_parquet(DATA_DIR / "study3" / "appendix" / "ellipse" / "essays.parquet",
+                               columns=["text_id", "text"])
+    if spec == "toefl":
+        return pd.read_parquet(DATA_DIR / "study3" / "appendix" / "toefl11" / "essays.parquet",
                                columns=["text_id", "text"])
     raise ValueError(spec)
 

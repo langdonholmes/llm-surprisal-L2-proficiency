@@ -13,6 +13,7 @@ reproduce (a dropped final newline is not a correction).
                        by ERRANT in the same way (so that model and gold differ only
                        in the corrections, not in how edits are cut)
     --source ellipse   the final model's corrections of ELLIPSE
+    --source toefl     the final model's corrections of TOEFL 11
 
 Writes data/study3/corrector/char_edits_<source>.parquet:
     text_id, k (index in the text's edit list), s, e, orig, repl, errant
@@ -44,8 +45,8 @@ def texts(source: str) -> pd.DataFrame:
         f = [DATA / "out" / f"{final_run(k)}__fold{k}.parquet" for k in range(5)]
         return pd.concat([pd.read_parquet(x, columns=["text_id", "text", "output"]) for x in f]
                          ).rename(columns={"output": "corrected"})
-    if source == "ellipse":
-        return pd.read_parquet(DATA / "out" / f"{final_run('all')}__ellipse.parquet",
+    if source in ("ellipse", "toefl"):
+        return pd.read_parquet(DATA / "out" / f"{final_run('all')}__{source}.parquet",
                                columns=["text_id", "text", "output"]).rename(columns={"output": "corrected"})
     raise ValueError(source)
 
@@ -66,7 +67,7 @@ def one(args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", choices=["model", "gold", "ellipse"], required=True)
+    ap.add_argument("--source", choices=["model", "gold", "ellipse", "toefl"], required=True)
     ap.add_argument("--procs", type=int, default=16)
     args = ap.parse_args()
     T = texts(args.source)
