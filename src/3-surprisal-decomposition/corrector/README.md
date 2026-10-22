@@ -141,6 +141,7 @@ optimizer steps.
 | c2 | `c2_train.py --model --fold [--tune] --lr [--r --epochs]` (GPU) | LoRA fine-tuning → `data/study3/corrector/adapters/<run>/` |
 | c3 | `c3_correct.py --model (--adapter <run> \| --prompt zero\|few) --texts` (GPU) | Greedy corrections → `data/study3/corrector/out/` |
 | c4 | `c4_score.py <out file>` | ERRANT agreement with the first annotator → `results/study3/corrector/score_*.json`, edits → `data/study3/corrector/edits/` |
+| c5 | `c5_edits.py --source model\|gold\|ellipse` | Character edits with ERRANT 3 types for stage 1 (`common.char_edits`): the five fold models' corrections, the annotator's corrected texts re-cut the same way, the final model's ELLIPSE corrections → `data/study3/corrector/char_edits_<source>.parquet` |
 | — | `common.py` | Candidate models, the prompt and its chat formatting, the LoRA settings |
 
 ## Running
@@ -162,6 +163,33 @@ for lr in 5e-05 0.0001 0.0002; do
   $R $C/c4_score.py data/study3/corrector/out/${run}__tune.parquet
 done
 ```
+
+Production (settings of D39): `c2_train.py --model qwen9b --lr 5e-5 --fold k` and
+`c3_correct.py --adapter <run> --texts fold:k` for k = 0..4, then `--fold all`
+and `--texts ellipse`, then `c5_edits.py` for each source and stage 1 with
+the corpus ids of `lib/corpora.py`.
+
+### From corrections to edits (c5)
+
+The decomposition needs edits, not corrected texts: stage 4 applies every
+subset of a text's edits. `common.char_edits` turns an (original, corrected)
+pair into ERRANT's edits as character spans of the original that, applied
+together with no whitespace repair, give the corrected text exactly
+(asserted for every text). As for the BEA-2019 M2 files, ERRANT sees
+non-whitespace tokens only. Whitespace is assigned gap by gap: an edit owns
+the gap before its first token and the gaps inside it; a whitespace change
+right after an edit joins it (FCE leaves a double space where a word is
+missing); two changes one unchanged token apart are one edit (" ,I" → ", I");
+any other whitespace change is an R:ORTH edit, the rule `lib/errant.py`
+uses for whitespace-only gold edits. For the model's corrections, the
+original's leading and trailing whitespace is kept first, because generation
+drops a final newline.
+
+Re-cutting the annotator's corrected texts this way gives about as many edits
+as the annotator's own json edits (W&I 22.1 vs 21.8 per text, FCE 21.2 vs
+20.8) and a similar mix of error groups, so the validation compares the model
+with gold cut the same way (`wi_errant`, `fce_errant`), and the re-cut gold
+with the json gold.
 
 The chat formatting is built in `common.py` so that training and inference
 see the same text: the generation prompt, then the correction and the

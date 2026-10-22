@@ -28,7 +28,7 @@ records the design decisions in date order.
 | Stage | File | What it does |
 |---|---|---|
 | 0 | `0_threshold.py` | τ from the ELLIPSE token surprisal stored by `appendix/A0_extract.py` and `appendix/split.csv`. |
-| 1 | `1_edits.py --corpus wi\|fce` | Applies the first annotator's corrections, types every edit with ERRANT (group, bucket), records each token's gold category, parses the corrected essays. |
+| 1 | `1_edits.py --corpus <id>` | Applies the corrections, types every edit with ERRANT (group, bucket), records each token's category relative to the edits, parses the corrected essays. `wi`, `fce`: the first annotator's json edits. `wi_model`, `fce_model`, `ellipse`: the corrector's; `wi_errant`, `fce_errant`: the annotator's corrected texts re-cut by ERRANT like the corrector's (both from `corrector/c5_edits.py`; `lib/corpora.py`, D40). |
 | 2 | `2_score.py --corpus` (GPU) | Scores the original and the corrected essays with the Study 1 instrument. |
 | 3 | `3_align.py --corpus` | Aligns the writer's own tokens between the two versions. |
 | 4 | `4_spill.py --corpus` (GPU) | Edit-level Shapley split of each own word's surprisal change over the corrections in its window (correction as baseline). |
@@ -64,6 +64,10 @@ CUDA_VISIBLE_DEVICES=1 python $S/9_calibration.py score   # 18 min
 python $S/9_calibration.py table
 quarto render $S/results.qmd
 ```
+
+Stages 2–4 take any corpus id. A W&I/FCE variant copies its base corpus's
+scores of the original texts (and of the corrected texts, when they are the
+same) instead of rescoring them.
 
 Outputs go to `data/study3/{wi,fce,calibration}/` (large, not versioned) and
 `results/study3/` (tables and figures for `results.qmd`). The appendix's go to

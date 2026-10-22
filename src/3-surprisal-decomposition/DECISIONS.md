@@ -1147,3 +1147,30 @@ the dev split.
   Both are inside the default's interval. Final 9B settings: LR 5e-5,
   r 16, 2 epochs. The 2B model uses 2e-4 and is run on fold 0 only, as the
   size comparison.
+
+## 2026-10-21 · D40. Corrections become edits the same way for model and gold
+
+The decomposition runs on edits (stage 4 applies every subset of them), so the
+corrector's corrected texts are turned into edits: `corrector/c5_edits.py`
+(`common.char_edits`) takes ERRANT 3's edits from the original to the
+correction and writes them as character spans of the original. Applied
+together, a text's edits give the correction exactly; stage 1 applies them
+without its whitespace repair and checks that.
+
+- **Whitespace.** ERRANT sees only non-whitespace tokens, as in the BEA-2019
+  M2 files (otherwise FCE's double spaces, left where a word is missing, are
+  aligned with the inserted word, and half the determiner insertions turn
+  into R:OTHER). Whitespace changes join the adjacent edit, or two changes
+  one token apart make one edit; any other is an R:ORTH edit. The model's
+  dropped final newline is not an edit.
+- **Three edit sources on W&I/FCE.** `wi`/`fce`: the annotator's json edits
+  (the main analysis, unchanged). `wi_model`/`fce_model`: the cross-fitted
+  corrector's. `wi_errant`/`fce_errant`: the annotator's corrected texts,
+  re-cut by ERRANT like the model's. The validation compares model with
+  re-cut gold, so the two differ only in the corrections; re-cut gold vs json
+  gold shows what the cut alone changes. The re-cut gold has the same
+  corrected texts as the json gold, and about as many edits (W&I 22.1 vs
+  21.8 per text, FCE 21.2 vs 20.8).
+- **ELLIPSE** (`ellipse`) is cut the same way from the final model's
+  corrections. Its unit is the essay and its group the overall score.
+- Stage 1 on `wi` and `fce` gives byte-identical outputs after the change.

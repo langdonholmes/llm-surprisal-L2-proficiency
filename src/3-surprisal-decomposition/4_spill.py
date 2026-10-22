@@ -30,7 +30,7 @@ import pandas as pd
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import RES, out  # noqa: E402
+from lib.corpora import ALL_IDS, RES, out  # noqa: E402
 from lib.corrections import apply_edits  # noqa: E402
 from lib.shapley import BACK, load_model, shapley_matrix, subset_masks, surprisal, variants  # noqa: E402
 
@@ -95,7 +95,7 @@ def jobs_for(O):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corpus", choices=["wi", "fce"], required=True)
+    ap.add_argument("--corpus", choices=ALL_IDS, required=True)
     ap.add_argument("--procs", type=int, default=24)
     args = ap.parse_args()
     O = out(args.corpus)

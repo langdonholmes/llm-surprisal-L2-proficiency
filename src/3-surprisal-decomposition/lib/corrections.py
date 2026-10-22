@@ -11,7 +11,7 @@ import numpy as np
 CLOSE_PUNCT = set(".,;:!?)")
 
 
-def apply_edits(text: str, edits: list) -> dict:
+def apply_edits(text: str, edits: list, repair: bool = True) -> dict:
     """Apply the gold edits to ``text``.
 
     Returns
@@ -28,7 +28,9 @@ def apply_edits(text: str, edits: list) -> dict:
     one of them (and a space left before closing punctuation), a replacement's
     leading/trailing space is dropped next to existing whitespace, and an
     insertion that would glue two words together gets a space. Nothing else in
-    the text is touched, so unedited characters map one to one.
+    the text is touched, so unedited characters map one to one. ERRANT's edits
+    from ``corrector/c5_edits.py`` already carry their whitespace, so they are
+    applied with ``repair=False``.
     """
     cmap = np.full(len(text), -1, dtype=np.int64)
     out: list[str] = []          # one character per entry
@@ -52,21 +54,21 @@ def apply_edits(text: str, edits: list) -> dict:
         left = out[-1] if out else "\n"
         right = text[e] if e < len(text) else "\n"
         r2 = r
-        if s == e and r2:
+        if repair and s == e and r2:
             if left.isalnum() and r2[0].isalnum():
                 r2 = " " + r2
                 fixes["ins_add_space"] += 1
             if r2[-1].isalnum() and right.isalnum():
                 r2 = r2 + " "
                 fixes["ins_add_space"] += 1
-        if r2 and r2[0] == " " and left in " \n":
+        if repair and r2 and r2[0] == " " and left in " \n":
             r2 = r2[1:]
             fixes["strip_lead"] += 1
-        if r2 and r2[-1] == " " and right in " \n":
+        if repair and r2 and r2[-1] == " " and right in " \n":
             r2 = r2[:-1]
             fixes["strip_trail"] += 1
         e2 = e
-        if r2 == "":
+        if repair and r2 == "":
             if left in " \n" and right == " " and e not in starts:
                 e2 = e + 1  # "a  b" -> "a b"
                 fixes["del_swallow_space"] += 1

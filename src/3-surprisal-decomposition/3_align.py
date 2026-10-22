@@ -27,7 +27,7 @@ import pandas as pd
 from transformers import AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import RES, out  # noqa: E402
+from lib.corpora import ALL_IDS, RES, out  # noqa: E402
 from lib.lm import HF_ID, REVISION  # noqa: E402
 
 WIN = 8
@@ -73,7 +73,7 @@ def align_essay(e, o, c, flagged, corr_edits, tok) -> pd.DataFrame:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corpus", choices=["wi", "fce"], required=True)
+    ap.add_argument("--corpus", choices=ALL_IDS, required=True)
     args = ap.parse_args()
     O = out(args.corpus)
     essays = pd.read_parquet(O / "essays.parquet")

@@ -4,11 +4,30 @@ Two gold-corrected corpora. W&I+LOCNESS: the unit is the essay and the
 criterion is CEFR level (A = 1, B = 2, C = 3; LOCNESS, level N, is described
 but has no criterion). FCE: the unit is the script (both answers pooled) and
 the criterion is the script score (1-40; the one script scored 0 is left out).
+ELLIPSE: the unit is the essay and the criterion the overall score (1-5).
+
+A corpus id names the texts and where their edits come from. ``wi`` and
+``fce`` take the first annotator's json edits (the main analysis). The other
+ids take ERRANT's edits from ``corrector/c5_edits.py`` (VARIANTS: id -> base
+corpus, c5 source):
+    wi_model, fce_model   the cross-fitted corrector's corrections
+    wi_errant, fce_errant the annotator's corrected texts, cut into edits by
+                          ERRANT like the model's, so that model and gold differ
+                          only in the corrections
+    ellipse               the final corrector's corrections
 """
 
 import json
 
-from util.paths import DATA_DIR, FCE_DIR, FCE_DOCBINS_DIR, RESULTS_DIR, WI_DIR, WI_DOCBINS_DIR
+from util.paths import (
+    DATA_DIR,
+    ELLIPSE_DOCBINS_DIR,
+    FCE_DIR,
+    FCE_DOCBINS_DIR,
+    RESULTS_DIR,
+    WI_DIR,
+    WI_DOCBINS_DIR,
+)
 
 S3 = DATA_DIR / "study3"
 DATA = S3
@@ -16,7 +35,11 @@ RES = RESULTS_DIR / "study3"
 # The ELLIPSE token surprisal stored by the appendix's GPU pass (appendix/A0_extract.py)
 ELLIPSE_APPX = S3 / "appendix" / "ellipse"
 CORPORA = ["wi", "fce"]
-DOCBINS = {"wi": WI_DOCBINS_DIR, "fce": FCE_DOCBINS_DIR}
+VARIANTS = {"wi_model": ("wi", "model"), "fce_model": ("fce", "model"),
+            "wi_errant": ("wi", "gold"), "fce_errant": ("fce", "gold"),
+            "ellipse": ("ellipse", "ellipse")}
+ALL_IDS = CORPORA + list(VARIANTS)
+DOCBINS = {"wi": WI_DOCBINS_DIR, "fce": FCE_DOCBINS_DIR, "ellipse": ELLIPSE_DOCBINS_DIR}
 RAW = {"wi": WI_DIR / "raw" / "wi+locness", "fce": FCE_DIR / "raw" / "fce"}
 LEVEL_Y = {"A": 1.0, "B": 2.0, "C": 3.0}
 FCE_BANDS = [(1, 23), (24, 27), (28, 31), (32, 40)]
@@ -28,6 +51,11 @@ GROUP_SLUGS = ["spelling_orth", "verb_form_SVA_tense", "determiner", "prepositio
                "noun_number", "word_order", "other_lexical", "other"]
 B = [f"rate_{g}" for g in GROUP_SLUGS] + ["rate_flagged", "log_n"]
 S_COMPACT = ["clean", "cost_mean", "spill_mean"]
+
+
+def base(corpus: str) -> str:
+    """The corpus whose texts an id uses (wi_model -> wi)."""
+    return VARIANTS[corpus][0] if corpus in VARIANTS else corpus
 
 
 def out(corpus: str):

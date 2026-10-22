@@ -83,6 +83,14 @@ def bucket_of(errant_type: str) -> str:
     return BUCKET.get(category(errant_type), UNCL)
 
 
+def op_of(errant_type: str, s: int, e: int, repl: str) -> str:
+    """missing / replacement / unnecessary, from the type's prefix, else from the edit."""
+    t = str(errant_type)
+    if t[1:2] == ":" and t[0] in OPS:
+        return OPS[t[0]]
+    return "missing" if s == e else ("unnecessary" if repl == "" else "replacement")
+
+
 def read_m2(path):
     """Yield (tokens, edits) per sentence; edits are (s, e, type) for coder 0."""
     for block in path.read_text().strip("\n").split("\n\n"):
@@ -183,10 +191,7 @@ def edit_types(corpus: str) -> pd.DataFrame:
                     continue
                 h = match(ed, m2, text) if ok else []
                 typ = h[0] if h else "unmapped"
-                op = OPS.get(typ[0], "unmapped") if typ[1:2] == ":" else "unmapped"
-                if op == "unmapped":
-                    op = "missing" if s == e else ("unnecessary" if r == "" else "replacement")
-                rows.append((tid, k, s, e, typ, group_of(typ), bucket_of(typ), op))
+                rows.append((tid, k, s, e, typ, group_of(typ), bucket_of(typ), op_of(typ, s, e, r)))
         left = sum(1 for _ in sents)
         if left:
             print(f"{mname}: {left} M2 sentences left over", flush=True)

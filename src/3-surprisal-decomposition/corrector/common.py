@@ -33,6 +33,99 @@ LORA_ALPHA = 32
 LORA_DROPOUT = 0.0
 TARGET = "all-linear"
 
+# the chosen settings (DECISIONS D39): the c2 run name of fold k's model, or "all"
+FINAL_MODEL, FINAL_LR = "qwen9b", 5e-5
+
+
+def final_run(fold) -> str:
+    return f"{FINAL_MODEL}_f{fold}_lr{FINAL_LR:g}_r{LORA_R}_e2"
+
+
+_ann = None
+
+
+def annotator():
+    global _ann
+    if _ann is None:
+        import errant
+        _ann = errant.load("en")
+    return _ann
+
+
+def char_edits(orig: str, cor: str) -> list[tuple[int, int, str, str]]:
+    """ERRANT's edits from ``orig`` to ``cor`` as (s, e, replacement, type) on characters of ``orig``.
+
+    Applied to ``orig`` without any whitespace repair, the edits give ``cor``
+    exactly. As for the BEA-2019 M2 files, ERRANT sees the non-whitespace tokens
+    only (spaCy's whitespace tokens, e.g. the second space of "take  exam", would
+    otherwise be aligned with an inserted word). All whitespace lies in the gaps
+    between tokens: with gap g the text between token g-1 and token g, an edit
+    owns the gap before its first token and the gaps inside it on each side (an
+    insertion owns no original gap). The remaining gaps pair up in order, and a
+    pair that differs is a whitespace change. A change in the gap right after an
+    edit joins that edit (FCE leaves a double space where a word is missing, and
+    the annotator's insertion fills it: "take  exam" -> "take an exam" is one
+    edit). Two changes one unchanged token apart are one edit (" ,I" -> ", I").
+    Any other change (e.g. a removed paragraph break) is a whitespace-only edit,
+    typed R:ORTH as in ``lib/errant.py``.
+    """
+    ann = annotator()
+
+    def tokens(text):
+        """The ERRANT parse of the non-whitespace tokens, and the gaps between them."""
+        spans = [(t.idx, t.idx + len(t.text)) for t in ann.nlp.tokenizer(text) if not t.is_space]
+        words = [text[a:b] for a, b in spans]
+        assert not any(" " in w for w in words)
+        doc = ann.parse(" ".join(words))
+        assert len(doc) == len(spans)
+        return doc, [0] + [b for _, b in spans], [a for a, _ in spans] + [len(text)]
+
+    po, ogs, oge = tokens(orig)
+    pc, cgs, cge = tokens(cor)
+    out, o_own, c_own = [], set(), set()
+    for e in ann.annotate(po, pc):
+        if e.type == "noop":
+            continue
+        s = ogs[e.o_start]
+        t = ogs[e.o_end] if e.o_end > e.o_start else s
+        cs = cgs[e.c_start]
+        ce = cgs[e.c_end] if e.c_end > e.c_start else cs
+        out.append((s, t, cor[cs:ce], e.type))
+        o_own.update(range(e.o_start, e.o_end))
+        c_own.update(range(e.c_start, e.c_end))
+    og = [g for g in range(len(po) + 1) if g not in o_own]
+    cg = [g for g in range(len(pc) + 1) if g not in c_own]
+    assert len(og) == len(cg)
+    diff = [(a, b) for a, b in zip(og, cg) if orig[ogs[a]:oge[a]] != cor[cgs[b]:cge[b]]]
+    ends = {t: i for i, (_, t, _, _) in enumerate(out)}
+    i = 0
+    while i < len(diff):
+        a, b = diff[i]
+        if ogs[a] in ends:  # the gap right after an edit
+            j = ends.pop(ogs[a])
+            s, _, r, typ = out[j]
+            out[j] = (s, oge[a], r + cor[cgs[b]:cge[b]], typ)
+            i += 1
+        elif i + 1 < len(diff) and diff[i + 1][0] == a + 1 and ogs[a + 1] not in ends:
+            # two changes one unchanged token apart, with no insertion between
+            b2 = diff[i + 1][1]
+            out.append((ogs[a], oge[a + 1], cor[cgs[b]:cge[b2]], "R:ORTH"))
+            i += 2
+        else:
+            out.append((ogs[a], oge[a], cor[cgs[b]:cge[b]], "R:ORTH"))
+            i += 1
+    return sorted(out, key=lambda x: (x[0], x[1]))
+
+
+def splice(text: str, edits) -> str:
+    """Apply (s, e, replacement, ...) edits to ``text`` as they are."""
+    out, p = [], 0
+    for s, e, r, *_ in sorted(edits, key=lambda x: (x[0], x[1])):
+        assert s >= p
+        out += [text[p:s], r]
+        p = e
+    return "".join(out) + text[p:]
+
 
 def messages(text: str, corrected: str | None = None) -> list[dict]:
     m = [{"role": "user", "content": f"{INSTRUCTION}\n\n{text}"}]
