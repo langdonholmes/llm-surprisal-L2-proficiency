@@ -19,15 +19,19 @@ and results/study3/spill_<corpus>.json (status counts, timing).
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
 from multiprocessing import Pool
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-import torch
+# batches of 4,096 windows fragment the reserved memory (wi_model ran out with 13 GiB of it free)
+os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import torch  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.corpora import ALL_IDS, RES, out  # noqa: E402
