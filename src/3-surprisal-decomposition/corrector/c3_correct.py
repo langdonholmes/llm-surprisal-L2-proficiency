@@ -11,7 +11,7 @@ Texts (--texts):
     fold:<k>   the held-out fold k of pairs.parquet
     tune       fold 0's tuning split
     ellipse    every ELLIPSE essay
-    toefl      every TOEFL 11 essay
+    toefl      every TOEFL 11 essay, detokenized (common.detokenize, D50)
 
 Greedy decoding, batched by length, at most 1.5 x the input length + 64 new
 tokens. Thinking is off for Qwen3.5. Resumable: finished batches are kept in
@@ -35,7 +35,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # src/, for util
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import DATA, MODELS, load_lm, prompt_text  # noqa: E402
+from common import DATA, MODELS, detokenize, load_lm, prompt_text  # noqa: E402
 
 from util.paths import DATA_DIR  # noqa: E402
 
@@ -53,8 +53,9 @@ def load_texts(spec: str) -> pd.DataFrame:
         return pd.read_parquet(DATA_DIR / "study3" / "appendix" / "ellipse" / "essays.parquet",
                                columns=["text_id", "text"])
     if spec == "toefl":
-        return pd.read_parquet(DATA_DIR / "study3" / "appendix" / "toefl11" / "essays.parquet",
-                               columns=["text_id", "text"])
+        t = pd.read_parquet(DATA_DIR / "study3" / "appendix" / "toefl11" / "essays.parquet",
+                            columns=["text_id", "text"])
+        return t.assign(text=[detokenize(x)[0] for x in t.text])
     raise ValueError(spec)
 
 

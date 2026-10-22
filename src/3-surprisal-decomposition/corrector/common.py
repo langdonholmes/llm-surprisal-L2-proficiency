@@ -3,8 +3,10 @@
 The hyperparameters and their sources are in README.md ("Training settings").
 """
 
+import re
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from util.paths import DATA_DIR, RESULTS_DIR
@@ -39,6 +41,43 @@ FINAL_MODEL, FINAL_LR = "qwen9b", 5e-5
 
 def final_run(fold) -> str:
     return f"{FINAL_MODEL}_f{fold}_lr{FINAL_LR:g}_r{LORA_R}_e2"
+
+
+# TOEFL 11 is distributed tokenized ("a good way . But , I do n't"). The corrector, trained on
+# naturally spaced text, sees it detokenized, and its edits are mapped back (D50).
+BEFORE = re.compile(r"[ \t]+(?=[.,?!:;)\]}%]|n't\b|'(?:s|m|d|re|ve|ll)\b|'(?=\s|$))", re.I)
+AFTER = re.compile(r"(?<=[(\[{$`])[ \t]+")
+
+
+def detokenize(text: str) -> tuple[str, np.ndarray]:
+    """The text with tokenization spaces removed, and for each of its characters the index of
+    that character in ``text`` (plus len(text) at the end). Only spaces and tabs are removed:
+    before closing punctuation and clitics, after opening brackets and the opening quote `, and inside straight double
+    quotes, which open and close in turn."""
+    drop = np.zeros(len(text), bool)
+    for rx in (BEFORE, AFTER):
+        for m in rx.finditer(text):
+            drop[m.start():m.end()] = True
+    for i, m in enumerate(re.finditer(r'"', text)):  # odd ones open, even ones close
+        gap = re.match(r"[ \t]+", text[m.end():]) if i % 2 == 0 else re.search(r"[ \t]+$", text[:m.start()])
+        if gap:
+            a, b = (m.end(), m.end() + gap.end()) if i % 2 == 0 else (gap.start(), m.start())
+            drop[a:b] = True
+    keep = np.flatnonzero(~drop)
+    out = "".join(text[i] for i in keep)
+    assert re.sub(r"\s", "", out) == re.sub(r"\s", "", text)
+    return out, np.append(keep, len(text))
+
+
+def map_edits(text: str, keep: np.ndarray, edits) -> list:
+    """(s, e, replacement, type) edits on the detokenized text, moved onto ``text``. A span
+    keeps any tokenization space inside it; the spaces around it stay where they were, and an
+    insertion goes right after the preceding character."""
+    out = []
+    for s, e, r, t in edits:
+        a = keep[s - 1] + 1 if s > 0 and s == e else keep[s]
+        out.append((int(a), int(keep[e - 1] + 1 if e > s else a), r, t))
+    return out
 
 
 _ann = None

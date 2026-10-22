@@ -1473,3 +1473,27 @@ extended FCE check and before any TOEFL L1 contrast.
     de −.05).
   - Word order misses the 50-correction rule for de, it, ja, ko, tr and zh,
     and has a margin only for es and fr.
+
+## 2026-10-22 · D50. TOEFL 11 is corrected detokenized
+
+TOEFL 11 is distributed tokenized: "a good way . But , I do n't agree".
+Study 1 scored that text, and stages 1–5 keep it, so that the total
+displacement is Study 1's. The corrector was trained and validated (D39, D48)
+on naturally spaced W&I/FCE text, so it corrects the essays detokenized.
+
+- `common.detokenize` removes spaces and tabs only, never newlines. It removes
+  them before closing punctuation (. , ? ! : ; ) ] } %, a closing `'`) and
+  clitics (n't, 's, 'm, 'd, 're, 've, 'll), after openers (( [ { $ and the
+  Penn Treebank opening quote `` ` ``), and inside straight double quotes,
+  which open and close in turn within an essay. It asserts that the text is
+  unchanged apart from whitespace. It takes 354,189 spaces out of the 11,000
+  essays. Hyphens, slashes and dashes keep their spaces, because learners
+  space them both ways.
+- c5 makes ERRANT's edits on the detokenized text and moves them onto the
+  tokenized original (`common.map_edits`). Detokenizing only deletes spaces, so
+  every character maps one to one. A span keeps any tokenization space inside
+  it, the spaces around it stay, and an insertion goes right after the
+  preceding character. The corrected tokenized text therefore keeps the
+  corpus's format ("way , but"). On synthetic corrections of 300 essays, every
+  mapped text equals the model's correction apart from whitespace, with no
+  added double spaces.

@@ -141,7 +141,7 @@ optimizer steps.
 | c2 | `c2_train.py --model --fold [--tune] --lr [--r --epochs]` (GPU) | LoRA fine-tuning → `data/study3/corrector/adapters/<run>/` |
 | c3 | `c3_correct.py --model (--adapter <run> \| --prompt zero\|few) --texts` (GPU) | Greedy corrections → `data/study3/corrector/out/` |
 | c4 | `c4_score.py <out file>` | ERRANT agreement with the first annotator → `results/study3/corrector/score_*.json`, edits → `data/study3/corrector/edits/` |
-| c5 | `c5_edits.py --source model\|gold\|ellipse` | Character edits with ERRANT 3 types for stage 1 (`common.char_edits`): the five fold models' corrections, the annotator's corrected texts re-cut the same way, the final model's ELLIPSE corrections → `data/study3/corrector/char_edits_<source>.parquet` |
+| c5 | `c5_edits.py --source model\|gold\|ellipse\|toefl` | Character edits with ERRANT 3 types for stage 1 (`common.char_edits`): the five fold models' corrections, the annotator's corrected texts re-cut the same way, the final model's ELLIPSE and TOEFL 11 corrections (TOEFL 11's moved from the detokenized essays the model saw onto the tokenized ones, `common.map_edits`, D50) → `data/study3/corrector/char_edits_<source>.parquet` |
 | — | `common.py` | Candidate models, the prompt and its chat formatting, the LoRA settings |
 
 ## Running
@@ -166,7 +166,7 @@ done
 
 Production (settings of D39): `c2_train.py --model qwen9b --lr 5e-5 --fold k` and
 `c3_correct.py --adapter <run> --texts fold:k` for k = 0..4, then `--fold all`
-and `--texts ellipse`, then `c5_edits.py` for each source and stage 1 with
+and `--texts ellipse` and `--texts toefl` (detokenized, D50), then `c5_edits.py` for each source and stage 1 with
 the corpus ids of `lib/corpora.py`.
 
 ### From corrections to edits (c5)
