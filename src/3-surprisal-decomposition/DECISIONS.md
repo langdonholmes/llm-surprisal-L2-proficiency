@@ -1232,3 +1232,7 @@ corrector candidate.
 - 2026-10-22 update: Luna's matrix ran in full (zero .537, few .527, zero
   with effort none .545; $0.71). Few-shot helped neither Qwen nor Luna, so
   Sol runs zero-shot only, low vs default effort. Astra is not tested.
+- 2026-10-22 results (F0.5, tuning split): Sol zero-shot .551 at effort low,
+  .540 at default ($4.70). Best prompted settings: Qwen 9B .507, Luna .545,
+  Sol .551; fine-tuned Qwen 9B .635. Reasoning helped neither OpenAI model.
+  Total API cost about $5.50 (list prices). The comparison is complete.
