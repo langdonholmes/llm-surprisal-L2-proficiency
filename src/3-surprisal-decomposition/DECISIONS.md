@@ -1184,3 +1184,23 @@ closest cut is ≤2.5 / 3.0 / 3.5 / ≥4.0 (1,739 / 2,335 / 1,302 / 1,106
 essays), which also falls on whole and half points. The table compares ≤2.5
 with ≥4.0. The bands are the group in stage 1 and only change the per-group
 tables; the shares use the continuous score.
+
+## 2026-10-22 · D42. Rubrics: what the level scores rate, and how it is used
+
+The three level criteria differ in what they rate. W&I's CEFR level is one
+rater's holistic score with no published criteria (Yannakoudakis et al.
+2018). FCE's script score uses the general impression bands (task, content,
+range, accuracy incl. spelling and punctuation, organisation, register,
+effect on the reader), so accuracy is one criterion of seven. ELLIPSE's
+overall score rates language only, and names accuracy in every band; its
+analytic scores separate grammar (morphology, word classes), conventions
+(spelling, punctuation, capitalization), syntax, vocabulary and phraseology
+(`ELL_Rubrics.docx`, ELLIPSE-Corpus repository).
+
+- Results compare the ELLIPSE analytic scores with the ERRANT groups
+  (e.g. conventions with spelling/orth and punctuation, grammar with verb
+  form, noun number, determiners, prepositions).
+- Discussion, read cautiously and not as definitive results: (1) the
+  criterion partly counts errors, so part of the errors' share is built in;
+  (2) FCE's lower errors' share (.81 vs W&I .97) fits a criterion that also
+  rates task achievement and content.
