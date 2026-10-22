@@ -34,7 +34,7 @@ records the design decisions in date order.
 | 4 | `4_spill.py --corpus` (GPU) | Edit-level Shapley split of each own word's surprisal change over the corrections in its window (correction as baseline). |
 | 5 | `5_decompose.py` | The exact splits per unit (four parts; by kind of correction and ERRANT group), shares of the proficiency signal, frequency vs cost, spill by distance, the clean part across corpora, RQ3 features. |
 | 6 | `6_increment.py` | RQ3: ridge ΔR² of the surprisal terms over the error counts. |
-| 7 | — | Reserved for the ELLIPSE analytic scores (D36). |
+| 7 | `7_analytic.py` | ELLIPSE: the clean part and each ERRANT group against the six analytic scores (shares; partial ρ given overall; D44). |
 | 8 | `8_classic.py` | Post hoc. Classic measures on every partially corrected version, Shapley by kind of correction, ρ, share removed, ΔR². |
 | 9 | `9_calibration.py prep\|score\|table` | Mean surprisal of PERSUADE, Wikipedia, W&I, LOCNESS and ELLIPSE documents of 200–600 words. `fetch_wiki.py` drew the Wikipedia samples. |
 | — | `lib/` | `corpora.py` (paths, units), `corrections.py` (applying edits, gold categories), `errant.py` (ERRANT types, groups, buckets), `shapley.py`, `classic.py`, `lm.py` (the instrument), `stats.py`. |

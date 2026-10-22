@@ -1236,3 +1236,21 @@ corrector candidate.
   .540 at default ($4.70). Best prompted settings: Qwen 9B .507, Luna .545,
   Sol .551; fine-tuned Qwen 9B .635. Reasoning helped neither OpenAI model.
   Total API cost about $5.50 (list prices). The comparison is complete.
+
+## 2026-10-22 · D44. Stage 7: ELLIPSE analytic scores against the parts of surprisal
+
+`7_analytic.py` implements D42's comparison on the stage 5 ELLIPSE units
+(model corrections, 6,482 essays). Two views, each part being the clean
+part or one ERRANT group's or bucket's at-site + spill part:
+- shares: each part's share of cov(mean surprisal, score) for all seven
+  scores, with the paired bootstrap difference from overall's share;
+- partial: Spearman of each part with each analytic score, controlling
+  overall (D35's A3), so only the score's own signal beyond overall counts.
+No prompt centring, as in stage 5. 2,000 essay bootstraps.
+
+First results (partial ρ given overall): conventions goes with spelling/orth
+(−.37) and punctuation (−.18) and not with the grammar groups (verb form
+.01); grammar goes with verb form (−.37), noun number (−.22), determiner
+(−.20) and preposition (−.17) and not with spelling (.00) or punctuation
+(.02); syntax's strongest is punctuation (−.14). The clean part's share is
+highest for cohesion (.39) and lowest for conventions (.27); overall .34.
