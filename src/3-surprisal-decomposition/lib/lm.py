@@ -33,7 +33,7 @@ def instrument():
     torch.set_float32_matmul_precision("high")
     predictor, commit = load_predictor(spec, torch.bfloat16, "cuda", 32)
     assert commit == REVISION, commit
-    w = window_int(spec, str(WINDOW))
+    window = window_int(spec, str(WINDOW))
     rows = []
 
     def record(spacy_idx, target_id, pred_logits):
@@ -44,9 +44,9 @@ def instrument():
 
     def score(docs, ids):
         out = []
-        for tid, doc in zip(ids, docs):
+        for text_id, doc in zip(ids, docs):
             rows.clear()
-            predictor(doc, window_size=w)
-            out += [(tid, si, doc[si].idx, doc[si].text, doc[si].is_space, s) for si, s in rows]
+            predictor(doc, window_size=window)
+            out += [(text_id, i, doc[i].idx, doc[i].text, doc[i].is_space, bits) for i, bits in rows]
         return pd.DataFrame(out, columns=["text_id", "spacy_idx", "idx", "text", "is_space", "surprisal_bits"])
     return score

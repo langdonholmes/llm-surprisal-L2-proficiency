@@ -12,10 +12,10 @@ SEED = 42
 def boot(stat, n: int, n_boot: int = 2000, seed: int = SEED):
     """Point estimate and 95% percentile CI of ``stat(index)`` over unit resamples."""
     rng = np.random.default_rng(seed)
-    pt = np.asarray(stat(np.arange(n)), float)
-    bs = np.array([stat(rng.integers(0, n, n)) for _ in range(n_boot)], float)
-    lo, hi = np.nanpercentile(bs, [2.5, 97.5], axis=0)
-    return pt, lo, hi
+    point = np.asarray(stat(np.arange(n)), float)
+    boots = np.array([stat(rng.integers(0, n, n)) for _ in range(n_boot)], float)
+    lo, hi = np.nanpercentile(boots, [2.5, 97.5], axis=0)
+    return point, lo, hi
 
 
 def cov_shares(X, y, **kw):
@@ -23,29 +23,29 @@ def cov_shares(X, y, **kw):
     split the covariance exactly, so their shares add up to 1."""
     X, y = np.asarray(X, float), np.asarray(y, float)
 
-    def sh(i):
-        c = ((X[i] - X[i].mean(0)) * (y[i] - y[i].mean())[:, None]).mean(0)
-        return c / c[0]
-    return boot(sh, len(y), **kw)
+    def shares(idx):
+        cov = ((X[idx] - X[idx].mean(0)) * (y[idx] - y[idx].mean())[:, None]).mean(0)
+        return cov / cov[0]
+    return boot(shares, len(y), **kw)
 
 
 def spearman_cols(X, y):
     """Spearman rho of every column of X with y (no missing values)."""
-    rx = np.apply_along_axis(rankdata, 0, np.asarray(X, float))
-    ry = rankdata(y)
-    rx, ry = rx - rx.mean(0), ry - ry.mean()
-    return (rx * ry[:, None]).sum(0) / np.sqrt((rx ** 2).sum(0) * (ry ** 2).sum())
+    rank_x = np.apply_along_axis(rankdata, 0, np.asarray(X, float))
+    rank_y = rankdata(y)
+    rank_x, rank_y = rank_x - rank_x.mean(0), rank_y - rank_y.mean()
+    return (rank_x * rank_y[:, None]).sum(0) / np.sqrt((rank_x ** 2).sum(0) * (rank_y ** 2).sum())
 
 
 def partial_rank(x, y, z):
     """Partial Spearman: Pearson of rank(x) and rank(y) after regressing out rank(z)."""
-    rx, ry, rz = rankdata(x), rankdata(y), rankdata(z)
-    zc = rz - rz.mean()
+    rank_x, rank_y, rank_z = rankdata(x), rankdata(y), rankdata(z)
+    z_centred = rank_z - rank_z.mean()
 
-    def res(u):
+    def residual(u):
         u = u - u.mean()
-        return u - zc * (zc @ u) / (zc @ zc)
-    return float(np.corrcoef(res(rx), res(ry))[0, 1])
+        return u - z_centred * (z_centred @ u) / (z_centred @ z_centred)
+    return float(np.corrcoef(residual(rank_x), residual(rank_y))[0, 1])
 
 
 # --------------------------------------------------------------------------- #
@@ -71,26 +71,28 @@ def oof(X, y, strata):
     every feature set."""
     from sklearn.model_selection import StratifiedKFold
     X = np.asarray(X, float)
-    P = np.empty((N_REPEATS, len(y)))
-    for r in range(N_REPEATS):
-        folds = StratifiedKFold(N_FOLDS, shuffle=True, random_state=SEED + r).split(X, strata)
-        for j, (tr, te) in enumerate(folds):
-            P[r, te] = ridge(SEED + 1000 * r + j).fit(X[tr], y[tr]).predict(X[te])
-    return P
+    preds = np.empty((N_REPEATS, len(y)))
+    for rep in range(N_REPEATS):
+        folds = StratifiedKFold(N_FOLDS, shuffle=True, random_state=SEED + rep).split(X, strata)
+        for fold, (train, test) in enumerate(folds):
+            preds[rep, test] = ridge(SEED + 1000 * rep + fold).fit(X[train], y[train]).predict(X[test])
+    return preds
 
 
-def r2(P, y):
-    return 1 - ((P - y) ** 2).sum(-1) / ((y - y.mean()) ** 2).sum()
+def r2(preds, y):
+    return 1 - ((preds - y) ** 2).sum(-1) / ((y - y.mean()) ** 2).sum()
 
 
-def delta_r2(Pa, Pb, y, n_boot: int = 2000, seed: int = SEED) -> dict:
+def delta_r2(preds_a, preds_b, y, n_boot: int = 2000, seed: int = SEED) -> dict:
     """R²(a) − R²(b), averaged over repeats, with a unit-bootstrap CI."""
     rng = np.random.default_rng(seed)
-    bs = np.empty(n_boot)
+    boots = np.empty(n_boot)
     for b in range(n_boot):
-        i = rng.integers(0, len(y), len(y))
-        yi = y[i]
-        bs[b] = (((Pb[:, i] - yi) ** 2).sum(-1) - ((Pa[:, i] - yi) ** 2).sum(-1)).mean() / ((yi - yi.mean()) ** 2).sum()
-    d = r2(Pa, y) - r2(Pb, y)
-    return {"delta_r2": float(d.mean()), "lo": float(np.percentile(bs, 2.5)), "hi": float(np.percentile(bs, 97.5)),
-            "share_repeats_gt0": float((d > 0).mean())}
+        idx = rng.integers(0, len(y), len(y))
+        y_boot = y[idx]
+        # (SSE_b - SSE_a) / SST, averaged over the CV repeats
+        boots[b] = (((preds_b[:, idx] - y_boot) ** 2).sum(-1) - ((preds_a[:, idx] - y_boot) ** 2).sum(-1)).mean() \
+            / ((y_boot - y_boot.mean()) ** 2).sum()
+    diffs = r2(preds_a, y) - r2(preds_b, y)
+    return {"delta_r2": float(diffs.mean()), "lo": float(np.percentile(boots, 2.5)),
+            "hi": float(np.percentile(boots, 97.5)), "share_repeats_gt0": float((diffs > 0).mean())}

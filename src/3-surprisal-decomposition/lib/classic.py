@@ -31,108 +31,116 @@ MEASURES = ["bigram_mi", "bigram_dp", "share_mi3", "amod_mi", "dobj_mi", "advmod
 
 def doc_items(docs):
     """Per-token, per-bigram and per-dependency rows; text_id is the doc's meta text_id."""
-    tok, big, dep = [], [], []
+    tokens, bigrams, deps = [], [], []
     for doc in docs:
-        tid = str(doc.user_data["meta"]["text_id"])
+        text_id = str(doc.user_data["meta"]["text_id"])
         prev = None
         for t in doc:
-            tok.append((tid, t.lower_, t.lemma_.lower(), t.pos_, t.is_alpha))
+            tokens.append((text_id, t.lower_, t.lemma_.lower(), t.pos_, t.is_alpha))
             if t.is_alpha and prev is not None and prev.is_alpha and prev.i == t.i - 1:
-                big.append((tid, prev.lower_, t.lower_))
+                bigrams.append((text_id, prev.lower_, t.lower_))
             prev = t
             if t.dep_ in RELS:
-                dep.append((tid, t.dep_, t.head.lemma_.lower(), t.lemma_.lower()))
-    return (pd.DataFrame(tok, columns=["text_id", "lower", "lemma", "pos", "is_alpha"]),
-            pd.DataFrame(big, columns=["text_id", "w1", "w2"]),
-            pd.DataFrame(dep, columns=["text_id", "rel", "h", "d"]))
+                deps.append((text_id, t.dep_, t.head.lemma_.lower(), t.lemma_.lower()))
+    return (pd.DataFrame(tokens, columns=["text_id", "lower", "lemma", "pos", "is_alpha"]),
+            pd.DataFrame(bigrams, columns=["text_id", "w1", "w2"]),
+            pd.DataFrame(deps, columns=["text_id", "rel", "h", "d"]))
 
 
-class Ref:
+class Reference:
     """Lookups into the Dolma tables for a fixed set of query keys."""
 
-    def __init__(self, uni_keys, bi_keys, dep_keys):
+    def __init__(self, unigram_keys, bigram_keys, dep_keys):
         t0 = time.time()
-        self.N, self.uni, self.bi = {}, {}, {}
-        for c in ["a", "b"]:
-            lf = pl.scan_parquet(str(FREQ / f"corpus_{c}" / "3grams.parquet"))
-            self.N[c] = int(lf.select(pl.col("count").sum()).collect().item())
-            keys = pl.DataFrame({"u": sorted(set(uni_keys))}).lazy()
-            u = (lf.join(keys, left_on="token_2", right_on="u", how="semi").group_by("token_2")
-                 .agg(pl.col("count").sum().alias("c")).collect(engine="streaming"))
-            self.uni[c] = dict(zip(u["token_2"].to_list(), u["c"].to_list()))
-            if c == "a":
-                bk = pl.DataFrame(list(set(bi_keys)), schema=["a", "b"], orient="row").lazy()
-                b = (lf.join(bk, left_on=["token_1", "token_2"], right_on=["a", "b"], how="semi")
-                     .group_by(["token_1", "token_2"]).agg(pl.col("count").sum().alias("c"))
+        self.n_tokens, self.unigrams, self.bigrams = {}, {}, {}
+        for corpus in ["a", "b"]:
+            # unigram and bigram counts are summed out of the trigram table
+            table = pl.scan_parquet(str(FREQ / f"corpus_{corpus}" / "3grams.parquet"))
+            self.n_tokens[corpus] = int(table.select(pl.col("count").sum()).collect().item())
+            keys = pl.DataFrame({"u": sorted(set(unigram_keys))}).lazy()
+            counts = (table.join(keys, left_on="token_2", right_on="u", how="semi").group_by("token_2")
+                      .agg(pl.col("count").sum().alias("c")).collect(engine="streaming"))
+            self.unigrams[corpus] = dict(zip(counts["token_2"].to_list(), counts["c"].to_list()))
+            if corpus == "a":
+                keys = pl.DataFrame(list(set(bigram_keys)), schema=["a", "b"], orient="row").lazy()
+                counts = (table.join(keys, left_on=["token_1", "token_2"], right_on=["a", "b"], how="semi")
+                          .group_by(["token_1", "token_2"]).agg(pl.col("count").sum().alias("c"))
+                          .collect(engine="streaming"))
+                self.bigrams["a"] = dict(zip(zip(counts["token_1"].to_list(), counts["token_2"].to_list()),
+                                             counts["c"].to_list()))
+        dep_frame = pl.DataFrame(list(set(dep_keys)), schema=["h", "d", "rel"], orient="row")
+        heads = pl.DataFrame({"h": dep_frame["h"].unique()}).lazy()
+        dependents = pl.DataFrame({"d": dep_frame["d"].unique()}).lazy()
+        # joint (head, dependent, relation) counts and the two marginals, corpora a + b summed
+        self.dep_total, joint, head_counts, dep_counts = 0, {}, {}, {}
+        for corpus in ["a", "b"]:
+            table = pl.scan_parquet(str(FREQ / f"corpus_{corpus}" / "depgrams.parquet"))
+            self.dep_total += int(table.select(pl.col("count").sum()).collect().item())
+            found = (table.join(dep_frame.lazy(), left_on=["head_lemma", "dependent_lemma", "relation"],
+                                right_on=["h", "d", "rel"], how="semi")
+                     .group_by(["head_lemma", "dependent_lemma", "relation"]).agg(pl.col("count").sum())
                      .collect(engine="streaming"))
-                self.bi["a"] = dict(zip(zip(b["token_1"].to_list(), b["token_2"].to_list()), b["c"].to_list()))
-        dk = pl.DataFrame(list(set(dep_keys)), schema=["h", "d", "rel"], orient="row")
-        hs = pl.DataFrame({"h": dk["h"].unique()}).lazy()
-        ds = pl.DataFrame({"d": dk["d"].unique()}).lazy()
-        self.dep_total, J, H, D = 0, {}, {}, {}
-        for c in ["a", "b"]:
-            lf = pl.scan_parquet(str(FREQ / f"corpus_{c}" / "depgrams.parquet"))
-            self.dep_total += int(lf.select(pl.col("count").sum()).collect().item())
-            j = (lf.join(dk.lazy(), left_on=["head_lemma", "dependent_lemma", "relation"],
-                         right_on=["h", "d", "rel"], how="semi")
-                 .group_by(["head_lemma", "dependent_lemma", "relation"]).agg(pl.col("count").sum())
-                 .collect(engine="streaming"))
-            for h, d, r, n in j.iter_rows():
-                J[(h, d, r)] = J.get((h, d, r), 0) + n
-            for col, key, acc in [("head_lemma", hs, H), ("dependent_lemma", ds, D)]:
-                m = (lf.join(key, left_on=col, right_on=key.collect_schema().names()[0], how="semi")
-                     .group_by(col).agg(pl.col("count").sum()).collect(engine="streaming"))
-                for w, n in m.iter_rows():
-                    acc[w] = acc.get(w, 0) + n
-        self.J, self.H, self.D = J, H, D
+            for head, dep, rel, n in found.iter_rows():
+                joint[(head, dep, rel)] = joint.get((head, dep, rel), 0) + n
+            for col, keys, acc in [("head_lemma", heads, head_counts), ("dependent_lemma", dependents, dep_counts)]:
+                found = (table.join(keys, left_on=col, right_on=keys.collect_schema().names()[0], how="semi")
+                         .group_by(col).agg(pl.col("count").sum()).collect(engine="streaming"))
+                for word, n in found.iter_rows():
+                    acc[word] = acc.get(word, 0) + n
+        self.dep_joint, self.dep_head, self.dep_dependent = joint, head_counts, dep_counts
         print(f"Dolma lookups: {time.time() - t0:.0f}s", flush=True)
 
 
-def item_sums(tok, big, dep, ref: Ref) -> pd.DataFrame:
+def item_sums(tokens, bigrams, deps, ref: Reference) -> pd.DataFrame:
     """Per text_id: the sum and count behind every measure."""
-    Na, Nab = ref.N["a"], ref.N["a"] + ref.N["b"]
-    S = {}
-    al = tok[tok.is_alpha]
-    cnt_a = al.lower.map(ref.uni["a"]).fillna(0).to_numpy(float)
-    cnt_lemma = (al.lemma.map(ref.uni["a"]).fillna(0) + al.lemma.map(ref.uni["b"]).fillna(0)).to_numpy(float)
-    g = pd.Series(np.log10(np.clip(cnt_lemma, 1, None) / Nab)).groupby(al.text_id.to_numpy())
-    S["lemma_freq_s"], S["lemma_freq_n"] = g.sum(), g.size()
-    cw = al.pos.isin(CONTENT).to_numpy() & (cnt_a > 0)
-    g = pd.Series(np.log10(cnt_a[cw] / Na)).groupby(al.text_id.to_numpy()[cw])
-    S["content_freq_s"], S["content_freq_n"] = g.sum(), g.size()
+    n_a, n_ab = ref.n_tokens["a"], ref.n_tokens["a"] + ref.n_tokens["b"]
+    sums = {}
+    alpha = tokens[tokens.is_alpha]
+    # word frequencies
+    count_a = alpha.lower.map(ref.unigrams["a"]).fillna(0).to_numpy(float)
+    count_lemma = (alpha.lemma.map(ref.unigrams["a"]).fillna(0)
+                   + alpha.lemma.map(ref.unigrams["b"]).fillna(0)).to_numpy(float)
+    by_text = pd.Series(np.log10(np.clip(count_lemma, 1, None) / n_ab)).groupby(alpha.text_id.to_numpy())
+    sums["lemma_freq_s"], sums["lemma_freq_n"] = by_text.sum(), by_text.size()
+    content = alpha.pos.isin(CONTENT).to_numpy() & (count_a > 0)
+    by_text = pd.Series(np.log10(count_a[content] / n_a)).groupby(alpha.text_id.to_numpy()[content])
+    sums["content_freq_s"], sums["content_freq_n"] = by_text.sum(), by_text.size()
 
-    c12 = np.array([ref.bi["a"].get(k, 0) for k in zip(big.w1, big.w2)], float)
+    # bigram MI and ΔP
+    c12 = np.array([ref.bigrams["a"].get(k, 0) for k in zip(bigrams.w1, bigrams.w2)], float)
     # the tables prune trigrams seen once, so a derived unigram count can fall
     # below the bigram count; floor the marginals at the joint count
-    c1 = np.maximum(big.w1.map(ref.uni["a"]).fillna(0).to_numpy(float), c12)
-    c2 = np.maximum(big.w2.map(ref.uni["a"]).fillna(0).to_numpy(float), c12)
-    att = c12 > 0
-    c12, c1, c2 = c12[att], c1[att], c2[att]
-    b = pd.DataFrame({"text_id": big.text_id.to_numpy()[att], "mi": np.log2(c12 * Na / (c1 * c2)),
-                      "dp": c12 / c1 - (c2 - c12) / (Na - c1)})
-    b["mi3"] = (b.mi >= 3).astype(float)
-    g = b.groupby("text_id")
+    c1 = np.maximum(bigrams.w1.map(ref.unigrams["a"]).fillna(0).to_numpy(float), c12)
+    c2 = np.maximum(bigrams.w2.map(ref.unigrams["a"]).fillna(0).to_numpy(float), c12)
+    attested = c12 > 0
+    c12, c1, c2 = c12[attested], c1[attested], c2[attested]
+    bi = pd.DataFrame({"text_id": bigrams.text_id.to_numpy()[attested], "mi": np.log2(c12 * n_a / (c1 * c2)),
+                       "dp": c12 / c1 - (c2 - c12) / (n_a - c1)})
+    bi["mi3"] = (bi.mi >= 3).astype(float)
+    by_text = bi.groupby("text_id")
     for m, col in [("bigram_mi", "mi"), ("bigram_dp", "dp"), ("share_mi3", "mi3")]:
-        S[f"{m}_s"], S[f"{m}_n"] = g[col].sum(), g.size()
+        sums[f"{m}_s"], sums[f"{m}_n"] = by_text[col].sum(), by_text.size()
 
-    j = np.array([ref.J.get(k, 0) for k in zip(dep.h, dep.d, dep.rel)], float)
-    T = ref.dep_total
-    hm = dep.h.map(ref.H).fillna(0).to_numpy(float)
-    dm = dep.d.map(ref.D).fillna(0).to_numpy(float)
-    ok = j > 0
-    d = pd.DataFrame({"text_id": dep.text_id.to_numpy()[ok], "rel": dep.rel.to_numpy()[ok],
-                      "mi": np.log2((j[ok] / T) / ((hm[ok] / T) * (dm[ok] / T)))})
-    for r in RELS:
-        g = d[d.rel == r].groupby("text_id").mi
-        S[f"{r}_mi_s"], S[f"{r}_mi_n"] = g.sum(), g.size()
-    return pd.DataFrame(S).fillna(0.0)
+    # dependency MI
+    joint = np.array([ref.dep_joint.get(k, 0) for k in zip(deps.h, deps.d, deps.rel)], float)
+    total = ref.dep_total
+    head = deps.h.map(ref.dep_head).fillna(0).to_numpy(float)
+    dependent = deps.d.map(ref.dep_dependent).fillna(0).to_numpy(float)
+    attested = joint > 0
+    dep_mi = pd.DataFrame({"text_id": deps.text_id.to_numpy()[attested], "rel": deps.rel.to_numpy()[attested],
+                           "mi": np.log2((joint[attested] / total)
+                                         / ((head[attested] / total) * (dependent[attested] / total)))})
+    for rel in RELS:
+        by_text = dep_mi[dep_mi.rel == rel].groupby("text_id").mi
+        sums[f"{rel}_mi_s"], sums[f"{rel}_mi_n"] = by_text.sum(), by_text.size()
+    return pd.DataFrame(sums).fillna(0.0)
 
 
 def measures(sums: pd.DataFrame) -> pd.DataFrame:
     """Measures from summed item sums (one row per unit); undefined with no items."""
-    M = pd.DataFrame(index=sums.index)
+    out = pd.DataFrame(index=sums.index)
     for m in MEASURES:
         if m != "dep_mi":
-            M[m] = (sums[f"{m}_s"] / sums[f"{m}_n"]).where(sums[f"{m}_n"] > 0)
-    M["dep_mi"] = M[[f"{r}_mi" for r in RELS]].mean(axis=1, skipna=True)
-    return M[MEASURES]
+            out[m] = (sums[f"{m}_s"] / sums[f"{m}_n"]).where(sums[f"{m}_n"] > 0)
+    out["dep_mi"] = out[[f"{rel}_mi" for rel in RELS]].mean(axis=1, skipna=True)
+    return out[MEASURES]

@@ -36,55 +36,61 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.classic import MEASURES, Ref, doc_items, item_sums, measures  # noqa: E402
-from lib.corpora import B, CORPORA, RES, out  # noqa: E402
+from lib.classic import MEASURES, Reference, doc_items, item_sums, measures  # noqa: E402
+from lib.corpora import CORPORA, ERROR_COUNTS, RESULTS, data_dir  # noqa: E402
 from lib.corrections import apply_edits  # noqa: E402
-from lib.errant import BUCKETS, UNCL  # noqa: E402
+from lib.errant import BUCKETS, UNCLASSIFIED  # noqa: E402
 from lib.stats import boot, cov_shares, delta_r2, oof, spearman_cols  # noqa: E402
 
-PLAYERS = BUCKETS + [UNCL]
+PLAYERS = BUCKETS + [UNCLASSIFIED]
 PHRASEO = ["content-word choice", "multi-word / order"]
 PROCS = 24
 
 
 def version_texts(job):
+    """(mask, text) for every subset of the present buckets; mask bit i = PLAYERS[i]'s edits applied."""
     text, edits, players = job
     out = []
     for r in range(len(players) + 1):
-        for A in combinations(players, r):
-            sub = [[s, e, x] for s, e, x, b in edits if x is None or b in A]
-            out.append((sum(1 << PLAYERS.index(p) for p in A), apply_edits(text, sub)["corrected"]))
+        for applied in combinations(players, r):
+            # flagged spans (repl None) are passed on and stay as written
+            sub = [[s, e, repl] for s, e, repl, bucket in edits if repl is None or bucket in applied]
+            out.append((sum(1 << PLAYERS.index(p) for p in applied), apply_edits(text, sub)["corrected"]))
     return out
 
 
 def build_versions(corpus):
-    O = out(corpus)
-    es = pd.read_parquet(O / "essays.parquet", columns=["text_id", "unit", "y", "text"])
-    es = es[es.y.notna()]
-    ed = pd.read_parquet(O / "edits.parquet").sort_values(["text_id", "k"])
-    ed = ed[ed.text_id.isin(es.text_id)]
-    pres = ed[ed.kind != "flagged"].assign(unit=ed.text_id.map(es.set_index("text_id").unit))
-    pres = pres.groupby("unit").bucket.agg(set)
-    by_t = {t: list(zip(g.s, g.e, g.repl.where(g.kind != "flagged", None), g.bucket)) for t, g in ed.groupby("text_id")}
-    jobs = [(e.text, by_t.get(e.text_id, []), [p for p in PLAYERS if p in pres.get(e.unit, set())])
-            for e in es.itertuples()]
+    """Every version of every learner text, and the distinct version texts (uid -> text)."""
+    out_dir = data_dir(corpus)
+    essays = pd.read_parquet(out_dir / "essays.parquet", columns=["text_id", "unit", "y", "text"])
+    essays = essays[essays.y.notna()]
+    edits = pd.read_parquet(out_dir / "edits.parquet").sort_values(["text_id", "k"])
+    edits = edits[edits.text_id.isin(essays.text_id)]
+    # the buckets present among each unit's corrections (an FCE script pools two texts)
+    present = edits[edits.kind != "flagged"].assign(unit=edits.text_id.map(essays.set_index("text_id").unit))
+    present = present.groupby("unit").bucket.agg(set)
+    by_text = {t: list(zip(g.s, g.e, g.repl.where(g.kind != "flagged", None), g.bucket))
+               for t, g in edits.groupby("text_id")}
+    jobs = [(e.text, by_text.get(e.text_id, []), [p for p in PLAYERS if p in present.get(e.unit, set())])
+            for e in essays.itertuples()]
     with Pool(PROCS) as pool:
-        res = pool.map(version_texts, jobs, chunksize=8)
-    rows, seen = [], {}
-    for e, vs in zip(es.itertuples(), res):
-        for mask, t in vs:
-            rows.append((e.text_id, e.unit, mask, seen.setdefault(t, f"{corpus}{len(seen)}")))
-    V = pd.DataFrame(rows, columns=["text_id", "unit", "mask", "uid"])
-    T = pd.DataFrame({"uid": list(seen.values()), "text": list(seen.keys())})
-    return V, T
+        results = pool.map(version_texts, jobs, chunksize=8)
+    rows, uid_of = [], {}  # identical texts are parsed once
+    for e, versions in zip(essays.itertuples(), results):
+        for mask, text in versions:
+            rows.append((e.text_id, e.unit, mask, uid_of.setdefault(text, f"{corpus}{len(uid_of)}")))
+    versions = pd.DataFrame(rows, columns=["text_id", "unit", "mask", "uid"])
+    texts = pd.DataFrame({"uid": list(uid_of.values()), "text": list(uid_of.keys())})
+    return versions, texts
 
 
-def parse(T):
+def parse(texts):
+    """spaCy parse of every version text, as doc_items tables (in chunks of 4,000 docs)."""
     import spacy
     nlp = spacy.load("en_core_web_lg", disable=["ner"])
     nlp.max_length = 5_000_000
     parts, batch = [], []
-    for doc, meta in nlp.pipe(((t, {"text_id": u}) for u, t in zip(T.uid, T.text)), as_tuples=True,
+    for doc, meta in nlp.pipe(((t, {"text_id": u}) for u, t in zip(texts.uid, texts.text)), as_tuples=True,
                               n_process=PROCS, batch_size=64):
         doc.user_data["meta"] = meta
         batch.append(doc)
@@ -95,47 +101,50 @@ def parse(T):
     return [pd.concat(x, ignore_index=True) for x in zip(*parts)]
 
 
-def shapley(M, full):
+def shapley(values, full):
     """ψ per unit, bucket and measure; v(S) = measure with the buckets in S uncorrected."""
     rows = []
-    for unit, g in M.groupby(level=0):
-        v = g.droplevel(0)
-        F = int(full[unit])
-        P = [i for i in range(len(PLAYERS)) if F >> i & 1]
-        p = len(P)
-        r = {"unit": unit}
+    for unit, g in values.groupby(level=0):
+        v = g.droplevel(0)  # measure by mask
+        full_mask = int(full[unit])
+        present = [i for i in range(len(PLAYERS)) if full_mask >> i & 1]
+        p = len(present)
+        row = {"unit": unit}
         for m in MEASURES:
             vm = v[m]
-            r[f"{m}|orig"], r[f"{m}|corr"] = vm.get(0, np.nan), vm.get(F, np.nan)
+            row[f"{m}|orig"], row[f"{m}|corr"] = vm.get(0, np.nan), vm.get(full_mask, np.nan)
             for i in range(len(PLAYERS)):
-                acc = 0.0
-                if i in P:
-                    others = [q for q in P if q != i]
+                psi = 0.0
+                if i in present:
+                    others = [q for q in present if q != i]
                     for k in range(1 << len(others)):
+                        # S: the subset of the other players left uncorrected; the mask is its complement
                         S = sum(1 << others[t] for t in range(len(others)) if k >> t & 1)
-                        w = factorial(bin(S).count("1")) * factorial(p - bin(S).count("1") - 1) / factorial(p)
-                        acc += w * (vm[F ^ (S | 1 << i)] - vm[F ^ S])
-                r[f"{m}|{PLAYERS[i]}"] = acc
-        rows.append(r)
+                        size = bin(S).count("1")
+                        weight = factorial(size) * factorial(p - size - 1) / factorial(p)
+                        psi += weight * (vm[full_mask ^ (S | 1 << i)] - vm[full_mask ^ S])
+                row[f"{m}|{PLAYERS[i]}"] = psi
+        rows.append(row)
     return pd.DataFrame(rows).set_index("unit")
 
 
-def summarise(corpus, Z, U):
-    y_all = U.y.reindex(Z.index).to_numpy(float)
-    st = y_all.astype(int) if corpus == "wi" else np.digitize(y_all, [0, 23.5, 27.5, 31.5, 40.5])
-    Ub = U.reindex(Z.index)
-    PB = oof(Ub[B], y_all, st)
+def summarise(corpus, psi_units, units):
+    """Per measure: bucket shares, rho before and after correction, share removed, ΔR² over B."""
+    y_all = units.y.reindex(psi_units.index).to_numpy(float)
+    folds = y_all.astype(int) if corpus == "wi" else np.digitize(y_all, [0, 23.5, 27.5, 31.5, 40.5])
+    units = units.reindex(psi_units.index)
+    preds_b = oof(units[ERROR_COUNTS], y_all, folds)
     rows = []
     # surprisal (stage 5): corrected = clean; flagged + residual reported separately
-    X = pd.DataFrame({"orig": Ub.total, "corr": Ub.clean})
+    X = pd.DataFrame({"orig": units.total, "corr": units.clean})
     for b in PLAYERS:
-        X[b] = Ub[f"{b}|total"]
-    X["flagged+residual"] = Ub["flagged|total"] + Ub["residual|total"]
+        X[b] = units[f"{b}|total"]
+    X["flagged+residual"] = units["flagged|total"] + units["residual|total"]
     todo = [("surprisal", X)]
     for m in MEASURES:
-        X = pd.DataFrame({"orig": Z[f"{m}|orig"], "corr": Z[f"{m}|corr"]})
+        X = pd.DataFrame({"orig": psi_units[f"{m}|orig"], "corr": psi_units[f"{m}|corr"]})
         for b in PLAYERS:
-            X[b] = Z[f"{m}|{b}"]
+            X[b] = psi_units[f"{m}|{b}"]
         todo.append((m, X))
     for m, X in todo:
         X = X.assign(**{"phraseological": X[PHRASEO].sum(axis=1),
@@ -145,45 +154,48 @@ def summarise(corpus, Z, U):
         sh = cov_shares(Xo, y)
         rows += [(m, f"share|{c}", sh[0][j], sh[1][j], sh[2][j]) for j, c in enumerate(X.columns) if c != "orig"]
 
-        def rho(i):
-            r = spearman_cols(Xo[i][:, :2], y[i])
+        def rho(idx):
+            r = spearman_cols(Xo[idx][:, :2], y[idx])
             if m == "surprisal":  # a token mean: the exact split gives the share removed
-                c = ((Xo[i][:, :2] - Xo[i][:, :2].mean(0)) * (y[i] - y[i].mean())[:, None]).mean(0)
-                return [r[0], r[1], 1 - c[1] / c[0]]
+                cov = ((Xo[idx][:, :2] - Xo[idx][:, :2].mean(0)) * (y[idx] - y[idx].mean())[:, None]).mean(0)
+                return [r[0], r[1], 1 - cov[1] / cov[0]]
             return [r[0], r[1], 1 - r[1] / r[0]]
-        pt, lo, hi = boot(rho, len(y))
-        rows += [(m, s, pt[j], lo[j], hi[j]) for j, s in enumerate(["rho_orig", "rho_corr", "removed"])]
+        point, lo, hi = boot(rho, len(y))
+        rows += [(m, stat, point[j], lo[j], hi[j]) for j, stat in enumerate(["rho_orig", "rho_corr", "removed"])]
         rows.append((m, "n_units", int(ok.sum()), np.nan, np.nan))
-        d = delta_r2(oof(np.column_stack([Ub[B], X["corr"]]), y_all, st), PB, y_all)
+        d = delta_r2(oof(np.column_stack([units[ERROR_COUNTS], X["corr"]]), y_all, folds), preds_b, y_all)
         rows.append((m, "dR2_corr", d["delta_r2"], d["lo"], d["hi"]))
     return pd.DataFrame(rows, columns=["measure", "stat", "value", "lo", "hi"])
 
 
 def run(corpus):
-    O = out(corpus)
+    out_dir = data_dir(corpus)
     t0 = time.time()
-    if not (O / "version_sums.parquet").exists():
-        V, T = build_versions(corpus)
-        V.to_parquet(O / "versions.parquet", index=False)
-        print(corpus, f"{len(V)} versions, {len(T)} texts, {time.time() - t0:.0f}s", flush=True)
-        tok, big, dep = parse(T)
+    if not (out_dir / "version_sums.parquet").exists():
+        versions, texts = build_versions(corpus)
+        versions.to_parquet(out_dir / "versions.parquet", index=False)
+        print(corpus, f"{len(versions)} versions, {len(texts)} texts, {time.time() - t0:.0f}s", flush=True)
+        tokens, bigrams, deps = parse(texts)
         print(corpus, f"parsed {time.time() - t0:.0f}s", flush=True)
-        ref = Ref(set(tok.lower) | set(tok.lemma), list(zip(big.w1, big.w2)), list(zip(dep.h, dep.d, dep.rel)))
-        item_sums(tok, big, dep, ref).to_parquet(O / "version_sums.parquet")
-    V = pd.read_parquet(O / "versions.parquet")
-    S = pd.read_parquet(O / "version_sums.parquet")
-    agg = V[["unit", "mask", "uid"]].join(S, on="uid").drop(columns="uid").fillna(0.0).groupby(["unit", "mask"]).sum()
-    Z = shapley(measures(agg), V.groupby("unit")["mask"].max())
+        ref = Reference(set(tokens.lower) | set(tokens.lemma), list(zip(bigrams.w1, bigrams.w2)),
+                        list(zip(deps.h, deps.d, deps.rel)))
+        item_sums(tokens, bigrams, deps, ref).to_parquet(out_dir / "version_sums.parquet")
+    versions = pd.read_parquet(out_dir / "versions.parquet")
+    sums = pd.read_parquet(out_dir / "version_sums.parquet")
+    # pool each unit's texts per version, then measures and their Shapley split
+    pooled = (versions[["unit", "mask", "uid"]].join(sums, on="uid").drop(columns="uid").fillna(0.0)
+              .groupby(["unit", "mask"]).sum())
+    psi_units = shapley(measures(pooled), versions.groupby("unit")["mask"].max())
     # units where a measure is undefined in some version are left out for that measure
     gap = max((X[f"{m}|corr"] + X[[f"{m}|{b}" for b in PLAYERS]].sum(axis=1) - X[f"{m}|orig"]).abs().max()
-              for m in MEASURES for X in [Z.filter(like=f"{m}|").dropna()])
+              for m in MEASURES for X in [psi_units.filter(like=f"{m}|").dropna()])
     assert gap < 1e-9, gap
-    Z.to_parquet(O / "classic_units.parquet")
-    U = pd.read_parquet(O / "units.parquet")
-    t = summarise(corpus, Z, U)
-    t.to_csv(RES / f"classic_{corpus}.csv", index=False)
+    psi_units.to_parquet(out_dir / "classic_units.parquet")
+    units = pd.read_parquet(out_dir / "units.parquet")
+    table = summarise(corpus, psi_units, units)
+    table.to_csv(RESULTS / f"classic_{corpus}.csv", index=False)
     print(corpus, f"exact sum gap {gap:.1e}, {time.time() - t0:.0f}s", flush=True)
-    print(t[t.stat.isin(["rho_orig", "rho_corr", "removed", "dR2_corr"])].pivot(
+    print(table[table.stat.isin(["rho_orig", "rho_corr", "removed", "dR2_corr"])].pivot(
         index="measure", columns="stat", values="value").round(3).to_string(), flush=True)
 
 

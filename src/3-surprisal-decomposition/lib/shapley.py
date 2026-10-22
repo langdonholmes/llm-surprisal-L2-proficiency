@@ -25,15 +25,15 @@ from lib.lm import HF_ID, REVISION
 WIN = 8
 BACK = 300
 LOG2E = 1.0 / math.log(2.0)
-_TOK = None
+_TOKENIZER = None
 
 
 def tokenizer():
-    global _TOK
-    if _TOK is None:
+    global _TOKENIZER
+    if _TOKENIZER is None:
         from transformers import AutoTokenizer
-        _TOK = AutoTokenizer.from_pretrained(HF_ID, revision=REVISION)
-    return _TOK
+        _TOKENIZER = AutoTokenizer.from_pretrained(HF_ID, revision=REVISION)
+    return _TOKENIZER
 
 
 def load_model(device="cuda"):
@@ -45,22 +45,23 @@ def load_model(device="cuda"):
 @lru_cache(None)
 def subset_masks(p: int) -> np.ndarray:
     """(2^p, p) bool: bit i of the subset index = player i in the subset."""
-    s = np.arange(2 ** p)
-    return ((s[:, None] >> np.arange(p)[None, :]) & 1).astype(bool)
+    subsets = np.arange(2 ** p)
+    return ((subsets[:, None] >> np.arange(p)[None, :]) & 1).astype(bool)
 
 
 @lru_cache(None)
 def shapley_matrix(p: int) -> np.ndarray:
     """(p, 2^p) matrix W such that phi = W @ v exactly."""
-    M = subset_masks(p)
-    size = M.sum(1)
+    masks = subset_masks(p)
+    size = masks.sum(1)
     W = np.zeros((p, 2 ** p))
     for i in range(p):
-        without = np.flatnonzero(~M[:, i])
-        w = np.array([math.factorial(int(k)) * math.factorial(p - int(k) - 1) / math.factorial(p)
-                      for k in size[without]])
-        W[i, without | (1 << i)] += w
-        W[i, without] -= w
+        # every subset without player i, and its Shapley weight |S|! (p - |S| - 1)! / p!
+        without = np.flatnonzero(~masks[:, i])
+        weight = np.array([math.factorial(int(k)) * math.factorial(p - int(k) - 1) / math.factorial(p)
+                           for k in size[without]])
+        W[i, without | (1 << i)] += weight  # v(S + i) ...
+        W[i, without] -= weight             # ... minus v(S)
     return W
 
 
@@ -70,44 +71,45 @@ def window_of(ids, offsets, text, char, from_start):
     A spaCy token that starts inside a subword is scored at that subword. Near
     the start of an essay the window is shorter, as in the instrument.
     """
-    k = None
+    target = None
     for j, (s, e) in enumerate(offsets):
         piece = text[s:e]
-        if s + len(piece) - len(piece.lstrip()) == char:
-            k = j
+        if s + len(piece) - len(piece.lstrip()) == char:  # the subword's first non-space character
+            target = j
             break
-    if k is None:
-        k = next((j for j, (s, e) in enumerate(offsets) if s <= char < e), None)
-    if k is None or k == 0 or (k < WIN - 1 and not from_start):
+    if target is None:
+        target = next((j for j, (s, e) in enumerate(offsets) if s <= char < e), None)
+    if target is None or target == 0 or (target < WIN - 1 and not from_start):
         return None, None
-    a = max(0, k - WIN + 1)
-    return tuple(ids[a:k + 1]), offsets[a][0]
+    first = max(0, target - WIN + 1)
+    return tuple(ids[first:target + 1]), offsets[first][0]
 
 
-def variants(seg, tgt, edit_sets, from_start):
-    """Windows of ``seg`` with each list of edits applied (target at char ``tgt`` of seg)."""
+def variants(segment, target_char, edit_sets, from_start):
+    """Windows of ``segment`` with each list of edits applied (target at ``target_char`` of segment)."""
     texts, chars = [], []
-    for es in edit_sets:
-        r = apply_edits(seg, [list(e) for e in es])
-        texts.append(r["corrected"])
-        chars.append(int(r["cmap"][tgt]))
+    for edit_set in edit_sets:
+        applied = apply_edits(segment, [list(e) for e in edit_set])
+        texts.append(applied["corrected"])
+        chars.append(int(applied["cmap"][target_char]))  # where the target starts in this version
     enc = tokenizer()(texts, add_special_tokens=False, return_offsets_mapping=True)
-    return [window_of(i, o, t, c, from_start) if c >= 0 else (None, None)
-            for t, c, i, o in zip(texts, chars, enc.input_ids, enc.offset_mapping)]
+    return [window_of(ids, offsets, text, char, from_start) if char >= 0 else (None, None)
+            for text, char, ids, offsets in zip(texts, chars, enc.input_ids, enc.offset_mapping)]
 
 
 @torch.no_grad()
 def surprisal(model, windows, batch=4096, device="cuda") -> np.ndarray:
     """Surprisal (bits) of the last id of each window, batched by window length."""
-    lens = np.array([len(w) for w in windows])
+    lengths = np.array([len(w) for w in windows])
     out = np.empty(len(windows))
-    for L in np.unique(lens):
-        idx = np.flatnonzero(lens == L)
-        for a in range(0, len(idx), batch):
-            i = idx[a:a + batch]
-            x = torch.as_tensor(np.array([windows[j] for j in i]), dtype=torch.long, device=device)
-            pos = torch.arange(L, device=device).expand(len(i), L)
-            logits = model(input_ids=x, position_ids=pos).logits[:, -2].float()
-            lp = torch.log_softmax(logits, -1).gather(1, x[:, -1:])[:, 0]
-            out[i] = (-lp * LOG2E).cpu().numpy()
+    for length in np.unique(lengths):
+        same_length = np.flatnonzero(lengths == length)
+        for start in range(0, len(same_length), batch):
+            rows = same_length[start:start + batch]
+            ids = torch.as_tensor(np.array([windows[j] for j in rows]), dtype=torch.long, device=device)
+            pos = torch.arange(length, device=device).expand(len(rows), length)
+            # the logits at the second-to-last position predict the last id
+            logits = model(input_ids=ids, position_ids=pos).logits[:, -2].float()
+            logp = torch.log_softmax(logits, -1).gather(1, ids[:, -1:])[:, 0]
+            out[rows] = (-logp * LOG2E).cpu().numpy()
     return out

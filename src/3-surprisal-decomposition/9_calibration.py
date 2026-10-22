@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import DATA, ELLIPSE_APPX, RES, SEED, N_BOOT  # noqa: E402
+from lib.corpora import DATA, ELLIPSE_APPENDIX, N_BOOT, RESULTS, SEED  # noqa: E402
 
 CAL = DATA / "calibration"
 N_PER_GROUP = 300
@@ -46,6 +46,7 @@ CONTRASTS = [("persuade_native", "W&I C"), ("persuade_native", "ELLIPSE >= 4"),
 
 
 def truncate(text: str) -> str:
+    """Cut at the last sentence end within MAX_WORDS words (or at MAX_WORDS, if that leaves under MIN_WORDS)."""
     text = text.strip()
     words = list(re.finditer(r"\S+", text))
     if len(words) <= MAX_WORDS:
@@ -55,28 +56,29 @@ def truncate(text: str) -> str:
     return text[:ends[-1] if ends and len(text[:ends[-1]].split()) >= MIN_WORDS else limit]
 
 
-def sample(df: pd.DataFrame, group: str) -> pd.DataFrame:
-    df = df[df.text.str.split().str.len() >= MIN_WORDS]
-    df = df.sample(n=min(N_PER_GROUP, len(df)), random_state=SEED)
-    return df.assign(text=df.text.map(truncate), group=group)
+def sample(docs: pd.DataFrame, group: str) -> pd.DataFrame:
+    docs = docs[docs.text.str.split().str.len() >= MIN_WORDS]
+    docs = docs.sample(n=min(N_PER_GROUP, len(docs)), random_state=SEED)
+    return docs.assign(text=docs.text.map(truncate), group=group)
 
 
 def prep():
-    p = pd.read_csv(CAL / "dl_persuade_train" / "persuade_train.bin",
-                    usecols=["essay_id_comp", "full_text", "holistic_essay_score", "task", "ell_status"])
-    p = p.drop_duplicates("essay_id_comp")
-    p = p[p.task == "Independent"].rename(columns={"essay_id_comp": "text_id", "full_text": "text",
-                                                    "holistic_essay_score": "score"})
-    p["text"] = p.text.str.replace("\r\n", "\n", regex=False).str.replace("\r", "\n", regex=False)
-    frames = [sample(p[p.ell_status == "No"], "persuade_native"),
-              sample(p[(p.ell_status == "No") & (p.score >= 5)], "persuade_native_hi"),
-              sample(p[p.ell_status == "Yes"], "persuade_ell")]
+    persuade = pd.read_csv(CAL / "dl_persuade_train" / "persuade_train.bin",
+                           usecols=["essay_id_comp", "full_text", "holistic_essay_score", "task", "ell_status"])
+    persuade = persuade.drop_duplicates("essay_id_comp")
+    persuade = persuade[persuade.task == "Independent"].rename(
+        columns={"essay_id_comp": "text_id", "full_text": "text", "holistic_essay_score": "score"})
+    persuade["text"] = persuade.text.str.replace("\r\n", "\n", regex=False).str.replace("\r", "\n", regex=False)
+    native = persuade.ell_status == "No"
+    frames = [sample(persuade[native], "persuade_native"),
+              sample(persuade[native & (persuade.score >= 5)], "persuade_native_hi"),
+              sample(persuade[persuade.ell_status == "Yes"], "persuade_ell")]
     for name in ["wiki_old", "wiki_new"]:
-        w = pd.DataFrame([json.loads(x) for x in (CAL / "dl_wiki" / f"{name}.jsonl").read_text().splitlines()])
-        frames.append(sample(w.assign(text_id=name + "-" + w.pageid.astype(str)), name))
-    df = pd.concat(frames, ignore_index=True)[["group", "text_id", "text"]]
-    df.to_parquet(CAL / "docs.parquet", index=False)
-    print(df.groupby("group").size().to_string())
+        wiki = pd.DataFrame([json.loads(x) for x in (CAL / "dl_wiki" / f"{name}.jsonl").read_text().splitlines()])
+        frames.append(sample(wiki.assign(text_id=name + "-" + wiki.pageid.astype(str)), name))
+    docs = pd.concat(frames, ignore_index=True)[["group", "text_id", "text"]]
+    docs.to_parquet(CAL / "docs.parquet", index=False)
+    print(docs.groupby("group").size().to_string())
 
 
 def score():
@@ -85,49 +87,50 @@ def score():
     docs = pd.read_parquet(CAL / "docs.parquet")
     nlp = spacy.load("en_core_web_lg", disable=["ner"])
     nlp.max_length = 5_000_000
-    tok = instrument()(nlp.pipe(docs.text.tolist(), batch_size=64), docs.text_id.tolist())
-    tok.to_parquet(CAL / "tokens.parquet", index=False)
-    print("scored", len(docs), "docs,", len(tok), "tokens")
+    tokens = instrument()(nlp.pipe(docs.text.tolist(), batch_size=64), docs.text_id.tolist())
+    tokens.to_parquet(CAL / "tokens.parquet", index=False)
+    print("scored", len(docs), "docs,", len(tokens), "tokens")
 
 
-def learner(essays: pd.DataFrame, tok: pd.DataFrame) -> pd.DataFrame:
+def learner(essays: pd.DataFrame, tokens: pd.DataFrame) -> pd.DataFrame:
     """Per-essay mean over the tokens of the cut text; essays under MIN_WORDS dropped."""
-    e = essays[essays.text.str.split().str.len() >= MIN_WORDS]
-    lead = e.text.str.len() - e.text.str.lstrip().str.len()
-    cut = pd.Series((lead + e.text.map(lambda t: len(truncate(t)))).to_numpy(), index=e.text_id)
-    t = tok[tok.text_id.isin(cut.index)]
-    t = t[t.idx < t.text_id.map(cut)]
-    return t.groupby("text_id").surprisal_bits.mean().rename("mean_s").to_frame().join(
-        e.set_index("text_id").group)
+    essays = essays[essays.text.str.split().str.len() >= MIN_WORDS]
+    lead = essays.text.str.len() - essays.text.str.lstrip().str.len()  # truncate() strips; offsets do not
+    cut = pd.Series((lead + essays.text.map(lambda t: len(truncate(t)))).to_numpy(), index=essays.text_id)
+    tokens = tokens[tokens.text_id.isin(cut.index)]
+    tokens = tokens[tokens.idx < tokens.text_id.map(cut)]
+    return tokens.groupby("text_id").surprisal_bits.mean().rename("mean_s").to_frame().join(
+        essays.set_index("text_id").group)
 
 
 def table():
     docs = pd.read_parquet(CAL / "docs.parquet")
-    ext = pd.read_parquet(CAL / "tokens.parquet").groupby("text_id").surprisal_bits.mean().rename("mean_s")
-    ext = ext.to_frame().join(docs.set_index("text_id").group)
+    external = pd.read_parquet(CAL / "tokens.parquet").groupby("text_id").surprisal_bits.mean().rename("mean_s")
+    external = external.to_frame().join(docs.set_index("text_id").group)
     wi = pd.read_parquet(DATA / "wi" / "essays.parquet", columns=["text_id", "group", "text"])
     wi["group"] = wi.group.map({"A": "W&I A", "B": "W&I B", "C": "W&I C", "N": "LOCNESS"})
     wi = learner(wi, pd.read_parquet(DATA / "wi" / "tokens_orig.parquet", columns=["text_id", "idx", "surprisal_bits"]))
-    el = pd.read_parquet(ELLIPSE_APPX / "essays.parquet", columns=["text_id", "overall", "text"])
-    el["group"] = pd.cut(el.overall, [0, 2.5, 3.5, 5], labels=ORDER[4:7]).astype(str)
-    el_tok = pd.concat([pd.read_parquet(p, columns=["text_id", "idx", "surprisal_bits"])
-                        for p in sorted((ELLIPSE_APPX / "shards").glob("shard_*.parquet"))])
-    D = pd.concat([ext, wi, learner(el, el_tok)])
+    ellipse = pd.read_parquet(ELLIPSE_APPENDIX / "essays.parquet", columns=["text_id", "overall", "text"])
+    ellipse["group"] = pd.cut(ellipse.overall, [0, 2.5, 3.5, 5], labels=ORDER[4:7]).astype(str)
+    ellipse_tokens = pd.concat([pd.read_parquet(p, columns=["text_id", "idx", "surprisal_bits"])
+                                for p in sorted((ELLIPSE_APPENDIX / "shards").glob("shard_*.parquet"))])
+    all_docs = pd.concat([external, wi, learner(ellipse, ellipse_tokens)])
     rng = np.random.default_rng(SEED)
-    rows, bs = [], {}
+    rows, boots = [], {}
     for g in ORDER:
-        x = D.mean_s[D.group == g].to_numpy()
-        bs[g] = x[rng.integers(0, len(x), (N_BOOT, len(x)))].mean(1)
+        x = all_docs.mean_s[all_docs.group == g].to_numpy()
+        boots[g] = x[rng.integers(0, len(x), (N_BOOT, len(x)))].mean(1)
         rows.append({"group": g, "n": len(x), "mean": x.mean(), "sd": x.std(ddof=1),
-                     "lo": np.percentile(bs[g], 2.5), "hi": np.percentile(bs[g], 97.5)})
-    t = pd.DataFrame(rows)
-    t.to_csv(RES / "calibration.csv", index=False)
-    m = t.set_index("group")["mean"]
-    c = pd.DataFrame([{"a": a, "b": b, "diff": m[a] - m[b], "lo": np.percentile(bs[a] - bs[b], 2.5),
-                       "hi": np.percentile(bs[a] - bs[b], 97.5)} for a, b in CONTRASTS])
-    c.to_csv(RES / "calibration_contrasts.csv", index=False)
-    print(t.round(3).to_string(index=False))
-    print(c.round(3).to_string(index=False))
+                     "lo": np.percentile(boots[g], 2.5), "hi": np.percentile(boots[g], 97.5)})
+    groups = pd.DataFrame(rows)
+    groups.to_csv(RESULTS / "calibration.csv", index=False)
+    means = groups.set_index("group")["mean"]
+    contrasts = pd.DataFrame([{"a": a, "b": b, "diff": means[a] - means[b],
+                               "lo": np.percentile(boots[a] - boots[b], 2.5),
+                               "hi": np.percentile(boots[a] - boots[b], 97.5)} for a, b in CONTRASTS])
+    contrasts.to_csv(RESULTS / "calibration_contrasts.csv", index=False)
+    print(groups.round(3).to_string(index=False))
+    print(contrasts.round(3).to_string(index=False))
 
 
 if __name__ == "__main__":

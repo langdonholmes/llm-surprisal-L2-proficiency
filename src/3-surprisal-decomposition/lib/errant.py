@@ -29,12 +29,12 @@ import re
 
 import pandas as pd
 
-from lib.corpora import RAW
+from lib.corpora import RAW_DIRS
 
 NORM = {"’": "'", "´": "'", "‘": "'", "′": "'", "`": "'", '“': '"', '”': '"', '˝': '"',
         '¨': '"', '„': '"', '『': '"', '』': '"', '–': '-', '—': '-', '―': '-', '¬': '-',
         '、': ',', '，': ',', '：': ':', '；': ';', '？': '?', '！': '!', 'ِ': ' ', '​': ' '}
-NORM = {ord(k): v for k, v in NORM.items()}
+CHAR_NORM = {ord(k): v for k, v in NORM.items()}
 
 GROUP = {
     "SPELL": "spelling/orth", "ORTH": "spelling/orth",
@@ -52,17 +52,17 @@ GROUPS = ["spelling/orth", "verb form/SVA/tense", "determiner", "preposition", "
           "noun number", "word order", "other lexical", "other"]
 
 BUCKET = {}
-for _c in ["SPELL", "ORTH", "PUNCT", "VERB:FORM", "VERB:SVA", "VERB:INFL", "VERB:TENSE", "NOUN:NUM",
+for _cat in ["SPELL", "ORTH", "PUNCT", "VERB:FORM", "VERB:SVA", "VERB:INFL", "VERB:TENSE", "NOUN:NUM",
            "NOUN:INFL", "MORPH", "ADJ:FORM", "CONTR", "NOUN:POSS"]:
-    BUCKET[_c] = "mechanical"
-for _c in ["DET", "PREP", "PRON", "CONJ", "PART"]:
-    BUCKET[_c] = "function word"
-for _c in ["NOUN", "VERB", "ADJ", "ADV"]:
-    BUCKET[_c] = "content-word choice"
-for _c in ["OTHER", "WO"]:
-    BUCKET[_c] = "multi-word / order"
+    BUCKET[_cat] = "mechanical"
+for _cat in ["DET", "PREP", "PRON", "CONJ", "PART"]:
+    BUCKET[_cat] = "function word"
+for _cat in ["NOUN", "VERB", "ADJ", "ADV"]:
+    BUCKET[_cat] = "content-word choice"
+for _cat in ["OTHER", "WO"]:
+    BUCKET[_cat] = "multi-word / order"
 BUCKETS = ["mechanical", "function word", "content-word choice", "multi-word / order"]
-UNCL = "unclassified"
+UNCLASSIFIED = "unclassified"
 OPS = {"M": "missing", "R": "replacement", "U": "unnecessary"}
 
 FILES = {"wi": [(f"json/{p}.json", f"m2/{p}.gold.bea19.m2") for p in
@@ -71,6 +71,7 @@ FILES = {"wi": [(f"json/{p}.json", f"m2/{p}.gold.bea19.m2") for p in
 
 
 def category(errant_type: str) -> str:
+    """The ERRANT type without its operation prefix (R:VERB:SVA -> VERB:SVA)."""
     t = str(errant_type)
     return t[2:] if t[:2] in ("M:", "R:", "U:") else t
 
@@ -80,7 +81,7 @@ def group_of(errant_type: str) -> str:
 
 
 def bucket_of(errant_type: str) -> str:
-    return BUCKET.get(category(errant_type), UNCL)
+    return BUCKET.get(category(errant_type), UNCLASSIFIED)
 
 
 def op_of(errant_type: str, s: int, e: int, repl: str) -> str:
@@ -95,74 +96,76 @@ def read_m2(path):
     """Yield (tokens, edits) per sentence; edits are (s, e, type) for coder 0."""
     for block in path.read_text().strip("\n").split("\n\n"):
         lines = block.split("\n")
-        toks = lines[0][2:].split(" ") if len(lines[0]) > 2 else []
-        eds = []
-        for ln in lines[1:]:
-            f = ln[2:].split("|||")
-            s, e = map(int, f[0].split())
-            if s < 0 or f[1] == "noop" or f[-1] != "0":
+        tokens = lines[0][2:].split(" ") if len(lines[0]) > 2 else []
+        edits = []
+        for line in lines[1:]:
+            fields = line[2:].split("|||")  # "s e", type, correction, required, comment, coder
+            s, e = map(int, fields[0].split())
+            if s < 0 or fields[1] == "noop" or fields[-1] != "0":
                 continue
-            eds.append((s, e, f[1]))
-        yield toks, eds
+            edits.append((s, e, fields[1]))
+        yield tokens, edits
 
 
 def essay_m2_spans(text: str, sents):
     """Consume M2 sentences for one essay; return char-span edits and an ok flag."""
-    t = re.sub(r"\s", " ", text.translate(NORM))
-    out, ok = [], True
+    norm = re.sub(r"\s", " ", text.translate(CHAR_NORM))  # same length as text, every whitespace a space
+    spans, ok = [], True
     for para in re.finditer(r"[^\n]+", text):
-        a, b = para.start(), para.end()
-        if not t[a:b].strip():
+        para_start, para_end = para.start(), para.end()
+        if not norm[para_start:para_end].strip():
             continue
-        p = a
-        while p < b and t[p] == " ":
-            p += 1
-        while p < b:
+        pos = para_start
+        while pos < para_end and norm[pos] == " ":
+            pos += 1
+        # each M2 sentence of the paragraph: match its tokens in order, then place its edits
+        while pos < para_end:
             try:
-                toks, eds = next(sents)
+                tokens, edits = next(sents)
             except StopIteration:
-                return out, False
+                return spans, False
             starts, ends = [], []
-            for tk in toks:
-                while p < b and t[p] == " ":
-                    p += 1
-                if t[p:p + len(tk)] != tk:
+            for token in tokens:
+                while pos < para_end and norm[pos] == " ":
+                    pos += 1
+                if norm[pos:pos + len(token)] != token:
                     ok = False
-                    starts.append(p)
-                    ends.append(p)
+                    starts.append(pos)
+                    ends.append(pos)
                     continue
-                starts.append(p)
-                ends.append(p + len(tk))
-                p += len(tk)
-            while p < b and t[p] == " ":
-                p += 1
-            for s, e, typ in eds:
+                starts.append(pos)
+                ends.append(pos + len(token))
+                pos += len(token)
+            while pos < para_end and norm[pos] == " ":
+                pos += 1
+            for s, e, etype in edits:
                 if s == e:
-                    c = starts[s] if s < len(starts) else ends[-1]
-                    out.append((c, c, typ))
+                    point = starts[s] if s < len(starts) else ends[-1]
+                    spans.append((point, point, etype))
                 else:
-                    out.append((starts[s], ends[e - 1], typ))
-    return out, ok
+                    spans.append((starts[s], ends[e - 1], etype))
+    return spans, ok
 
 
 def match(edit, m2, text):
+    """The types of the M2 edits that a json edit overlaps, in the order of the module docstring."""
     s, e = edit[0], edit[1]
     hits = []
     if s < e:
-        for ms, me, typ in m2:
-            if (ms < me and ms < e and me > s) or (ms == me and s <= ms <= e):
-                hits.append(typ)
+        for m2_s, m2_e, etype in m2:
+            if (m2_s < m2_e and m2_s < e and m2_e > s) or (m2_s == m2_e and s <= m2_s <= e):
+                hits.append(etype)
     else:
-        n = s
-        while n < len(text) and text[n].isspace():
-            n += 1
-        q = s
-        while q > 0 and text[q - 1].isspace():
-            q -= 1
-        tiers = ([t for ms, me, t in m2 if ms == me and ms in (n, s)],
-                 [t for ms, me, t in m2 if ms < me and ms <= n < me],
-                 [t for ms, me, t in m2 if ms < me and me == q])
-        hits = [t for tier in tiers for t in tier]
+        next_char = s  # the next non-space character after the insertion point
+        while next_char < len(text) and text[next_char].isspace():
+            next_char += 1
+        prev_end = s  # just after the last non-space character before it
+        while prev_end > 0 and text[prev_end - 1].isspace():
+            prev_end -= 1
+        tiers = ([etype for m2_s, m2_e, etype in m2 if m2_s == m2_e and m2_s in (next_char, s)],
+                 [etype for m2_s, m2_e, etype in m2 if m2_s < m2_e and m2_s <= next_char < m2_e],
+                 [etype for m2_s, m2_e, etype in m2 if m2_s < m2_e and m2_e == prev_end])
+        hits = [etype for tier in tiers for etype in tier]
     if not hits and s < e and re.sub(r"\s", "", text[s:e]) == re.sub(r"\s", "", edit[2]):
         hits = ["R:ORTH"]  # whitespace-only edit: ERRANT drops it after tokenisation
     return hits
@@ -173,27 +176,27 @@ def edit_types(corpus: str) -> pd.DataFrame:
 
     Flagged (null-replacement) edits get "flagged" in every column.
     """
-    rows, n_ok, n = [], 0, 0
-    for jname, mname in FILES[corpus]:
-        sents = read_m2(RAW[corpus] / mname)
-        for line in open(RAW[corpus] / jname):
-            d = json.loads(line)
-            text = d["text"]
+    rows, n_ok, n_texts = [], 0, 0
+    for json_name, m2_name in FILES[corpus]:
+        sents = read_m2(RAW_DIRS[corpus] / m2_name)
+        for line in open(RAW_DIRS[corpus] / json_name):
+            record = json.loads(line)
+            text = record["text"]
             m2, ok = essay_m2_spans(text, sents)
             n_ok += ok
-            n += 1
-            tid = d["id"] if corpus == "wi" else f"{d['id']}_{d['q']}"
-            edits = [x for c, x in d["edits"] if c == 0][0]
-            for k, ed in enumerate(edits):
-                s, e, r = ed[0], ed[1], ed[2]
-                if r is None:
-                    rows.append((tid, k, s, e, "flagged", "flagged", "flagged", "flagged"))
+            n_texts += 1
+            text_id = record["id"] if corpus == "wi" else f"{record['id']}_{record['q']}"
+            edits = [x for coder, x in record["edits"] if coder == 0][0]
+            for k, edit in enumerate(edits):
+                s, e, repl = edit[0], edit[1], edit[2]
+                if repl is None:
+                    rows.append((text_id, k, s, e, "flagged", "flagged", "flagged", "flagged"))
                     continue
-                h = match(ed, m2, text) if ok else []
-                typ = h[0] if h else "unmapped"
-                rows.append((tid, k, s, e, typ, group_of(typ), bucket_of(typ), op_of(typ, s, e, r)))
+                hits = match(edit, m2, text) if ok else []
+                etype = hits[0] if hits else "unmapped"
+                rows.append((text_id, k, s, e, etype, group_of(etype), bucket_of(etype), op_of(etype, s, e, repl)))
         left = sum(1 for _ in sents)
         if left:
-            print(f"{mname}: {left} M2 sentences left over", flush=True)
-    print(f"{corpus}: {n_ok}/{n} texts walked onto M2 without a token mismatch", flush=True)
+            print(f"{m2_name}: {left} M2 sentences left over", flush=True)
+    print(f"{corpus}: {n_ok}/{n_texts} texts walked onto M2 without a token mismatch", flush=True)
     return pd.DataFrame(rows, columns=["text_id", "k", "s", "e", "errant", "group", "bucket", "op"])

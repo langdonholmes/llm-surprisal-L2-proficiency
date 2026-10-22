@@ -29,19 +29,18 @@ from util.paths import (
     WI_DOCBINS_DIR,
 )
 
-S3 = DATA_DIR / "study3"
-DATA = S3
-RES = RESULTS_DIR / "study3"
+DATA = DATA_DIR / "study3"
+RESULTS = RESULTS_DIR / "study3"
 # The ELLIPSE token surprisal stored by the appendix's GPU pass (appendix/A0_extract.py)
-ELLIPSE_APPX = S3 / "appendix" / "ellipse"
+ELLIPSE_APPENDIX = DATA / "appendix" / "ellipse"
 CORPORA = ["wi", "fce"]
 VARIANTS = {"wi_model": ("wi", "model"), "fce_model": ("fce", "model"),
             "wi_errant": ("wi", "gold"), "fce_errant": ("fce", "gold"),
             "ellipse": ("ellipse", "ellipse")}
 ALL_IDS = CORPORA + list(VARIANTS)
 DOCBINS = {"wi": WI_DOCBINS_DIR, "fce": FCE_DOCBINS_DIR, "ellipse": ELLIPSE_DOCBINS_DIR}
-RAW = {"wi": WI_DIR / "raw" / "wi+locness", "fce": FCE_DIR / "raw" / "fce"}
-LEVEL_Y = {"A": 1.0, "B": 2.0, "C": 3.0}
+RAW_DIRS = {"wi": WI_DIR / "raw" / "wi+locness", "fce": FCE_DIR / "raw" / "fce"}
+CEFR_SCORE = {"A": 1.0, "B": 2.0, "C": 3.0}
 FCE_BANDS = [(1, 23), (24, 27), (28, 31), (32, 40)]
 # overall score 1-5 in halves; the closest the nine values allow to quartiles (DECISIONS D41)
 ELLIPSE_BANDS = [(1.0, 2.5), (3.0, 3.0), (3.5, 3.5), (4.0, 5.0)]
@@ -51,23 +50,24 @@ N_BOOT = 2000
 # RQ3 feature sets (columns of units_<corpus>.parquet, written by 5_decompose.py)
 GROUP_SLUGS = ["spelling_orth", "verb_form_SVA_tense", "determiner", "preposition", "punctuation",
                "noun_number", "word_order", "other_lexical", "other"]
-B = [f"rate_{g}" for g in GROUP_SLUGS] + ["rate_flagged", "log_n"]
+ERROR_COUNTS = [f"rate_{g}" for g in GROUP_SLUGS] + ["rate_flagged", "log_n"]  # "B" in the write-up
 S_COMPACT = ["clean", "cost_mean", "spill_mean"]
 
 
-def base(corpus: str) -> str:
+def base_corpus(corpus: str) -> str:
     """The corpus whose texts an id uses (wi_model -> wi)."""
     return VARIANTS[corpus][0] if corpus in VARIANTS else corpus
 
 
-def out(corpus: str):
-    d = DATA / corpus
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+def data_dir(corpus: str):
+    """data/study3/<corpus id>/, created if missing."""
+    path = DATA / corpus
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def tau() -> float:
-    return json.loads((RES / "threshold.json").read_text())["tau_bits"]
+    return json.loads((RESULTS / "threshold.json").read_text())["tau_bits"]
 
 
 def fce_band(score: float):
@@ -83,9 +83,9 @@ def ellipse_band(score: float) -> str:
 
 def bands(corpus: str) -> list[str]:
     """The level groups of rate_cost, lowest first."""
-    b = base(corpus)
-    if b == "wi":
+    base = base_corpus(corpus)
+    if base == "wi":
         return ["A", "B", "C"]
-    if b == "fce":
+    if base == "fce":
         return [f"{lo}-{hi}" for lo, hi in FCE_BANDS]
     return [f"{lo:g}" if lo == hi else f"{lo:g}-{hi:g}" for lo, hi in ELLIPSE_BANDS]

@@ -48,165 +48,180 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import ALL_IDS, CORPORA, GROUP_SLUGS, N_BOOT, RES, SEED, bands, base, out, tau  # noqa: E402
-from lib.errant import BUCKETS, GROUPS, UNCL  # noqa: E402
+from lib.corpora import (  # noqa: E402
+    ALL_IDS, CORPORA, GROUP_SLUGS, N_BOOT, RESULTS, SEED, bands, base_corpus, data_dir, tau)
+from lib.errant import BUCKETS, GROUPS, UNCLASSIFIED  # noqa: E402
 from lib.stats import boot, cov_shares, partial_rank, spearman_cols  # noqa: E402
 
 PARTS4 = ["clean", "omission", "context", "error_tokens"]
 COMP = ["at_site", "spill"]
-CATS = {"bucket": BUCKETS + [UNCL, "flagged", "residual"], "group": GROUPS + ["flagged", "residual"]}
+CATS = {"bucket": BUCKETS + [UNCLASSIFIED, "flagged", "residual"], "group": GROUPS + ["flagged", "residual"]}
 
 
 def load(corpus):
-    O = out(corpus)
-    a = pd.read_parquet(O / "aligned.parquet")
-    a = a[a.y.notna() | (a.group == "N")].copy()  # learners with a criterion, and LOCNESS
-    a["o"] = a.own & a.aligned
-    a = a.merge(pd.read_parquet(O / "spill.parquet"), on=["text_id", "spacy_idx"], how="left")
-    ed = pd.read_parquet(O / "edits.parquet")
-    return a, ed
+    """Scored original tokens (with their stage 4 spill split) and the edits."""
+    out_dir = data_dir(corpus)
+    tokens = pd.read_parquet(out_dir / "aligned.parquet")
+    tokens = tokens[tokens.y.notna() | (tokens.group == "N")].copy()  # learners with a criterion, and LOCNESS
+    tokens["own_aligned"] = tokens.own & tokens.aligned
+    tokens = tokens.merge(pd.read_parquet(out_dir / "spill.parquet"), on=["text_id", "spacy_idx"], how="left")
+    edits = pd.read_parquet(out_dir / "edits.parquet")
+    return tokens, edits
 
 
 # --------------------------------------------------------------------------- #
 # four-part split
 # --------------------------------------------------------------------------- #
-def split4(a, so, sc):
-    d = np.where(a.o, a[so] - a[sc], 0.0)
-    a = a.assign(d=d)
-    g = a.groupby("unit")
-    U = pd.DataFrame({"group": g.group.first(), "y": g.y.first(), "n": g.size(), "total": g[so].mean()})
-    U["clean"] = a[a.o].groupby("unit")[sc].mean()
-    U["omission"] = a[a.o & (a.gold == "ERR_INS")].groupby("unit").d.sum()
-    U["context"] = a[a.o & (a.gold != "ERR_INS")].groupby("unit").d.sum()
-    x = a[~a.o].join(U.clean, on="unit")
-    U["error_tokens"] = (x[so] - x.clean).groupby(x.unit).sum()
-    U = U.fillna({p: 0.0 for p in PARTS4[1:]})
-    U[PARTS4[1:]] = U[PARTS4[1:]].div(U.n, axis=0)
-    assert np.allclose(U[PARTS4].sum(axis=1), U.total, atol=1e-9)
-    return U
+def split4(tokens, orig_col, corr_col):
+    """Per unit: total = clean + omission + context + error_tokens (module docstring)."""
+    delta = np.where(tokens.own_aligned, tokens[orig_col] - tokens[corr_col], 0.0)
+    tokens = tokens.assign(delta=delta)
+    own = tokens[tokens.own_aligned]
+    by_unit = tokens.groupby("unit")
+    units = pd.DataFrame({"group": by_unit.group.first(), "y": by_unit.y.first(), "n": by_unit.size(),
+                          "total": by_unit[orig_col].mean()})
+    units["clean"] = own.groupby("unit")[corr_col].mean()
+    units["omission"] = own[own.gold == "ERR_INS"].groupby("unit").delta.sum()
+    units["context"] = own[own.gold != "ERR_INS"].groupby("unit").delta.sum()
+    err = tokens[~tokens.own_aligned].join(units.clean, on="unit")
+    units["error_tokens"] = (err[orig_col] - err.clean).groupby(err.unit).sum()
+    units = units.fillna({p: 0.0 for p in PARTS4[1:]})
+    units[PARTS4[1:]] = units[PARTS4[1:]].div(units.n, axis=0)
+    assert np.allclose(units[PARTS4].sum(axis=1), units.total, atol=1e-9)
+    return units
 
 
-def learners(U):
-    L = U[U.y.notna()]
-    return L, L.y.to_numpy(float)
+def learners(units):
+    """The units with a criterion, and the criterion as an array."""
+    rated = units[units.y.notna()]
+    return rated, rated.y.to_numpy(float)
 
 
-def run_split4(a, corpus):
+def run_split4(tokens, corpus):
+    """The four-part split for mean surprisal and the high-token rate: shares, rho, group means."""
     t = tau()
-    a = a.assign(high_o=(a.surprisal_bits > t).astype(float), high_c=(a.s_corr > t).astype(float))
-    rows, means, res = [], [], {}
-    for name, so, sc, k in [("mean_surprisal", "surprisal_bits", "s_corr", 1.0),
-                            ("high_per_1000", "high_o", "high_c", 1000.0)]:
-        U = split4(a, so, sc)
-        U[["total"] + PARTS4] *= k
-        L, y = learners(U)
-        X = L[["total"] + PARTS4].to_numpy(float)
-        sh = cov_shares(X, y)
-        rho = boot(lambda i: spearman_cols(X[i], y[i]), len(y))
-        for j, p in enumerate(["total"] + PARTS4):
-            rows.append({"measure": name, "part": p, "share": sh[0][j], "lo": sh[1][j], "hi": sh[2][j],
-                         "rho": rho[0][j], "rho_lo": rho[1][j], "rho_hi": rho[2][j]})
-        m = U.groupby("group")[["total"] + PARTS4].mean()
-        m["n_units"] = U.groupby("group").size()
-        m.loc["learners"] = list(L[["total"] + PARTS4].mean()) + [len(L)]
-        means.append(m.reset_index().assign(measure=name))
-        if base(corpus) == "wi":  # LOCNESS minus C
-            N, C = U[U.group == "N"], U[U.group == "C"]
+    tokens = tokens.assign(high_o=(tokens.surprisal_bits > t).astype(float), high_c=(tokens.s_corr > t).astype(float))
+    rows, means, native_minus_c = [], [], {}
+    for name, orig_col, corr_col, scale in [("mean_surprisal", "surprisal_bits", "s_corr", 1.0),
+                                            ("high_per_1000", "high_o", "high_c", 1000.0)]:
+        units = split4(tokens, orig_col, corr_col)
+        units[["total"] + PARTS4] *= scale
+        rated, y = learners(units)
+        X = rated[["total"] + PARTS4].to_numpy(float)
+        shares = cov_shares(X, y)
+        rho = boot(lambda idx: spearman_cols(X[idx], y[idx]), len(y))
+        for j, part in enumerate(["total"] + PARTS4):
+            rows.append({"measure": name, "part": part, "share": shares[0][j], "lo": shares[1][j],
+                         "hi": shares[2][j], "rho": rho[0][j], "rho_lo": rho[1][j], "rho_hi": rho[2][j]})
+        group_means = units.groupby("group")[["total"] + PARTS4].mean()
+        group_means["n_units"] = units.groupby("group").size()
+        group_means.loc["learners"] = list(rated[["total"] + PARTS4].mean()) + [len(rated)]
+        means.append(group_means.reset_index().assign(measure=name))
+        if base_corpus(corpus) == "wi":  # LOCNESS minus C, with independent bootstraps of the two groups
+            native, level_c = units[units.group == "N"], units[units.group == "C"]
             rng = np.random.default_rng(SEED)
-            iN = rng.integers(0, len(N), (N_BOOT, len(N)))
-            iC = rng.integers(0, len(C), (N_BOOT, len(C)))
-            res[name] = {}
-            for p in ["total"] + PARTS4:
-                n_, c_ = N[p].to_numpy(), C[p].to_numpy()
-                bs = n_[iN].mean(axis=1) - c_[iC].mean(axis=1)
-                res[name][p] = [float(n_.mean() - c_.mean()), *map(float, np.percentile(bs, [2.5, 97.5]))]
+            boot_native = rng.integers(0, len(native), (N_BOOT, len(native)))
+            boot_c = rng.integers(0, len(level_c), (N_BOOT, len(level_c)))
+            native_minus_c[name] = {}
+            for part in ["total"] + PARTS4:
+                n_vals, c_vals = native[part].to_numpy(), level_c[part].to_numpy()
+                boots = n_vals[boot_native].mean(axis=1) - c_vals[boot_c].mean(axis=1)
+                native_minus_c[name][part] = [float(n_vals.mean() - c_vals.mean()),
+                                              *map(float, np.percentile(boots, [2.5, 97.5]))]
         if name == "mean_surprisal":
-            mean_units = U
-    pd.DataFrame(rows).to_csv(RES / f"split4_{corpus}.csv", index=False)
-    pd.concat(means).to_csv(RES / f"split4_means_{corpus}.csv", index=False)
-    return mean_units, res
+            mean_units = units
+    pd.DataFrame(rows).to_csv(RESULTS / f"split4_{corpus}.csv", index=False)
+    pd.concat(means).to_csv(RESULTS / f"split4_means_{corpus}.csv", index=False)
+    return mean_units, native_minus_c
 
 
 # --------------------------------------------------------------------------- #
 # split by kind of correction
 # --------------------------------------------------------------------------- #
-def credits(a, ed):
+def credits(tokens, edits):
     """Long table: unit, text_id, k (edit; -1 residual, -2 flagged), comp, val, cnt.
 
     Error-token rows carry val = s_orig and cnt = 1, so that the unit's clean
     mean is subtracted once per token when the table is summed.
     """
     rows = []
-    E = a[~a.o]
-    k = np.where(E.site_k >= 0, E.site_k, np.where(E.own, -1, -2))
-    rows += list(zip(E.unit, E.text_id, k, ["at_site"] * len(E), E.surprisal_bits, [1.0] * len(E)))
-    O = a[a.o]
-    for r in O.itertuples():
-        d = r.surprisal_bits - r.s_corr
-        if len(r.gap_k):
-            rows += [(r.unit, r.text_id, g, "at_site", d / len(r.gap_k), 0.0) for g in r.gap_k]
-        elif r.status == "ok":
-            adj = (d - (r.v_none - r.v_all)) / len(r.psi)
-            rows += [(r.unit, r.text_id, e, "spill", p + adj, 0.0) for e, p in zip(r.edit_k, r.psi)]
-        elif len(r.edit_k):
-            rows += [(r.unit, r.text_id, e, "spill", d / len(r.edit_k), 0.0) for e in r.edit_k]
-        else:
-            rows.append((r.unit, r.text_id, -1, "spill", d, 0.0))
-    cr = pd.DataFrame(rows, columns=["unit", "text_id", "k", "comp", "val", "cnt"])
-    cr = cr.merge(ed[["text_id", "k", "group", "bucket"]], on=["text_id", "k"], how="left")
-    for k_, lab in [(-1, "residual"), (-2, "flagged")]:
-        cr.loc[cr.k == k_, ["group", "bucket"]] = lab
-    assert cr.group.notna().all()
-    return cr
+    # tokens inside an error: at site of their correction, else residual (own) or flagged
+    err = tokens[~tokens.own_aligned]
+    edit_k = np.where(err.site_k >= 0, err.site_k, np.where(err.own, -1, -2))
+    rows += list(zip(err.unit, err.text_id, edit_k, ["at_site"] * len(err), err.surprisal_bits, [1.0] * len(err)))
+    own = tokens[tokens.own_aligned]
+    for tok in own.itertuples():
+        delta = tok.surprisal_bits - tok.s_corr
+        if len(tok.gap_k):  # a word is missing right before it: Δ is the missing word's cost, at site
+            rows += [(tok.unit, tok.text_id, g, "at_site", delta / len(tok.gap_k), 0.0) for g in tok.gap_k]
+        elif tok.status == "ok":  # Shapley split, shifted so that the parts sum to the stored Δ
+            shift = (delta - (tok.v_none - tok.v_all)) / len(tok.psi)
+            rows += [(tok.unit, tok.text_id, k, "spill", psi + shift, 0.0) for k, psi in zip(tok.edit_k, tok.psi)]
+        elif len(tok.edit_k):  # too many players: equal split
+            rows += [(tok.unit, tok.text_id, k, "spill", delta / len(tok.edit_k), 0.0) for k in tok.edit_k]
+        else:  # no edit in the window
+            rows.append((tok.unit, tok.text_id, -1, "spill", delta, 0.0))
+    credit = pd.DataFrame(rows, columns=["unit", "text_id", "k", "comp", "val", "cnt"])
+    credit = credit.merge(edits[["text_id", "k", "group", "bucket"]], on=["text_id", "k"], how="left")
+    for k, label in [(-1, "residual"), (-2, "flagged")]:
+        credit.loc[credit.k == k, ["group", "bucket"]] = label
+    assert credit.group.notna().all()
+    return credit
 
 
-def unit_table(a, cr):
-    g = a.groupby("unit")
-    U = pd.DataFrame({"group": g.group.first(), "y": g.y.first(), "n": g.size(), "total": g.surprisal_bits.mean()})
-    U["clean"] = a[a.o].groupby("unit").s_corr.mean()
-    c = cr.join(U.clean, on="unit")
-    c["x"] = c.val - c.cnt * c.clean
+def unit_table(tokens, credit):
+    """Per unit: total, clean, and every <category>|<at_site, spill, total> part, per token."""
+    by_unit = tokens.groupby("unit")
+    units = pd.DataFrame({"group": by_unit.group.first(), "y": by_unit.y.first(), "n": by_unit.size(),
+                          "total": by_unit.surprisal_bits.mean()})
+    units["clean"] = tokens[tokens.own_aligned].groupby("unit").s_corr.mean()
+    credit = credit.join(units.clean, on="unit")
+    credit["x"] = credit.val - credit.cnt * credit.clean  # error tokens: excess over clean
     for by, cats in CATS.items():
-        w = c.groupby(["unit", by, "comp"]).x.sum().unstack([1, 2])
+        wide = credit.groupby(["unit", by, "comp"]).x.sum().unstack([1, 2])
         for cat in cats:
             for comp in COMP:
-                U[f"{cat}|{comp}"] = w.get((cat, comp), pd.Series(0.0, index=U.index)).reindex(U.index).fillna(0.0)
-                U[f"{cat}|{comp}"] /= U.n
-            U[f"{cat}|total"] = U[f"{cat}|at_site"] + U[f"{cat}|spill"]
-        gap = (U.clean + U[[f"{x}|total" for x in cats]].sum(axis=1) - U.total).abs().max()
+                col = f"{cat}|{comp}"
+                units[col] = wide.get((cat, comp), pd.Series(0.0, index=units.index)).reindex(units.index).fillna(0.0)
+                units[col] /= units.n
+            units[f"{cat}|total"] = units[f"{cat}|at_site"] + units[f"{cat}|spill"]
+        gap = (units.clean + units[[f"{x}|total" for x in cats]].sum(axis=1) - units.total).abs().max()
         assert gap < 1e-9, f"{by} split fails by {gap}"
-    return U
+    return units
 
 
-def edit_counts(U, ed, units):
-    ed = ed.assign(unit=ed.text_id.map(units))
+def edit_counts(units, edits, unit_of_text):
+    """Per unit: the number of corrections of each bucket and group, and of flagged spans."""
+    edits = edits.assign(unit=edits.text_id.map(unit_of_text))
     for by, cats in CATS.items():
-        c = ed[ed.kind != "flagged"].groupby(["unit", by]).size().unstack()
+        counts = edits[edits.kind != "flagged"].groupby(["unit", by]).size().unstack()
         for cat in cats[:-2]:
-            U[f"n_{cat}"] = c.get(cat, pd.Series(dtype=float)).reindex(U.index).fillna(0.0)
-    U["n_flagged"] = ed[ed.kind == "flagged"].groupby("unit").size().reindex(U.index).fillna(0.0)
-    U["n_edits"] = U[[f"n_{b}" for b in BUCKETS + [UNCL]]].sum(axis=1)
-    return U
+            units[f"n_{cat}"] = counts.get(cat, pd.Series(dtype=float)).reindex(units.index).fillna(0.0)
+    units["n_flagged"] = edits[edits.kind == "flagged"].groupby("unit").size().reindex(units.index).fillna(0.0)
+    units["n_edits"] = units[[f"n_{b}" for b in BUCKETS + [UNCLASSIFIED]]].sum(axis=1)
+    return units
 
 
-def shares(U):
-    L, y = learners(U)
+def shares(units):
+    """Each part's share of cov(total, criterion), by bucket and by group, and the edit-rate reference."""
+    rated, y = learners(units)
     rows = []
     for by, cats in CATS.items():
         cols = ["total", "clean"] + [f"{c}|{p}" for c in cats for p in COMP + ["total"]]
-        sh = cov_shares(L[cols].to_numpy(float), y)
+        sh = cov_shares(rated[cols].to_numpy(float), y)
         rows += [{"cut": by, "col": c, "share": sh[0][j], "lo": sh[1][j], "hi": sh[2][j]}
                  for j, c in enumerate(cols) if c != "total"]
     # reference: each bucket's share of cov(edit rate, criterion), and of all edits
-    R = L[[f"n_{b}" for b in BUCKETS + [UNCL]]].div(L.n, axis=0)
-    sh = cov_shares(np.column_stack([R.sum(axis=1), R]), y)
-    tot = L[[f"n_{b}" for b in BUCKETS + [UNCL]]].sum()
+    buckets = BUCKETS + [UNCLASSIFIED]
+    rates = rated[[f"n_{b}" for b in buckets]].div(rated.n, axis=0)
+    sh = cov_shares(np.column_stack([rates.sum(axis=1), rates]), y)
+    n_edits = rated[[f"n_{b}" for b in buckets]].sum()
     rows += [{"cut": "edit_rate", "col": b, "share": sh[0][j + 1], "lo": sh[1][j + 1], "hi": sh[2][j + 1],
-              "share_of_edits": tot.iloc[j] / tot.sum()} for j, b in enumerate(BUCKETS + [UNCL])]
+              "share_of_edits": n_edits.iloc[j] / n_edits.sum()} for j, b in enumerate(buckets)]
     return pd.DataFrame(rows)
 
 
-def rate_cost(U, corpus):
+def rate_cost(units, corpus):
     """Errors per 100 tokens and bits per error, token-pooled within level.
 
     pooled part_L = sum(part * n) / sum(n) = rate_L * cost_L exactly. The
@@ -214,131 +229,136 @@ def rate_cost(U, corpus):
     rule d(rc) = dr * mean(c) + mean(r) * dc. CIs by resampling units within level.
     rate_all and cost_all pool all learners.
     """
-    L, _ = learners(U)
-    lv = bands(corpus)
-    lo_, hi_ = lv[0], lv[-1]
-    idx = {g: np.flatnonzero((L.group == g).to_numpy()) for g in lv}
-    n = L.n.to_numpy(float)
+    rated, _ = learners(units)
+    levels = bands(corpus)
+    rows_of = {g: np.flatnonzero((rated.group == g).to_numpy()) for g in levels}
+    n = rated.n.to_numpy(float)
     rng = np.random.default_rng(SEED)
-    boots = [{g: rng.choice(idx[g], len(idx[g])) for g in lv} for _ in range(N_BOOT)]
+    boots = [{g: rng.choice(rows_of[g], len(rows_of[g])) for g in levels} for _ in range(N_BOOT)]
     rows = []
     for by, cats in CATS.items():
         for cat in cats[:-2]:
-            ne = L[f"n_{cat}"].to_numpy(float)
+            n_err = rated[f"n_{cat}"].to_numpy(float)
             for comp in COMP + ["total"]:
-                x = L[f"{cat}|{comp}"].to_numpy(float) * n
+                bits = rated[f"{cat}|{comp}"].to_numpy(float) * n  # the unit's summed bits of this part
 
                 def stats(sel):
-                    r = np.array([ne[sel[g]].sum() / n[sel[g]].sum() for g in lv])
-                    c = np.array([x[sel[g]].sum() / max(ne[sel[g]].sum(), 1e-12) for g in lv])
-                    d = r[0] * c[0] - r[-1] * c[-1]
-                    return r, c, (r[0] - r[-1]) * (c[0] + c[-1]) / 2 / d, c[-1] - c[0]
+                    rate = np.array([n_err[sel[g]].sum() / n[sel[g]].sum() for g in levels])
+                    cost = np.array([bits[sel[g]].sum() / max(n_err[sel[g]].sum(), 1e-12) for g in levels])
+                    diff = rate[0] * cost[0] - rate[-1] * cost[-1]  # lowest minus highest level
+                    rate_share = (rate[0] - rate[-1]) * (cost[0] + cost[-1]) / 2 / diff
+                    return rate, cost, rate_share, cost[-1] - cost[0]
 
-                r, c, rs, dc = stats(idx)
-                bs = [stats(s) for s in boots]
-                row = {"cut": by, "cat": cat, "comp": comp, **{f"rate_{g}": 100 * v for g, v in zip(lv, r)},
-                       **{f"cost_{g}": v for g, v in zip(lv, c)}, "rate_share": rs,
-                       "cost_change": dc, "rate_all": 100 * ne.sum() / n.sum(), "cost_all": x.sum() / ne.sum()}
-                row["rate_share_lo"], row["rate_share_hi"] = np.nanpercentile([b[2] for b in bs], [2.5, 97.5])
-                row["cost_change_lo"], row["cost_change_hi"] = np.percentile([b[3] for b in bs], [2.5, 97.5])
+                rate, cost, rate_share, cost_change = stats(rows_of)
+                boot_stats = [stats(sel) for sel in boots]
+                row = {"cut": by, "cat": cat, "comp": comp, **{f"rate_{g}": 100 * v for g, v in zip(levels, rate)},
+                       **{f"cost_{g}": v for g, v in zip(levels, cost)}, "rate_share": rate_share,
+                       "cost_change": cost_change, "rate_all": 100 * n_err.sum() / n.sum(),
+                       "cost_all": bits.sum() / n_err.sum()}
+                row["rate_share_lo"], row["rate_share_hi"] = np.nanpercentile([b[2] for b in boot_stats], [2.5, 97.5])
+                row["cost_change_lo"], row["cost_change_hi"] = np.percentile([b[3] for b in boot_stats], [2.5, 97.5])
                 rows.append(row)
-    return pd.DataFrame(rows).assign(low=lo_, high=hi_)
+    return pd.DataFrame(rows).assign(low=levels[0], high=levels[-1])
 
 
-def spill_decay(a, ed):
+def spill_decay(tokens, edits):
     """Mean spill per (edit, own word) pair by distance in words (5 = 5 or more)."""
-    O = a[a.o & (a.status == "ok")]
-    O = O[O.gap_k.map(len) == 0]
-    adj = (O.surprisal_bits - O.s_corr - (O.v_none - O.v_all)) / O.psi.map(len)
-    p = pd.DataFrame({"unit": np.repeat(O.unit.to_numpy(), O.psi.map(len)),
-                      "text_id": np.repeat(O.text_id.to_numpy(), O.psi.map(len)),
-                      "k": np.concatenate(O.edit_k.to_numpy()),
-                      "d": np.clip(np.concatenate(O.dist.to_numpy()), 1, 5),
-                      "psi": np.concatenate(O.psi.to_numpy()) + np.repeat(adj.to_numpy(), O.psi.map(len))})
-    p = p.merge(ed[["text_id", "k", "bucket"]], on=["text_id", "k"])
+    own = tokens[tokens.own_aligned & (tokens.status == "ok")]
+    own = own[own.gap_k.map(len) == 0]
+    n_players = own.psi.map(len)
+    shift = (own.surprisal_bits - own.s_corr - (own.v_none - own.v_all)) / n_players
+    # one row per (own word, player) pair
+    pairs = pd.DataFrame({"unit": np.repeat(own.unit.to_numpy(), n_players),
+                          "text_id": np.repeat(own.text_id.to_numpy(), n_players),
+                          "k": np.concatenate(own.edit_k.to_numpy()),
+                          "d": np.clip(np.concatenate(own.dist.to_numpy()), 1, 5),
+                          "psi": np.concatenate(own.psi.to_numpy()) + np.repeat(shift.to_numpy(), n_players)})
+    pairs = pairs.merge(edits[["text_id", "k", "bucket"]], on=["text_id", "k"])
     rows = []
-    for b in ["all"] + BUCKETS:
-        q = p if b == "all" else p[p.bucket == b]
-        s = q.groupby(["unit", "d"]).psi.agg(["sum", "size"]).unstack(fill_value=0)
-        S, N = s["sum"].to_numpy(float), s["size"].to_numpy(float)
-        pt, lo, hi = boot(lambda i: S[i].sum(0) / N[i].sum(0), len(S))
-        rows += [{"bucket": b, "d": d, "n_pairs": int(N[:, j].sum()), "mean_spill": pt[j], "lo": lo[j], "hi": hi[j]}
-                 for j, d in enumerate(s["sum"].columns)]
+    for bucket in ["all"] + BUCKETS:
+        sel = pairs if bucket == "all" else pairs[pairs.bucket == bucket]
+        by_unit = sel.groupby(["unit", "d"]).psi.agg(["sum", "size"]).unstack(fill_value=0)
+        sums, sizes = by_unit["sum"].to_numpy(float), by_unit["size"].to_numpy(float)
+        point, lo, hi = boot(lambda idx: sums[idx].sum(0) / sizes[idx].sum(0), len(sums))
+        rows += [{"bucket": bucket, "d": d, "n_pairs": int(sizes[:, j].sum()), "mean_spill": point[j],
+                  "lo": lo[j], "hi": hi[j]} for j, d in enumerate(by_unit["sum"].columns)]
     return pd.DataFrame(rows)
 
 
-def clean_assoc(U, corpus):
+def clean_assoc(units, corpus):
     """The clean part against the criterion: rho, and partial rho given the
     plain share of corrected tokens (ERR_TOK or ERR_INS)."""
-    L, y = learners(U)
+    rated, y = learners(units)
     rows = []
-    for m in ["mean_surprisal", "high_per_1000"]:
-        x, z = L[f"{m}|clean"].to_numpy(float), L.corr_share.to_numpy(float)
-        xt = L[f"{m}|total"].to_numpy(float)
+    for measure in ["mean_surprisal", "high_per_1000"]:
+        clean = rated[f"{measure}|clean"].to_numpy(float)
+        corr_share = rated.corr_share.to_numpy(float)
+        total = rated[f"{measure}|total"].to_numpy(float)
 
-        def st(i):
-            return [spearman_cols(xt[i, None], y[i])[0], spearman_cols(x[i, None], y[i])[0],
-                    partial_rank(x[i], y[i], z[i])]
-        pt, lo, hi = boot(st, len(y))
-        for j, s in enumerate(["rho_total", "rho_clean", "partial_clean"]):
-            rows.append({"corpus": corpus, "measure": m, "stat": s, "value": pt[j], "lo": lo[j], "hi": hi[j],
-                         "n": len(y)})
+        def stat(idx):
+            return [spearman_cols(total[idx, None], y[idx])[0], spearman_cols(clean[idx, None], y[idx])[0],
+                    partial_rank(clean[idx], y[idx], corr_share[idx])]
+        point, lo, hi = boot(stat, len(y))
+        for j, name in enumerate(["rho_total", "rho_clean", "partial_clean"]):
+            rows.append({"corpus": corpus, "measure": measure, "stat": name, "value": point[j], "lo": lo[j],
+                         "hi": hi[j], "n": len(y)})
     return rows
 
 
-def rq3_features(U):
+def rq3_features(units):
     """Error counts (B) and the compact surprisal terms (S) per unit."""
-    for g, s in zip(GROUPS, GROUP_SLUGS):
-        U[f"rate_{s}"] = U[f"n_{g}"] / U.n
-    U["rate_flagged"] = U.n_flagged / U.n
-    U["log_n"] = np.log(U.n)
-    k = U[[f"n_{g}" for g in GROUPS]].sum(axis=1)
-    at = sum(U[f"{g}|at_site"] for g in GROUPS) * U.n
-    sp = sum(U[f"{g}|spill"] for g in GROUPS) * U.n
-    U["cost_mean"] = (at / k).where(k > 0)
-    U["spill_mean"] = (sp / k).where(k > 0)
-    return U
+    for g, slug in zip(GROUPS, GROUP_SLUGS):
+        units[f"rate_{slug}"] = units[f"n_{g}"] / units.n
+    units["rate_flagged"] = units.n_flagged / units.n
+    units["log_n"] = np.log(units.n)
+    n_err = units[[f"n_{g}" for g in GROUPS]].sum(axis=1)
+    at_site = sum(units[f"{g}|at_site"] for g in GROUPS) * units.n
+    spill = sum(units[f"{g}|spill"] for g in GROUPS) * units.n
+    units["cost_mean"] = (at_site / n_err).where(n_err > 0)
+    units["spill_mean"] = (spill / n_err).where(n_err > 0)
+    return units
 
 
 def run(corpus):
-    a, ed = load(corpus)
-    U4, n_minus_c = run_split4(a, corpus)
-    U = unit_table(a, credits(a, ed))
-    assert np.allclose(U.clean, U4.clean.reindex(U.index)) and np.allclose(U.total, U4.total.reindex(U.index))
-    units = a.groupby("text_id").unit.first()
-    U = edit_counts(U, ed, units)
-    U["corr_share"] = a.gold.isin(["ERR_TOK", "ERR_INS"]).groupby(a.unit).mean().reindex(U.index)
+    tokens, edits = load(corpus)
+    units4, native_minus_c = run_split4(tokens, corpus)
+    units = unit_table(tokens, credits(tokens, edits))
+    assert np.allclose(units.clean, units4.clean.reindex(units.index))
+    assert np.allclose(units.total, units4.total.reindex(units.index))
+    unit_of_text = tokens.groupby("text_id").unit.first()
+    units = edit_counts(units, edits, unit_of_text)
+    units["corr_share"] = tokens.gold.isin(["ERR_TOK", "ERR_INS"]).groupby(tokens.unit).mean().reindex(units.index)
     t = tau()
-    U["mean_surprisal|total"], U["mean_surprisal|clean"] = U.total, U.clean
-    U["high_per_1000|total"] = (a.surprisal_bits > t).groupby(a.unit).mean() * 1000
-    U["high_per_1000|clean"] = (a.s_corr[a.o] > t).groupby(a.unit[a.o]).mean() * 1000
-    U = rq3_features(U)
-    U.to_parquet(out(corpus) / "units.parquet")
+    own = tokens[tokens.own_aligned]
+    units["mean_surprisal|total"], units["mean_surprisal|clean"] = units.total, units.clean
+    units["high_per_1000|total"] = (tokens.surprisal_bits > t).groupby(tokens.unit).mean() * 1000
+    units["high_per_1000|clean"] = (own.s_corr > t).groupby(own.unit).mean() * 1000
+    units = rq3_features(units)
+    units.to_parquet(data_dir(corpus) / "units.parquet")
 
-    shares(U).to_csv(RES / f"shares_{corpus}.csv", index=False)
+    shares(units).to_csv(RESULTS / f"shares_{corpus}.csv", index=False)
     cols = list(dict.fromkeys(["total", "clean"] + [f"{c}|{p}" for by in CATS for c in CATS[by]
                                                     for p in COMP + ["total"]]))
-    m = U.groupby("group")[cols].mean().T
-    m["learners"] = learners(U)[0][cols].mean()
-    m.to_csv(RES / f"means_{corpus}.csv")
-    rate_cost(U, corpus).to_csv(RES / f"rate_cost_{corpus}.csv", index=False)
-    spill_decay(a, ed).to_csv(RES / f"spill_decay_{corpus}.csv", index=False)
-    O = a[a.o]
-    st = O.status.value_counts().to_dict()
-    L = learners(U)[0]
-    e = ed[ed.text_id.map(units).isin(L.index)]
-    checks = {"n_units": int(len(L)), "n_by_group": U.groupby("group").size().to_dict(),
-              "n_texts": int(a[a.y.notna()].text_id.nunique()), "n_tokens": int(a.y.notna().sum()),
-              "n_corrections": int((e.kind != "flagged").sum()), "n_flagged": int((e.kind == "flagged").sum()),
-              "unmapped_share": float((e.errant[e.kind != "flagged"] == "unmapped").mean()),
-              "spill_status": st,
-              "own_words_with_gap": int((O.gap_k.map(len) > 0).sum()),
-              "v_none_vs_stored_median_abs": float((O.v_none - O.surprisal_bits).abs().median()),
-              "v_all_vs_s_corr_median_abs": float((O.v_all - O.s_corr).abs().median()),
-              "native_minus_C": n_minus_c}
-    (RES / f"decompose_{corpus}.json").write_text(json.dumps(checks, indent=2, default=float))
+    means = units.groupby("group")[cols].mean().T
+    means["learners"] = learners(units)[0][cols].mean()
+    means.to_csv(RESULTS / f"means_{corpus}.csv")
+    rate_cost(units, corpus).to_csv(RESULTS / f"rate_cost_{corpus}.csv", index=False)
+    spill_decay(tokens, edits).to_csv(RESULTS / f"spill_decay_{corpus}.csv", index=False)
+    rated = learners(units)[0]
+    rated_edits = edits[edits.text_id.map(unit_of_text).isin(rated.index)]
+    corrections = rated_edits[rated_edits.kind != "flagged"]
+    checks = {"n_units": int(len(rated)), "n_by_group": units.groupby("group").size().to_dict(),
+              "n_texts": int(tokens[tokens.y.notna()].text_id.nunique()), "n_tokens": int(tokens.y.notna().sum()),
+              "n_corrections": len(corrections), "n_flagged": int((rated_edits.kind == "flagged").sum()),
+              "unmapped_share": float((corrections.errant == "unmapped").mean()),
+              "spill_status": own.status.value_counts().to_dict(),
+              "own_words_with_gap": int((own.gap_k.map(len) > 0).sum()),
+              "v_none_vs_stored_median_abs": float((own.v_none - own.surprisal_bits).abs().median()),
+              "v_all_vs_s_corr_median_abs": float((own.v_all - own.s_corr).abs().median()),
+              "native_minus_C": native_minus_c}
+    (RESULTS / f"decompose_{corpus}.json").write_text(json.dumps(checks, indent=2, default=float))
     print(corpus, json.dumps(checks, default=float), flush=True)
-    return clean_assoc(U, corpus)
+    return clean_assoc(units, corpus)
 
 
 def main():
@@ -346,13 +366,13 @@ def main():
     ap.add_argument("--corpus", nargs="+", choices=ALL_IDS, default=CORPORA,
                     help="corpus ids (default: the main analysis, wi and fce)")
     args = ap.parse_args()
-    RES.mkdir(parents=True, exist_ok=True)
+    RESULTS.mkdir(parents=True, exist_ok=True)
     if args.corpus == CORPORA:
         rows = [r for c in CORPORA for r in run(c)]
-        pd.DataFrame(rows).to_csv(RES / "clean_assoc.csv", index=False)
+        pd.DataFrame(rows).to_csv(RESULTS / "clean_assoc.csv", index=False)
         return
     for c in args.corpus:
-        pd.DataFrame(run(c)).to_csv(RES / f"clean_assoc_{c}.csv", index=False)
+        pd.DataFrame(run(c)).to_csv(RESULTS / f"clean_assoc_{c}.csv", index=False)
 
 
 if __name__ == "__main__":

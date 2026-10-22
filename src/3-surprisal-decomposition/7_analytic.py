@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import RES, out  # noqa: E402
+from lib.corpora import RESULTS, data_dir  # noqa: E402
 from lib.errant import BUCKETS, GROUPS  # noqa: E402
 from lib.stats import boot, partial_rank  # noqa: E402
 from util.paths import ELLIPSE_DIR  # noqa: E402
@@ -35,53 +35,56 @@ CUTS = {"bucket": BUCKETS, "group": GROUPS}
 
 
 def load():
-    U = pd.read_parquet(out("ellipse") / "units.parquet")
-    m = pd.read_csv(ELLIPSE_DIR / "ELLIPSE_Final_github.csv", usecols=["text_id_kaggle"] + [s.title() for s in SCORES])
-    m = m.rename(columns={"text_id_kaggle": "unit", **{s.title(): s for s in SCORES}}).set_index("unit")
-    U = U.join(m, how="inner")
-    assert len(U) == 6482 and np.allclose(U.y, U.overall)
-    return U
+    units = pd.read_parquet(data_dir("ellipse") / "units.parquet")
+    scores = pd.read_csv(ELLIPSE_DIR / "ELLIPSE_Final_github.csv",
+                         usecols=["text_id_kaggle"] + [s.title() for s in SCORES])
+    scores = scores.rename(columns={"text_id_kaggle": "unit", **{s.title(): s for s in SCORES}}).set_index("unit")
+    units = units.join(scores, how="inner")
+    assert len(units) == 6482 and np.allclose(units.y, units.overall)
+    return units
 
 
-def shares(U):
+def shares(units):
     rows = []
-    Y = U[SCORES].to_numpy(float)
+    Y = units[SCORES].to_numpy(float)
     for cut, cats in CUTS.items():
         cols = ["clean"] + [f"{c}|total" for c in cats]
-        X = U[["total"] + cols].to_numpy(float)
+        X = units[["total"] + cols].to_numpy(float)
 
-        def st(i):
-            x, y = X[i] - X[i].mean(0), Y[i] - Y[i].mean(0)
-            c = x.T @ y  # parts x scores
-            sh = c[1:] / c[0]
-            return np.concatenate([sh.ravel(), (sh - sh[:, :1]).ravel()])
-        pt, lo, hi = boot(st, len(U))
-        k = len(cols) * len(SCORES)
-        for j, (col, s) in enumerate((col, s) for col in cols for s in SCORES):
-            rows.append({"cut": cut, "col": col.removesuffix("|total"), "score": s,
-                         "share": pt[j], "lo": lo[j], "hi": hi[j],
-                         "diff_vs_overall": pt[k + j], "diff_lo": lo[k + j], "diff_hi": hi[k + j]})
+        def stat(idx):
+            x, y = X[idx] - X[idx].mean(0), Y[idx] - Y[idx].mean(0)
+            cov = x.T @ y  # (total + parts) x scores
+            share = cov[1:] / cov[0]
+            # every share, then every share minus overall's (column 0)
+            return np.concatenate([share.ravel(), (share - share[:, :1]).ravel()])
+        point, lo, hi = boot(stat, len(units))
+        k = len(cols) * len(SCORES)  # where the differences start
+        for j, (col, score) in enumerate((col, score) for col in cols for score in SCORES):
+            rows.append({"cut": cut, "col": col.removesuffix("|total"), "score": score,
+                         "share": point[j], "lo": lo[j], "hi": hi[j],
+                         "diff_vs_overall": point[k + j], "diff_lo": lo[k + j], "diff_hi": hi[k + j]})
     return pd.DataFrame(rows)
 
 
-def partials(U):
+def partials(units):
     rows = []
-    z = U.overall.to_numpy(float)
+    z = units.overall.to_numpy(float)
     for cut, cats in CUTS.items():
         cols = ["clean"] + [f"{c}|total" for c in cats]
-        X = U[cols].to_numpy(float)
-        for s in SCORES[1:]:
-            y = U[s].to_numpy(float)
-            pt, lo, hi = boot(lambda i: [partial_rank(X[i, j], y[i], z[i]) for j in range(len(cols))], len(U))
-            rows += [{"cut": cut, "col": c.removesuffix("|total"), "score": s, "partial": pt[j], "lo": lo[j],
+        X = units[cols].to_numpy(float)
+        for score in SCORES[1:]:
+            y = units[score].to_numpy(float)
+            point, lo, hi = boot(lambda idx: [partial_rank(X[idx, j], y[idx], z[idx]) for j in range(len(cols))],
+                                 len(units))
+            rows += [{"cut": cut, "col": c.removesuffix("|total"), "score": score, "partial": point[j], "lo": lo[j],
                       "hi": hi[j]} for j, c in enumerate(cols)]
     return pd.DataFrame(rows)
 
 
 def main():
-    U = load()
-    shares(U).to_csv(RES / "analytic_shares_ellipse.csv", index=False)
-    partials(U).to_csv(RES / "analytic_partial_ellipse.csv", index=False)
+    units = load()
+    shares(units).to_csv(RESULTS / "analytic_shares_ellipse.csv", index=False)
+    partials(units).to_csv(RESULTS / "analytic_partial_ellipse.csv", index=False)
 
 
 if __name__ == "__main__":

@@ -21,25 +21,25 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from lib.corpora import ELLIPSE_APPX, RES  # noqa: E402
+from lib.corpora import ELLIPSE_APPENDIX, RESULTS  # noqa: E402
 
 TAU_PCT = 90
 
 
 def main():
-    RES.mkdir(parents=True, exist_ok=True)
+    RESULTS.mkdir(parents=True, exist_ok=True)
     split = pd.read_csv(HERE / "appendix" / "split.csv", dtype={"text_id": str})
-    essays = pd.read_parquet(ELLIPSE_APPX / "essays.parquet", columns=["text_id", "overall"])
+    essays = pd.read_parquet(ELLIPSE_APPENDIX / "essays.parquet", columns=["text_id", "overall"])
     dev = essays.merge(split[split.split == "dev"], on="text_id")
     cut = float(dev.overall.quantile(2 / 3))
     ref = set(dev.text_id[dev.overall >= cut])
-    toks = pd.concat([pd.read_parquet(p, columns=["text_id", "is_space", "surprisal_bits"])
-                      for p in sorted((ELLIPSE_APPX / "shards").glob("shard_*.parquet"))])
-    s = toks.surprisal_bits[toks.text_id.isin(ref) & ~toks.is_space]
-    tau = float(np.percentile(s, TAU_PCT))
+    tokens = pd.concat([pd.read_parquet(p, columns=["text_id", "is_space", "surprisal_bits"])
+                        for p in sorted((ELLIPSE_APPENDIX / "shards").glob("shard_*.parquet"))])
+    ref_bits = tokens.surprisal_bits[tokens.text_id.isin(ref) & ~tokens.is_space]
+    tau = float(np.percentile(ref_bits, TAU_PCT))
     res = {"tau_bits": tau, "tau_percentile": TAU_PCT, "dev_top_tertile_overall_cut": cut,
-           "n_reference_essays": len(ref), "n_reference_tokens": int(len(s))}
-    (RES / "threshold.json").write_text(json.dumps(res, indent=2))
+           "n_reference_essays": len(ref), "n_reference_tokens": int(len(ref_bits))}
+    (RESULTS / "threshold.json").write_text(json.dumps(res, indent=2))
     print(json.dumps(res, indent=2))
 
 

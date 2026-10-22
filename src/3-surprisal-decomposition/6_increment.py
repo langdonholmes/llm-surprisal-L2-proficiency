@@ -25,15 +25,16 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import B, CORPORA, RES, S_COMPACT, SEED, out  # noqa: E402
+from lib.corpora import CORPORA, ERROR_COUNTS, RESULTS, S_COMPACT, SEED, data_dir  # noqa: E402
 from lib.stats import delta_r2, oof, r2, ridge  # noqa: E402
 
-MODELS = {"B": B, "B + S compact": B + S_COMPACT, "B + mean surprisal": B + ["total"],
+MODELS = {"B": ERROR_COUNTS, "B + S compact": ERROR_COUNTS + S_COMPACT, "B + mean surprisal": ERROR_COUNTS + ["total"],
           "mean surprisal": ["total"], "S compact": S_COMPACT}
 
 
-def strata(U, corpus):
-    y = U.y.to_numpy()
+def strata(units, corpus):
+    """CV strata: CEFR level (W&I) or score band (FCE)."""
+    y = units.y.to_numpy()
     return y.astype(int) if corpus == "wi" else np.digitize(y, [0, 23.5, 27.5, 31.5, 40.5])
 
 
@@ -41,24 +42,24 @@ def main():
     warnings.filterwarnings("ignore", category=FutureWarning)
     rows, coefs = [], []
     for corpus in CORPORA:
-        U = pd.read_parquet(out(corpus) / "units.parquet")
-        U = U[U.y.notna()]
-        y = U.y.to_numpy(float)
-        st = strata(U, corpus)
-        P = {m: oof(U[f], y, st) for m, f in MODELS.items()}
-        for m in MODELS:
-            row = {"corpus": corpus, "model": m, "n": len(y), "r2": float(r2(P[m], y).mean())}
-            if m.startswith("B +"):
-                row.update(delta_r2(P[m], P["B"], y))
+        units = pd.read_parquet(data_dir(corpus) / "units.parquet")
+        units = units[units.y.notna()]
+        y = units.y.to_numpy(float)
+        folds = strata(units, corpus)
+        preds = {model: oof(units[features], y, folds) for model, features in MODELS.items()}
+        for model in MODELS:
+            row = {"corpus": corpus, "model": model, "n": len(y), "r2": float(r2(preds[model], y).mean())}
+            if model.startswith("B +"):
+                row.update(delta_r2(preds[model], preds["B"], y))
             rows.append(row)
-        for m in ["B", "B + S compact"]:
-            fit = ridge(SEED).fit(U[MODELS[m]].to_numpy(float), y)
-            coefs += [{"corpus": corpus, "model": m, "feature": f, "coef_sd": c}
-                      for f, c in zip(MODELS[m], fit[-1].coef_)]
-    t = pd.DataFrame(rows)
-    t.to_csv(RES / "increment.csv", index=False)
-    pd.DataFrame(coefs).to_csv(RES / "coefs.csv", index=False)
-    print(t.round(4).to_string())
+        for model in ["B", "B + S compact"]:
+            fit = ridge(SEED).fit(units[MODELS[model]].to_numpy(float), y)
+            coefs += [{"corpus": corpus, "model": model, "feature": f, "coef_sd": c}
+                      for f, c in zip(MODELS[model], fit[-1].coef_)]
+    table = pd.DataFrame(rows)
+    table.to_csv(RESULTS / "increment.csv", index=False)
+    pd.DataFrame(coefs).to_csv(RESULTS / "coefs.csv", index=False)
+    print(table.round(4).to_string())
 
 
 if __name__ == "__main__":
