@@ -31,11 +31,15 @@ spill by distance, the clean part against the criterion, and the RQ3 features.
 Writes results/study3/: split4_<corpus>.csv, split4_means_<corpus>.csv,
 shares_<corpus>.csv, means_<corpus>.csv, rate_cost_<corpus>.csv,
 spill_decay_<corpus>.csv, clean_assoc.csv, decompose_<corpus>.json; and
-data/study3/<corpus>/units.parquet.
+data/study3/<corpus>/units.parquet. With --corpus (any ids of
+``lib.corpora``, e.g. the corrector variants), the same per id, and
+clean_assoc_<id>.csv.
 
     python src/3-surprisal-decomposition/5_decompose.py
+    python src/3-surprisal-decomposition/5_decompose.py --corpus wi_model fce_model
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -44,7 +48,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import CORPORA, GROUP_SLUGS, N_BOOT, RES, SEED, out, tau  # noqa: E402
+from lib.corpora import ALL_IDS, CORPORA, FCE_BANDS, GROUP_SLUGS, N_BOOT, RES, SEED, base, out, tau  # noqa: E402
 from lib.errant import BUCKETS, GROUPS, UNCL  # noqa: E402
 from lib.stats import boot, cov_shares, partial_rank, spearman_cols  # noqa: E402
 
@@ -106,7 +110,7 @@ def run_split4(a, corpus):
         m["n_units"] = U.groupby("group").size()
         m.loc["learners"] = list(L[["total"] + PARTS4].mean()) + [len(L)]
         means.append(m.reset_index().assign(measure=name))
-        if corpus == "wi":  # LOCNESS minus C
+        if base(corpus) == "wi":  # LOCNESS minus C
             N, C = U[U.group == "N"], U[U.group == "C"]
             rng = np.random.default_rng(SEED)
             iN = rng.integers(0, len(N), (N_BOOT, len(N)))
@@ -211,7 +215,9 @@ def rate_cost(U, corpus):
     rate_all and cost_all pool all learners.
     """
     L, _ = learners(U)
-    lv = ["A", "B", "C"] if corpus == "wi" else [f"{a}-{b}" for a, b in [(1, 23), (24, 27), (28, 31), (32, 40)]]
+    if base(corpus) == "ellipse":
+        raise NotImplementedError("ELLIPSE score bands for rate_cost are not decided yet")
+    lv = ["A", "B", "C"] if base(corpus) == "wi" else [f"{a}-{b}" for a, b in FCE_BANDS]
     lo_, hi_ = lv[0], lv[-1]
     idx = {g: np.flatnonzero((L.group == g).to_numpy()) for g in lv}
     n = L.n.to_numpy(float)
@@ -338,9 +344,17 @@ def run(corpus):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--corpus", nargs="+", choices=ALL_IDS, default=CORPORA,
+                    help="corpus ids (default: the main analysis, wi and fce)")
+    args = ap.parse_args()
     RES.mkdir(parents=True, exist_ok=True)
-    rows = [r for c in CORPORA for r in run(c)]
-    pd.DataFrame(rows).to_csv(RES / "clean_assoc.csv", index=False)
+    if args.corpus == CORPORA:
+        rows = [r for c in CORPORA for r in run(c)]
+        pd.DataFrame(rows).to_csv(RES / "clean_assoc.csv", index=False)
+        return
+    for c in args.corpus:
+        pd.DataFrame(run(c)).to_csv(RES / f"clean_assoc_{c}.csv", index=False)
 
 
 if __name__ == "__main__":
