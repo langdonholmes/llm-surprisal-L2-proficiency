@@ -37,7 +37,25 @@ cf <- rd("coefs.csv")
 cl <- both("classic")
 cal <- rd("calibration.csv")
 calc <- rd("calibration_contrasts.csv")
-CORP <- c(wi = "W&I", fce = "FCE")
+# the corrector and ELLIPSE (Sections 3.9, 4.6-4.8)
+MC <- c(wi = "wi_model", fce = "fce_model", ellipse = "ellipse")
+CKm <- map(MC, ~ js(paste0("decompose_", .x, ".json")))
+shm <- map_dfr(MC, ~ rd(paste0("shares_", .x, ".csv")), .id = "corpus")
+cam <- map_dfr(MC, ~ rd(paste0("clean_assoc_", .x, ".csv")) |> select(-corpus), .id = "corpus")
+rce <- rd("rate_cost_ellipse.csv")
+incm <- map_dfr(MC, ~ rd(paste0("increment_", .x, ".csv")) |> select(-corpus), .id = "corpus")
+cle <- rd("classic_ellipse.csv")
+EL <- function(stat, m) filter(cle, measure == m, stat == !!stat)
+val <- rd("validation_shares.csv")
+anp <- rd("analytic_partial_ellipse.csv")
+ans <- rd("analytic_shares_ellipse.csv")
+CS <- function(f) js(file.path("corrector", paste0("score_", f, ".json")))
+FOLDS <- map(0:4, ~ CS(sprintf("qwen9b_f%d_lr5e-05_r16_e2__fold%d", .x, .x)))
+POOL <- map(c(tp = "tp", fp = "fp", fn = "fn"), \(k) sum(map_dbl(FOLDS, k)))
+f05 <- function(tp, fp, fn) {p <- tp / (tp + fp); r <- tp / (tp + fn); 1.25 * p * r / (0.25 * p + r)}
+VAL <- function(c, col) filter(val, corpus == c, col == !!col)
+VALD <- function(c, col) with(VAL(c, col), pci(`model-errant`, `model-errant_lo`, `model-errant_hi`))
+CORP <- c(wi = "W&I", fce = "FCE", ellipse = "ELLIPSE")
 BUCKETS <- c("mechanical", "function word", "content-word choice", "multi-word / order")
 
 f2 <- function(x) sprintf("%.2f", x)
@@ -117,6 +135,25 @@ essays and `r format(CK$fce$n_corrections, big.mark = ",")` in FCE, plus
 `r format(CK$fce$n_flagged, big.mark = ",")` spans that the annotator flagged
 without correcting. Both corpora are licensed for research without
 redistribution, so no learner text is quoted.
+
+**ELLIPSE** holds `r format(CKm$ellipse$n_units, big.mark = ",")` essays by
+English learners in US grades 8–12, written to 44 prompts (Crossley et al.
+2023), each rated on an
+overall scale of 1–5 in half points and on six analytic scales (cohesion,
+syntax, vocabulary, phraseology, grammar, conventions). The criterion is the
+overall score. The essays have no expert corrections, so a fine-tuned
+corrector supplies them (Section 3.9). For the tables by level, the score is
+cut into four bands, ≤ 2.5, 3, 3.5 and ≥ 4
+(`r paste(format(unlist(CKm$ellipse$n_by_group), big.mark = ","), collapse = ", ")`
+essays), the closest the nine score values allow to quartiles (D41).
+
+The three criteria rate different things (D42). W&I's CEFR level is one
+rater's holistic judgement with no published criteria. FCE's score follows
+general impression bands that weigh accuracy (including spelling and
+punctuation) alongside task achievement, content, organisation, register and
+the effect on the reader. ELLIPSE's overall score rates language only, and
+names accuracy at every band. Its grammar scale covers morphology and word
+classes, and its conventions scale spelling, punctuation and capitalisation.
 
 ## 3.2 Instrument
 
@@ -247,6 +284,27 @@ log frequency of content words, and Study 2's lemma frequency. Each essay is
 rebuilt with every subset of its kinds of correction applied, re-parsed, and
 re-measured. Exact Shapley values over the kinds of correction then split
 each measure's original-minus-corrected difference.
+
+## 3.9 The corrector
+
+ELLIPSE's corrections come from a language model fine-tuned to correct as the
+W&I and FCE annotators do (D36, D38). Qwen3.5-9B-Base is trained with LoRA
+(Hu et al. 2022; rank 16, all linear layers, 2 epochs) on whole essays, with
+the minimal-edit instruction and the original text as input and the first
+annotator's corrected text as output. The learning rate (5 × 10⁻⁵) was chosen
+on a tuning split of 462 texts, and the results were flat across the three
+values tried (D39). Corrections are decoded greedily.
+
+To check the corrector against the annotators on the same essays, the W&I
+and FCE texts are split into five folds, and each fold is corrected by a model
+trained on the other four. Every W&I and FCE text is therefore corrected by a
+model that has not seen it. A sixth model, trained on all of them, corrects
+ELLIPSE. A model's corrected text is turned into edits by ERRANT, and so that
+the comparison with the annotators differs only in the corrections, the
+annotators' corrected texts are cut into edits the same way (*re-cut gold*,
+D40). Both then run through the same decomposition as the main analysis.
+ELLIPSE's tables by level use the score bands of Section 3.1, and its
+cross-validation is stratified by them.
 
 # 4. Results
 
@@ -654,6 +712,173 @@ unseen lemmas, which the measure counts at the frequency floor. On W&I the
 measure has no association with level
 (ρ = `r f2(CL("wi", "lemma_freq", "rho_orig")$value)`).
 
+## 4.6 The corrector against the annotators
+
+```{r}
+#| label: t-corrector
+row <- function(name, d) tibble(corrector = name, texts = format(d$n_texts, big.mark = ","), precision = d$precision, recall = d$recall,
+                                       `F0.5 [95% CI]` = ci2(d$f05, d$f05_ci[1], d$f05_ci[2], 3),
+                                       `edits per 100 tokens` = round(d$edits_per_100_tokens_hyp, 1))
+pool <- with(POOL, tibble(corrector = "Qwen3.5-9B, fine-tuned (five folds pooled)",
+                          texts = format(sum(map_dbl(FOLDS, "n_texts")), big.mark = ","), precision = tp / (tp + fp), recall = tp / (tp + fn),
+                          `F0.5 [95% CI]` = sprintf("%.3f (folds %.3f–%.3f)", f05(tp, fp, fn),
+                                                    min(map_dbl(FOLDS, "f05")), max(map_dbl(FOLDS, "f05"))),
+                          `edits per 100 tokens` = round(mean(map_dbl(FOLDS, "edits_per_100_tokens_hyp")), 1)))
+bind_rows(pool,
+          row("Qwen3.5-2B, fine-tuned, fold 0", CS("qwen2b_f0_lr0.0002_r16_e2__fold0")),
+          row("Qwen3.5-9B, prompted, zero-shot, fold 0", CS("qwen9b_prompt-zero__fold0")),
+          row("Qwen3.5-9B, prompted, three examples, fold 0", CS("qwen9b_prompt-few__fold0"))) |>
+  kable(digits = 3, caption = sprintf("Table 13. Agreement of the corrector with the first annotator on held-out W&I and FCE texts (ERRANT span-level F0.5). The annotators make %.1f edits per 100 tokens", FOLDS[[1]]$edits_per_100_tokens_ref))
+```
+
+The fine-tuned corrector agrees with the first annotator at F0.5 =
+`r sprintf("%.2f", with(POOL, f05(tp, fp, fn)))` on texts it was not trained
+on (Table 13). About two thirds of its edits match an annotator's edit, and it
+finds about half of the annotator's edits. It makes fewer edits than the
+annotators, so it errs towards leaving text as written. Fine-tuning gains
+about .13 over prompting the same model, and the 2B model of the same family
+is .04 behind.
+
+::: {.callout-note collapse="true"}
+## Side comparison: prompting OpenAI models
+
+```{r}
+#| label: t-openai
+tibble(f = c("qwen9b_prompt-zero__tune", "gpt-6-luna_prompt-zero_eff-none__tune", "gpt-6-luna_prompt-zero_eff-default__tune",
+             "gpt-6.1-sol_prompt-zero_eff-low__tune", "gpt-6.1-sol_prompt-zero_eff-default__tune",
+             "qwen9b_f0_tune_lr5e-05_r16_e2__tune"),
+       corrector = c("Qwen3.5-9B, prompted", "gpt-6-luna, reasoning none", "gpt-6-luna, reasoning default",
+                     "gpt-6.1-sol, reasoning low", "gpt-6.1-sol, reasoning default", "Qwen3.5-9B, fine-tuned")) |>
+  mutate(d = map(f, CS), precision = map_dbl(d, "precision"), recall = map_dbl(d, "recall"),
+         `F0.5 [95% CI]` = map_chr(d, ~ ci2(.x$f05, .x$f05_ci[1], .x$f05_ci[2], 3))) |>
+  select(-f, -d) |>
+  kable(digits = 3, caption = "Zero-shot prompting of two OpenAI models with the same instruction, on the 462 tuning texts (D43). Three examples in the prompt and more reasoning helped neither")
+```
+
+Prompted OpenAI models reach F0.5 of about .55 on the tuning texts, a little
+above the prompted Qwen model and well below the fine-tuned one.
+:::
+
+```{r}
+#| label: t-validation
+cats <- c(errors = "all corrections (1 − clean)", mechanical = "mechanical", `function word` = "function word",
+          `content-word choice` = "content-word choice", `multi-word / order` = "multi-word / order",
+          flagged = "flagged", unclassified = "unclassified", residual = "residual")
+val |>
+  filter(col %in% names(cats)) |>
+  transmute(corpus = CORP[corpus], component = factor(cats[col], cats),
+            `annotator, json edits` = pc(gold), `annotator, re-cut` = pc(errant), model = pc(model),
+            `model − re-cut, points [95% CI]` = pci(`model-errant`, `model-errant_lo`, `model-errant_hi`)) |>
+  arrange(desc(corpus), component) |>
+  kable(caption = "Table 14. Share of the proficiency signal in mean surprisal (%) by source of the corrections, on the same W&I and FCE units. The difference is paired (the same 2,000 unit resamples)")
+```
+
+Table 14 runs the decomposition of Section 4.3 with each source of
+corrections. Cutting the annotators' corrections into edits the ERRANT way
+moves the errors' share from `r pc(VAL("wi", "errors")$gold)`% to
+`r pc(VAL("wi", "errors")$errant)`% on W&I and from
+`r pc(VAL("fce", "errors")$gold)`% to `r pc(VAL("fce", "errors")$errant)`% on
+FCE. Most of the change is the flagged spans, which have no corrected text
+and so become part of the clean text. Against the re-cut annotators, the corrector's errors'
+share differs by `r VALD("wi", "errors")` points on W&I and
+`r VALD("fce", "errors")` on FCE. It gives slightly more of the signal to mechanical corrections and
+less to content-word choice and multi-word corrections, the errors it finds
+least often. The corrector's corrections thus reproduce the annotators'
+decomposition to within a few points.
+
+## 4.7 A third corpus: ELLIPSE
+
+```{r}
+#| label: t-ellipse
+er_share <- function(c) with(filter(shm, corpus == c, cut == "bucket", col == "clean"), pci(1 - share, 1 - hi, 1 - lo))
+bshare <- function(c, b) with(filter(shm, corpus == c, cut == "bucket", col == paste0(b, "|total")), pci(share, lo, hi))
+clean_rho <- function(c, s) with(filter(cam, corpus == c, measure == "mean_surprisal", stat == s), ci2(value, lo, hi))
+dr2 <- function(c) with(filter(incm, corpus == c, model == "B + S compact"), ci2(100 * delta_r2, 100 * lo, 100 * hi, 1))
+column <- function(c) c(units = format(CKm[[c]]$n_units, big.mark = ","),
+                        `edits per 100 tokens` = sprintf("%.1f", 100 * CKm[[c]]$n_corrections / CKm[[c]]$n_tokens),
+                        `errors' share, %` = er_share(c),
+                        set_names(map_chr(BUCKETS, \(b) bshare(c, b)), paste0("share, ", BUCKETS, ", %")),
+                        `ρ, clean part` = clean_rho(c, "rho_clean"),
+                        `partial ρ, clean part` = clean_rho(c, "partial_clean"),
+                        `ΔR², B + S over B (points)` = dr2(c))
+map(set_names(names(MC), CORP[names(MC)]), column) |>
+  as_tibble() |>
+  mutate(measure = names(column("wi")), .before = 1) |>
+  kable(caption = "Table 15. The decomposition with the corrector's corrections in all three corpora: share of the proficiency signal in mean surprisal [95% CI], the clean part against the criterion, and the increment of the surprisal terms over the corrector's error counts")
+```
+
+With the corrector's corrections in all three corpora (Table 15), the errors
+carry `r pc(1 - filter(shm, corpus == "ellipse", cut == "bucket", col == "clean")$share)`% of the ELLIPSE signal, against
+`r pc(1 - filter(shm, corpus == "wi", cut == "bucket", col == "clean")$share)`%
+on W&I and `r pc(1 - filter(shm, corpus == "fce", cut == "bucket", col == "clean")$share)`%
+on FCE. The ELLIPSE essays have more errors per token than either, mostly
+spelling, punctuation and capitalisation. Mechanical corrections carry about
+as much of the signal as in FCE, and function words about half as much as in
+the other corpora. As before, the fall in error rate accounts for
+`r pc(min(filter(rce, cut == "bucket", comp == "total", !is.na(rate_share))$rate_share))`–`r pc(max(filter(rce, cut == "bucket", comp == "total", !is.na(rate_share))$rate_share))`%
+of each kind's difference between the lowest and highest bands.
+
+The rest of the ELLIPSE signal is in the clean text. Its correlation with the
+score is `r f2(filter(cam, corpus == "ellipse", measure == "mean_surprisal", stat == "rho_clean")$value)`,
+against `r f2(filter(cam, corpus == "wi", measure == "mean_surprisal", stat == "rho_clean")$value)`
+on W&I and `r f2(filter(cam, corpus == "fce", measure == "mean_surprisal", stat == "rho_clean")$value)`
+on FCE, and the surprisal terms add
+`r sprintf("%.1f", 100 * filter(incm, corpus == "ellipse", model == "B + S compact")$delta_r2)`
+points of R² to the error counts, four to ten times as much as on FCE and W&I.
+On the corrected essays, mean surprisal adds
+`r ci2(100 * EL("dR2_corr", "surprisal")$value, 100 * EL("dR2_corr", "surprisal")$lo, 100 * EL("dR2_corr", "surprisal")$hi, 1)`
+points of R² to the error counts, more than any classic measure (at most
+`r sprintf("%.1f", 100 * max(filter(cle, stat == "dR2_corr", measure != "surprisal")$value))`). The classic
+measures behave as on W&I and FCE. Correction removes
+`r pc(EL("removed", "bigram_mi")$value)`% of bigram MI's association and
+`r pc(EL("removed", "share_mi3")$value)`% of the high-MI share's, about half
+of dependency MI's and ΔP's, and none of content-word frequency's.
+
+## 4.8 The ELLIPSE analytic scores
+
+```{r}
+#| label: t-analytic
+SC <- c("conventions", "grammar", "syntax", "vocabulary", "phraseology", "cohesion")
+anp |>
+  filter(cut == "group" | col == "clean") |>
+  distinct(col, score, .keep_all = TRUE) |>
+  mutate(v = paste0(sprintf("%.2f", r0(partial, 2)), if_else(lo > 0 | hi < 0, "*", ""))) |>
+  select(col, score, v) |>
+  pivot_wider(names_from = score, values_from = v) |>
+  mutate(col = factor(col, c(setdiff(unique(col), "clean"), "clean"))) |>
+  arrange(col) |>
+  select(component = col, all_of(SC)) |>
+  kable(caption = "Table 16. Partial Spearman ρ of each component of mean surprisal with each ELLIPSE analytic score, given the overall score. * 95% CI excludes zero")
+```
+
+Each analytic score was correlated with the components of mean surprisal,
+holding the overall score fixed (Table 16). A negative value means that more
+surprisal from that component goes with a lower analytic score than the
+overall score predicts. The two accuracy scales pick out
+the errors their rubrics name. Conventions goes with spelling and orthography
+(`r f2(filter(anp, cut == "group", col == "spelling/orth", score == "conventions")$partial)`)
+and punctuation
+(`r f2(filter(anp, cut == "group", col == "punctuation", score == "conventions")$partial)`)
+and not with verb-form errors
+(`r f2(filter(anp, cut == "group", col == "verb form/SVA/tense", score == "conventions")$partial)`).
+Grammar goes with verb form
+(`r f2(filter(anp, cut == "group", col == "verb form/SVA/tense", score == "grammar")$partial)`),
+noun number, determiners and prepositions, and not with spelling
+(`r f2(filter(anp, cut == "group", col == "spelling/orth", score == "grammar")$partial)`)
+or punctuation. Syntax goes most with punctuation errors
+(`r f2(filter(anp, cut == "group", col == "punctuation", score == "syntax")$partial)`).
+Phraseology spreads over grammatical and lexical errors. Cohesion runs the
+other way for most error groups, so at a given overall score, essays with more
+grammatical and lexical errors are rated slightly higher on cohesion. More
+surprising clean text goes with lower cohesion, syntax, phraseology and
+grammar, and only slightly with higher vocabulary
+(`r f2(filter(anp, cut == "bucket", col == "clean", score == "vocabulary")$partial)`).
+Shares of each analytic score's signal (`analytic_shares_ellipse.csv`) give
+the same picture. The errors carry the most of conventions
+(`r pc(1 - filter(ans, cut == "bucket", col == "clean", score == "conventions")$share)`%)
+and the least of cohesion
+(`r pc(1 - filter(ans, cut == "bucket", col == "clean", score == "cohesion")$share)`%).
+
 # 5. Discussion
 
 **RQ1.** The surprisal of learner writing decomposes into a clean part and
@@ -678,6 +903,31 @@ the clean text. Surprisal is better read as a model-based estimate of error
 density, weighted by how disruptive the errors are, than as a measure of
 something beyond errors.
 
+**A third corpus.** With a fine-tuned corrector standing in for the
+annotators, the decomposition carries over to ELLIPSE, and on W&I and FCE the
+corrector's split of the signal is within a few points of the annotators'. On
+ELLIPSE the errors carry two thirds of the signal, and the clean text keeps a
+stronger association with the score than on W&I or FCE. Two readings fit this.
+ELLIPSE's criterion rates language alone, including vocabulary and
+phraseology, so it may credit wording that no correction touches. The
+corrector may also miss more errors in essays unlike those it was trained on,
+which would leave them in the clean part. The analytic scores do not single
+out vocabulary as the source. The clean part goes with lower cohesion,
+syntax, phraseology and grammar at a given overall score, and only slightly
+with higher vocabulary.
+
+**What the criteria rate.** Part of the errors' share may be built into the
+criteria. ELLIPSE's overall score names accuracy at every band, and its
+grammar and conventions scales line up with the matching ERRANT groups
+(Table 16). A rater who counts errors produces a criterion that error counts
+predict. FCE's score also weighs task achievement and content, which fits its
+lower errors' share
+(`r pc(min(unlist(VAL("fce", "errors")[c("gold", "errant", "model")])))`–`r pc(max(unlist(VAL("fce", "errors")[c("gold", "errant", "model")])))`%
+by source of corrections, against
+`r pc(min(unlist(VAL("wi", "errors")[c("gold", "errant", "model")])))`–`r pc(max(unlist(VAL("wi", "errors")[c("gold", "errant", "model")])))`%
+on W&I). Neither point settles
+how much of the signal is the rating procedure and how much is writing.
+
 Two consequences for the measure follow. First, lower mean surprisal is not
 better writing above the C level. Native student essays sit at the C-learner
 level, and more literate native prose is more surprising. The scale runs
@@ -696,6 +946,10 @@ correction.
   edit as possible. Awkward but grammatical phrasing is usually left alone
   and stays in the clean part, so the error components are a lower bound on
   what fluent rewriting would remove.
+- **Model corrections.** ELLIPSE's corrections come from a model, which finds
+  about half of what an annotator corrects on W&I and FCE and errs towards
+  leaving text as written. Its recall on ELLIPSE cannot be checked without
+  expert corrections.
 - **One annotator.** Only the first annotator's corrections are used.
   Annotators disagree on what counts as an error, and the split inherits that
   uncertainty.
@@ -726,10 +980,19 @@ Crossley, S. A., Tian, Y., Baffour, P., Franklin, A., Benner, M., &
 Boser, U. (2024). A large-scale corpus for assessing written argumentation:
 PERSUADE 2.0. *Assessing Writing, 61*, 100865.
 
+Crossley, S. A., Tian, Y., Baffour, P., Franklin, A., Kim, Y., Morris, W.,
+Benner, M., Picou, A., & Boser, U. (2023). The English Language Learner
+Insight, Proficiency and Skills Evaluation (ELLIPSE) Corpus. *International
+Journal of Learner Corpus Research, 9*(2), 248–269.
+
 Granger, S. (1998). The computer learner corpus: A versatile new source of
 data for SLA research. In S. Granger (Ed.), *Learner English on Computer*
 (pp. 3–18). Longman. (LOCNESS: Centre for English Corpus Linguistics,
 Université catholique de Louvain.)
+
+Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., &
+Chen, W. (2022). LoRA: Low-rank adaptation of large language models.
+*Proceedings of ICLR 2022*.
 
 Shapley, L. S. (1953). A value for n-person games. In H. W. Kuhn &
 A. W. Tucker (Eds.), *Contributions to the Theory of Games II* (pp. 307–317).

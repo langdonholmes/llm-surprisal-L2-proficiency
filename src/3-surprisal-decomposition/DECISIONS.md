@@ -1254,3 +1254,24 @@ First results (partial ρ given overall): conventions goes with spelling/orth
 (−.20) and preposition (−.17) and not with spelling (.00) or punctuation
 (.02); syntax's strongest is punctuation (−.14). The clean part's share is
 highest for cohesion (.39) and lowest for conventions (.27); overall .34.
+
+## 2026-10-22 · D45. Corrector validation with CIs; stages 6 and 8 on ELLIPSE; write-up
+
+- **Paired validation** (`5_decompose.py --validate`, validation_shares.csv):
+  the shares of the json gold, the ERRANT re-cut of gold and the model on the
+  same W&I/FCE units, from the same 2,000 unit resamples. Model minus re-cut,
+  errors' share: W&I −3.8 points [−5.8, −1.9], FCE −0.4 [−3.1, 2.4]. The
+  model gives more to mechanical (+1.6, +2.4) and less to content-word choice
+  (−3.2, −1.5) and multi-word / order (−2.5, −2.3).
+- **Stages 6 and 8 take --corpus**, and both stratify the CV by the units'
+  level group. For W&I and FCE these are the same folds as before (stage 6
+  and 8 outputs byte-identical). Run on ellipse, and stage 6 also on
+  wi_model / fce_model so that ELLIPSE's ΔR² is compared with model-based
+  error counts: B + S over B adds 5.2 points [4.1, 6.4] on ELLIPSE, against
+  0.5 on W&I and 1.2 on FCE. Corrected ELLIPSE surprisal adds 3.8 [2.8, 4.8];
+  the classic measures at most 1.3.
+- **results.qmd** gains ELLIPSE in 3.1 (with the rubric comparison of D42),
+  3.9 The corrector, 4.6 (corrector agreement, OpenAI side table, Table 14
+  validation), 4.7 ELLIPSE, 4.8 analytic scores, two discussion paragraphs
+  (a third corpus; what the criteria rate, read cautiously per D42) and a
+  limitation (model corrections).

@@ -32,13 +32,13 @@ records the design decisions in date order.
 | 2 | `2_score.py --corpus` (GPU) | Scores the original and the corrected essays with the Study 1 instrument. |
 | 3 | `3_align.py --corpus` | Aligns the writer's own tokens between the two versions. |
 | 4 | `4_spill.py --corpus` (GPU) | Edit-level Shapley split of each own word's surprisal change over the corrections in its window (correction as baseline). |
-| 5 | `5_decompose.py` | The exact splits per unit (four parts; by kind of correction and ERRANT group), shares of the proficiency signal, frequency vs cost, spill by distance, the clean part across corpora, RQ3 features. |
+| 5 | `5_decompose.py` | The exact splits per unit (four parts; by kind of correction and ERRANT group), shares of the proficiency signal, frequency vs cost, spill by distance, the clean part across corpora, RQ3 features. `--validate`: the corrector against the annotators (shares by source of corrections, paired differences). |
 | 6 | `6_increment.py` | RQ3: ridge ΔR² of the surprisal terms over the error counts. |
 | 7 | `7_analytic.py` | ELLIPSE: the clean part and each ERRANT group against the six analytic scores (shares; partial ρ given overall; D44). |
 | 8 | `8_classic.py` | Post hoc. Classic measures on every partially corrected version, Shapley by kind of correction, ρ, share removed, ΔR². |
 | 9 | `9_calibration.py prep\|score\|table` | Mean surprisal of PERSUADE, Wikipedia, W&I, LOCNESS and ELLIPSE documents of 200–600 words. `fetch_wiki.py` drew the Wikipedia samples. |
 | — | `lib/` | `corpora.py` (paths, units), `corrections.py` (applying edits, gold categories), `errant.py` (ERRANT types, groups, buckets), `shapley.py`, `classic.py`, `lm.py` (the instrument), `stats.py`. |
-| c0–c4 | `corrector/` | The fine-tuned corrector that will give ELLIPSE its corrections (D36, D38). Own environment and README. |
+| c0–c5 | `corrector/` | The fine-tuned corrector that gives ELLIPSE its corrections and is checked against the annotators on W&I/FCE (D36, D38–D40). Own environment and README. |
 | A0–A6 | `appendix/` | The δ-vector analysis. `A0_extract.py` is its GPU pass (top-k predictions for every ELLIPSE and TOEFL 11 token) and `A0_select.py` its threshold and selection. |
 
 Reports: `results.qmd` (main) and `appendix/appendix.qmd`.
@@ -62,6 +62,18 @@ python $S/8_classic.py                          # CPU, about 15 min with 24 proc
 python -I $S/9_calibration.py prep              # reads the public downloads
 CUDA_VISIBLE_DEVICES=1 python $S/9_calibration.py score   # 18 min
 python $S/9_calibration.py table
+
+# the corrector's corrections (after corrector/README.md, c0-c5)
+for c in wi_model fce_model wi_errant fce_errant ellipse; do python $S/1_edits.py --corpus $c; done
+CUDA_VISIBLE_DEVICES=0 python $S/2_score.py --corpus ellipse   # the W&I/FCE variants copy most scores
+for c in wi_model fce_model wi_errant fce_errant; do CUDA_VISIBLE_DEVICES=1 python $S/2_score.py --corpus $c; done
+for c in wi_model fce_model wi_errant fce_errant ellipse; do python $S/3_align.py --corpus $c; done
+for c in wi_model fce_model wi_errant fce_errant ellipse; do python $S/4_spill.py --corpus $c; done   # GPU
+python $S/5_decompose.py --corpus wi_model fce_model wi_errant fce_errant ellipse
+python $S/5_decompose.py --validate             # model vs annotator shares, paired
+python $S/6_increment.py --corpus wi_model fce_model ellipse
+python $S/7_analytic.py                         # about 6 min
+python $S/8_classic.py --corpus ellipse         # CPU, about 40 min
 quarto render $S/results.qmd
 ```
 

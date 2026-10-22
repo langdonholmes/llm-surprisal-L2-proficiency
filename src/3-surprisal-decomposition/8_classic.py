@@ -19,11 +19,15 @@ bucket's share of cov(original measure, criterion). Surprisal is added from
 stage 5 for comparison.
 
 Writes data/study3/<corpus>/versions.parquet, version_sums.parquet,
-classic_units.parquet, and results/study3/classic_<corpus>.csv.
+classic_units.parquet, and results/study3/classic_<corpus>.csv. With --corpus,
+any ids of ``lib.corpora`` (e.g. ellipse, where the corrector's edits are the
+corrections).
 
     python src/3-surprisal-decomposition/8_classic.py
+    python src/3-surprisal-decomposition/8_classic.py --corpus ellipse
 """
 
+import argparse
 import sys
 import time
 import warnings
@@ -37,7 +41,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.classic import MEASURES, Reference, doc_items, item_sums, measures  # noqa: E402
-from lib.corpora import CORPORA, ERROR_COUNTS, RESULTS, data_dir  # noqa: E402
+from lib.corpora import ALL_IDS, CORPORA, ERROR_COUNTS, RESULTS, data_dir  # noqa: E402
 from lib.corrections import apply_edits  # noqa: E402
 from lib.errant import BUCKETS, UNCLASSIFIED  # noqa: E402
 from lib.stats import boot, cov_shares, delta_r2, oof, spearman_cols  # noqa: E402
@@ -128,11 +132,11 @@ def shapley(values, full):
     return pd.DataFrame(rows).set_index("unit")
 
 
-def summarise(corpus, psi_units, units):
+def summarise(psi_units, units):
     """Per measure: bucket shares, rho before and after correction, share removed, ΔR² over B."""
-    y_all = units.y.reindex(psi_units.index).to_numpy(float)
-    folds = y_all.astype(int) if corpus == "wi" else np.digitize(y_all, [0, 23.5, 27.5, 31.5, 40.5])
     units = units.reindex(psi_units.index)
+    y_all = units.y.to_numpy(float)
+    folds = units.group.to_numpy()  # CV strata: the level groups, as in stage 6
     preds_b = oof(units[ERROR_COUNTS], y_all, folds)
     rows = []
     # surprisal (stage 5): corrected = clean; flagged + residual reported separately
@@ -192,7 +196,7 @@ def run(corpus):
     assert gap < 1e-9, gap
     psi_units.to_parquet(out_dir / "classic_units.parquet")
     units = pd.read_parquet(out_dir / "units.parquet")
-    table = summarise(corpus, psi_units, units)
+    table = summarise(psi_units, units)
     table.to_csv(RESULTS / f"classic_{corpus}.csv", index=False)
     print(corpus, f"exact sum gap {gap:.1e}, {time.time() - t0:.0f}s", flush=True)
     print(table[table.stat.isin(["rho_orig", "rho_corr", "removed", "dR2_corr"])].pivot(
@@ -200,8 +204,12 @@ def run(corpus):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--corpus", nargs="+", choices=ALL_IDS, default=CORPORA,
+                    help="corpus ids (default: the main analysis, wi and fce)")
+    args = ap.parse_args()
     warnings.filterwarnings("ignore", category=FutureWarning)
-    for corpus in CORPORA:
+    for corpus in args.corpus:
         run(corpus)
 
 

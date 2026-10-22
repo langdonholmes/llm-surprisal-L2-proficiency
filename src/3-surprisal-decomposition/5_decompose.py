@@ -33,10 +33,14 @@ shares_<corpus>.csv, means_<corpus>.csv, rate_cost_<corpus>.csv,
 spill_decay_<corpus>.csv, clean_assoc.csv, decompose_<corpus>.json; and
 data/study3/<corpus>/units.parquet. With --corpus (any ids of
 ``lib.corpora``, e.g. the corrector variants), the same per id, and
-clean_assoc_<id>.csv.
+clean_assoc_<id>.csv. With --validate (after the variants have run), the
+corrector check: the shares of the json gold, the ERRANT re-cut of gold and the
+model, and their paired differences (the same unit resamples for all three),
+in validation_shares.csv.
 
     python src/3-surprisal-decomposition/5_decompose.py
     python src/3-surprisal-decomposition/5_decompose.py --corpus wi_model fce_model
+    python src/3-surprisal-decomposition/5_decompose.py --validate
 """
 
 import argparse
@@ -361,12 +365,65 @@ def run(corpus):
     return clean_assoc(units, corpus)
 
 
+VALIDATION_SOURCES = {"gold": "", "errant": "_errant", "model": "_model"}
+VALIDATION_DIFFS = [("model", "errant"), ("model", "gold"), ("errant", "gold")]
+
+
+def validation():
+    """Shares by source (json gold, ERRANT re-cut of gold, model) and their paired differences.
+
+    The original texts, so the totals and the criterion, are the same for the
+    three sources; only the split differs. Every share and difference comes
+    from the same 2,000 unit resamples. "errors" is 1 - clean.
+    """
+    rows = []
+    for corpus in CORPORA:
+        units = {src: learners(pd.read_parquet(data_dir(corpus + suffix) / "units.parquet"))[0]
+                 for src, suffix in VALIDATION_SOURCES.items()}
+        gold = units["gold"]
+        y = gold.y.to_numpy(float)
+        assert all(u.index.equals(gold.index) and np.allclose(u.total, gold.total) for u in units.values())
+        cols = (["clean"] + [f"{c}|total" for c in BUCKETS + [UNCLASSIFIED]]
+                + [f"{c}|total" for c in GROUPS + ["flagged", "residual"]])
+        # the shared total, then one block of parts per source
+        X = np.column_stack([gold.total] + [units[src][cols].to_numpy(float) for src in VALIDATION_SOURCES])
+        start = {src: 1 + i * len(cols) for i, src in enumerate(VALIDATION_SOURCES)}
+
+        def shares(idx):
+            cov = ((X[idx] - X[idx].mean(0)) * (y[idx] - y[idx].mean())[:, None]).mean(0)
+            return cov / cov[0]
+        rng = np.random.default_rng(SEED)
+        point = shares(np.arange(len(y)))
+        boots = np.array([shares(rng.integers(0, len(y), len(y))) for _ in range(N_BOOT)])
+        for j, col in enumerate(cols):
+            name = col.removesuffix("|total")
+            # the clean row is reported as the errors' share, 1 - clean
+            flip = (lambda v: 1 - v) if name == "clean" else (lambda v: v)
+            row = {"corpus": corpus, "col": "errors" if name == "clean" else name}
+            for src, k in start.items():
+                lo, hi = sorted(flip(np.percentile(boots[:, k + j], [2.5, 97.5])))
+                row.update({src: flip(point[k + j]), f"{src}_lo": lo, f"{src}_hi": hi})
+            for a, b in VALIDATION_DIFFS:
+                diff = flip(boots[:, start[a] + j]) - flip(boots[:, start[b] + j])
+                lo, hi = np.percentile(diff, [2.5, 97.5])
+                row.update({f"{a}-{b}": row[a] - row[b], f"{a}-{b}_lo": lo, f"{a}-{b}_hi": hi})
+            rows.append(row)
+    table = pd.DataFrame(rows)
+    table.to_csv(RESULTS / "validation_shares.csv", index=False)
+    print(table[["corpus", "col", "gold", "errant", "model", "model-errant", "model-errant_lo", "model-errant_hi",
+                 "model-gold", "model-gold_lo", "model-gold_hi"]].round(3).to_string())
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", nargs="+", choices=ALL_IDS, default=CORPORA,
                     help="corpus ids (default: the main analysis, wi and fce)")
+    ap.add_argument("--validate", action="store_true", help="the corrector check across sources only")
     args = ap.parse_args()
     RESULTS.mkdir(parents=True, exist_ok=True)
+    if args.validate:
+        validation()
+        return
     if args.corpus == CORPORA:
         rows = [r for c in CORPORA for r in run(c)]
         pd.DataFrame(rows).to_csv(RESULTS / "clean_assoc.csv", index=False)
