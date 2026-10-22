@@ -43,6 +43,8 @@ DOCBINS = {"wi": WI_DOCBINS_DIR, "fce": FCE_DOCBINS_DIR, "ellipse": ELLIPSE_DOCB
 RAW = {"wi": WI_DIR / "raw" / "wi+locness", "fce": FCE_DIR / "raw" / "fce"}
 LEVEL_Y = {"A": 1.0, "B": 2.0, "C": 3.0}
 FCE_BANDS = [(1, 23), (24, 27), (28, 31), (32, 40)]
+# overall score 1-5 in halves; the closest the nine values allow to quartiles (DECISIONS D41)
+ELLIPSE_BANDS = [(1.0, 2.5), (3.0, 3.0), (3.5, 3.5), (4.0, 5.0)]
 SEED = 42
 N_BOOT = 2000
 
@@ -73,3 +75,17 @@ def fce_band(score: float):
         if lo <= score <= hi:
             return f"{lo}-{hi}"
     return None
+
+
+def ellipse_band(score: float) -> str:
+    return next(f"{lo:g}" if lo == hi else f"{lo:g}-{hi:g}" for lo, hi in ELLIPSE_BANDS if lo <= score <= hi)
+
+
+def bands(corpus: str) -> list[str]:
+    """The level groups of rate_cost, lowest first."""
+    b = base(corpus)
+    if b == "wi":
+        return ["A", "B", "C"]
+    if b == "fce":
+        return [f"{lo}-{hi}" for lo, hi in FCE_BANDS]
+    return [f"{lo:g}" if lo == hi else f"{lo:g}-{hi:g}" for lo, hi in ELLIPSE_BANDS]

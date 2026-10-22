@@ -1172,5 +1172,15 @@ without its whitespace repair and checks that.
   corrected texts as the json gold, and about as many edits (W&I 22.1 vs
   21.8 per text, FCE 21.2 vs 20.8).
 - **ELLIPSE** (`ellipse`) is cut the same way from the final model's
-  corrections. Its unit is the essay and its group the overall score.
+  corrections. Its unit is the essay and its group the score band (D41).
 - Stage 1 on `wi` and `fce` gives byte-identical outputs after the change.
+
+## 2026-10-22 · D41. ELLIPSE score bands: ≤2.5 / 3.0 / 3.5 / ≥4.0
+
+The frequency-vs-cost table (`rate_cost`, stage 5) compares the lowest and
+highest level groups, so ELLIPSE's overall score (1–5 in halves) is cut into
+bands, as FCE's 1–40 score is. The nine values allow no exact quartiles; the
+closest cut is ≤2.5 / 3.0 / 3.5 / ≥4.0 (1,739 / 2,335 / 1,302 / 1,106
+essays), which also falls on whole and half points. The table compares ≤2.5
+with ≥4.0. The bands are the group in stage 1 and only change the per-group
+tables; the shares use the continuous score.

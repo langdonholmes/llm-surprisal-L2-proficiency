@@ -34,7 +34,7 @@ import spacy
 from spacy.tokens import DocBin
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import ALL_IDS, DOCBINS, LEVEL_Y, S3, VARIANTS, base, fce_band, out  # noqa: E402
+from lib.corpora import ALL_IDS, DOCBINS, LEVEL_Y, S3, VARIANTS, base, ellipse_band, fce_band, out  # noqa: E402
 from lib.corrections import apply_edits, gold_for_doc  # noqa: E402
 from lib.errant import bucket_of, edit_types, group_of, op_of  # noqa: E402
 from util.process_docs import load_all_docbins  # noqa: E402
@@ -49,8 +49,8 @@ def unit_group_y(corpus: str, m: dict):
     if corpus == "fce":
         score = pd.to_numeric(m["script_s"], errors="coerce")
         return m["script_id"], fce_band(score), (score if score > 0 else None)
-    y = float(m["overall"])  # ELLIPSE: group is the overall score as written
-    return tid, f"{y:.1f}", y
+    y = float(m["overall"])  # ELLIPSE: group is the score band
+    return tid, ellipse_band(y), y
 
 
 def c5_edits(source: str):

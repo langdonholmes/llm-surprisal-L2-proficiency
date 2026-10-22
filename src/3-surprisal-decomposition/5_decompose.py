@@ -48,7 +48,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.corpora import ALL_IDS, CORPORA, FCE_BANDS, GROUP_SLUGS, N_BOOT, RES, SEED, base, out, tau  # noqa: E402
+from lib.corpora import ALL_IDS, CORPORA, GROUP_SLUGS, N_BOOT, RES, SEED, bands, base, out, tau  # noqa: E402
 from lib.errant import BUCKETS, GROUPS, UNCL  # noqa: E402
 from lib.stats import boot, cov_shares, partial_rank, spearman_cols  # noqa: E402
 
@@ -215,9 +215,7 @@ def rate_cost(U, corpus):
     rate_all and cost_all pool all learners.
     """
     L, _ = learners(U)
-    if base(corpus) == "ellipse":
-        raise NotImplementedError("ELLIPSE score bands for rate_cost are not decided yet")
-    lv = ["A", "B", "C"] if base(corpus) == "wi" else [f"{a}-{b}" for a, b in FCE_BANDS]
+    lv = bands(corpus)
     lo_, hi_ = lv[0], lv[-1]
     idx = {g: np.flatnonzero((L.group == g).to_numpy()) for g in lv}
     n = L.n.to_numpy(float)
