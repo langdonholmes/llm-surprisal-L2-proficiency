@@ -1461,3 +1461,15 @@ extended FCE check and before any TOEFL L1 contrast.
   200 draws, with the 2.5–97.5% spread across draws as the band. It is
   descriptive and carries no margins. The low band, at 14 per L1, is read with
   caution, as in Chapter 3.
+- 2026-10-22 update, the extended FCE check (`l1_distortion.csv`). The
+  distortion spreads over the error kinds rather than sitting in one.
+  - Korean's +.24 is +.15 error tokens, +.07 context and +.02 omission. By
+    bucket it is mechanical +.07, content-word choice +.08 and multi-word
+    +.08. Japanese is the same pattern at half the size, and German, French
+    and Turkish the reverse.
+  - Every bucket and group distortion is within ±.08, and most groups within
+    ±.02, so the error-kind margins are far narrower than the errors part's.
+    The largest group distortions are other lexical (ko +.08, ja +.07,
+    de −.05).
+  - Word order misses the 50-correction rule for de, it, ja, ko, tr and zh,
+    and has a margin only for es and fr.

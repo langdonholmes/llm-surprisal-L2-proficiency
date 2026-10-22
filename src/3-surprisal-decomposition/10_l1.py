@@ -14,18 +14,30 @@ L1's band means regressed on the latent band positions θ̄_s (truncated-normal
 means between the cutpoints of the pooled band shares), weighted by cell size;
 bits per θ SD, and pooled over L1s by size. Linear in the part, so it splits too.
 
-Residual proficiency (Cochran 1968): three bands leave about 21% (35%
-conservative) of a normal confounder's bias. allowance = r × gap_g × β_part,
-with gap_g g's latent proficiency gap (a probit with a scale term; saturated
-with three bands, so in closed form) and β_part the pooled slope.
+Residual proficiency (Cochran 1968): three bands leave about 21% of a normal
+confounder's bias (35% as a sensitivity check; D49). allowance = r × gap_g ×
+β_part, with gap_g g's latent proficiency gap (a probit with a scale term;
+saturated with three bands, so in closed form) and β_part the pooled slope.
+
+Margins (D49): the FCE distortion of each part (model d minus re-cut gold d)
+bounds how far the corrector could have moved it. They are never subtracted.
+A shared L1's part clears its margin if d_lo - max(hi, 0) > 0 or
+d_hi + max(-lo, 0) < 0, with [lo, hi] the distortion's CI. Arabic, Hindi and
+Telugu get the symmetric margin m = the largest |distortion| over the shared L1s.
+
+Per band, balanced (Study 1): within each band every L1 is subsampled to the
+smallest cell, 200 draws, mean d and the 2.5-97.5% spread across draws.
 
 CIs: 2,000 resamples of units stratified by band (Study 1), as resampling
 weights, so every statistic of one iteration uses the same draw.
 
     --check   step 1, the corrector by L1 on FCE: agreement (ERRANT P/R/F0.5,
               corrections per 100 tokens) per L1, and the distortion of each
-              shared L1's errors-part d, model minus the re-cut gold, paired.
-              -> results/study3/validation/l1_check.csv (per L1) and l1_split4.csv
+              shared L1's errors-part d, model minus the re-cut gold, paired; the
+              same distortion for every part (D49; a group only where the L1 has
+              at least 50 corrections of it under each source).
+              -> results/study3/validation/l1_check.csv (per L1), l1_split4.csv and
+                 l1_distortion.csv (per L1 and part)
     (default) steps 2-5 on toefl: acceptance against Study 1, displacement split,
               per band, slopes, gaps and allowances.
               -> results/study3/toefl/l1_*.csv, l1_check.json
@@ -52,7 +64,9 @@ from lib.errant import BUCKETS, GROUPS, UNCLASSIFIED  # noqa: E402
 from util.paths import RESULTS_DIR  # noqa: E402
 
 FLAG = 0.10  # Study 1's |d| flag (Williamson et al. 2012)
-COCHRAN, COCHRAN_CONSERVATIVE = 0.21, 0.35
+COCHRAN, COCHRAN_CONSERVATIVE = 0.21, 0.35  # primary and sensitivity (D49)
+MIN_GROUP_CORRECTIONS = 50  # per L1 and source, for a group's FCE distortion (D49)
+K_DRAWS = 200  # balanced subsamples per band (Study 1)
 SHARED_L1 = {"es": "SPA", "fr": "FRE", "ko": "KOR", "ja": "JPN", "it": "ITA", "de": "GER", "tr": "TUR", "zh": "CHI"}
 SPLIT4 = ["clean", "omission", "context", "error_tokens"]
 CATS = {"bucket": BUCKETS + [UNCLASSIFIED, "flagged", "residual"], "group": GROUPS + ["flagged", "residual"]}
@@ -167,6 +181,39 @@ def boot_ci(point, boots):
     return point, lo, hi
 
 
+def balanced_bands(X, band, l1, l1s, rng):
+    """Per band: d of every L1 and part with every L1 subsampled to the band's smallest cell.
+    Mean over K_DRAWS draws and the 2.5-97.5% spread: three (S, G, P) arrays, and the cell size per band."""
+    X, band, l1 = np.asarray(X, float), np.asarray(band), np.asarray(l1)
+    mean, lo, hi, n_min = [], [], [], []
+    for b in TOEFL_BANDS:
+        rows_of = [np.flatnonzero((band == b) & (l1 == g)) for g in l1s]
+        n_min.append(min(len(r) for r in rows_of))
+        draws = []
+        for _ in range(K_DRAWS):
+            idx = np.concatenate([rng.choice(r, n_min[-1], replace=False) for r in rows_of])
+            cells = Cells(X[idx], band[idx], l1[idx], [b], l1s)
+            draws.append(displacement(*cells.sums(np.ones(len(idx))))[2][0])
+        draws = np.array(draws)
+        mean.append(draws.mean(0))
+        lo.append(np.percentile(draws, 2.5, axis=0))
+        hi.append(np.percentile(draws, 97.5, axis=0))
+    return np.array(mean), np.array(lo), np.array(hi), n_min
+
+
+def margins():
+    """The FCE distortion of each part, as a margin per TOEFL L1 (D49): (l1, part) -> (lo, hi),
+    the most the corrector could have moved d down and up. Shared L1s: from the distortion's CI,
+    zero always allowed; the other L1s: ± the largest |distortion| over the shared L1s."""
+    dist = pd.read_csv(RESULTS / "validation" / "l1_distortion.csv")
+    dist = dist[dist.has_margin]
+    out = {(SHARED_L1[r.l1], r.part): (max(r.hi, 0.0), max(-r.lo, 0.0)) for r in dist.itertuples()}
+    for part, m in dist.groupby("part").distortion.apply(lambda v: v.abs().max()).items():
+        for g in ["ARA", "HIN", "TEL"]:
+            out[(g, part)] = (m, m)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # TOEFL 11 (steps 2-5)
 # --------------------------------------------------------------------------- #
@@ -220,16 +267,27 @@ def run_toefl():
     d, bits, d_band, beta, pooled, gap, scale, allow = (boot_ci(p, np.array([b[i] for b in boots]))
                                                         for i, p in enumerate(point))
 
+    margin = margins()
+
+    def within_reach(observed, allowance):
+        return bool(np.sign(observed) == np.sign(allowance) and abs(observed) <= abs(allowance))
+
     rows = []
     for gi, g in enumerate(l1s):
         for pj, part in enumerate(cols):
-            a = allow[0][gi, pj]
-            ab = bits[0][gi, pj]
-            reach = np.sign(ab) == np.sign(a) and abs(ab) <= COCHRAN_CONSERVATIVE * abs(a)
-            rows.append({"l1": g, "part": part, "d": d[0][gi, pj], "d_lo": d[1][gi, pj], "d_hi": d[2][gi, pj],
+            a, ab = allow[0][gi, pj], bits[0][gi, pj]
+            d_lo, d_hi = d[1][gi, pj], d[2][gi, pj]
+            # how far the corrector could have moved d up (too high) and down (too low); none for the total
+            up, down = (0.0, 0.0) if part == "total" else margin.get((g, part), (np.nan, np.nan))
+            clears = None if np.isnan(up) else bool(d_lo - up > 0 or d_hi + down < 0)
+            rows.append({"l1": g, "part": part, "d": d[0][gi, pj], "d_lo": d_lo, "d_hi": d_hi,
+                         "ci_excludes_0": bool(d_lo > 0 or d_hi < 0), "margin_up": up, "margin_down": down,
+                         "clears_margin": clears,
                          "bits": ab, "bits_lo": bits[1][gi, pj], "bits_hi": bits[2][gi, pj],
-                         "allowance": COCHRAN * a, "allowance_conservative": COCHRAN_CONSERVATIVE * a,
-                         "residual_proficiency": "within reach" if reach else "beyond",
+                         "allowance": COCHRAN * a, "allowance_35": COCHRAN_CONSERVATIVE * a,
+                         "residual_proficiency": "within reach" if within_reach(ab, COCHRAN * a) else "beyond",
+                         "residual_proficiency_35":
+                             "within reach" if within_reach(ab, COCHRAN_CONSERVATIVE * a) else "beyond",
                          "flagged": abs(d[0][gi, 0]) >= FLAG})
     pd.DataFrame(rows).to_csv(out / "l1_displacement.csv", index=False)
 
@@ -237,6 +295,11 @@ def run_toefl():
              "hi": d_band[2][si, gi, pj], "n": int(((units.l1 == g) & (units.group == b)).sum())}
             for si, b in enumerate(TOEFL_BANDS) for gi, g in enumerate(l1s) for pj, part in enumerate(cols)]
     pd.DataFrame(rows).to_csv(out / "l1_displacement_band.csv", index=False)
+    mean, lo, hi, n_min = balanced_bands(units[cols], units.group, units.l1, l1s, np.random.default_rng(SEED))
+    rows = [{"l1": g, "band": b, "part": part, "d": mean[si, gi, pj], "lo": lo[si, gi, pj], "hi": hi[si, gi, pj],
+             "n_per_l1": n_min[si]}
+            for si, b in enumerate(TOEFL_BANDS) for gi, g in enumerate(l1s) for pj, part in enumerate(cols)]
+    pd.DataFrame(rows).to_csv(out / "l1_displacement_band_balanced.csv", index=False)
 
     rows = [{"l1": g, "part": part, "slope": beta[0][gi, pj], "lo": beta[1][gi, pj], "hi": beta[2][gi, pj]}
             for gi, g in enumerate(l1s) for pj, part in enumerate(cols)]
@@ -345,9 +408,44 @@ def run_check():
         m = units.assign(l1=l1).groupby("l1")[split].mean().loc[list(SHARED_L1)]
         means.append(m.assign(source=source).reset_index())
     pd.concat(means).to_csv(out / "l1_split4.csv", index=False)
+    part_distortion(model, errant, l1, l1s).to_csv(out / "l1_distortion.csv", index=False)
     show = ["l1", "n_scripts", "recall", "f05", "f05_minus_rest", "edits_per_100_model", "edits_per_100_errant",
             "d_total", "d_errors_model", "d_errors_errant", "distortion", "distortion_lo", "distortion_hi", "flag"]
     print(table[show].round(3).to_string())
+
+
+def part_distortion(model, errant, l1, l1s):
+    """Per shared L1 and part: d under the model and the re-cut gold, and the distortion
+    (model minus gold) with paired band-stratified CIs (D49)."""
+    cols = list(dict.fromkeys(part_columns(model)[1] + part_columns(errant)[1]))
+    k = len(cols)
+    cells = Cells(np.column_stack([model[cols], errant[cols]]), model.group, l1, bands("fce"), l1s)
+    shared = [l1s.index(g) for g in SHARED_L1]
+
+    def stats(w):
+        n, s, q = cells.sums(w)
+        d_model, d_errant = displacement(n, s[..., :k], q)[0], displacement(n, s[..., k:], q)[0]
+        return np.stack([d_model, d_errant, d_model - d_errant])[:, shared]
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        point = stats(cells.weights())
+        rng = np.random.default_rng(SEED)
+        boots = np.array([stats(cells.weights(rng)) for _ in range(N_BOOT)])
+    lo, hi = np.nanpercentile(boots[:, 2], [2.5, 97.5], axis=0)
+    rows = []
+    for i, g in enumerate(SHARED_L1):
+        for j, part in enumerate(cols):
+            cat = part.split("|")[0]
+            if cat in GROUPS:  # where n allows: enough corrections of the group under both sources
+                n_model, n_errant = (int(u.loc[l1 == g, f"n_{cat}"].sum()) for u in (model, errant))
+            else:
+                n_model = n_errant = None
+            enough = cat not in GROUPS or min(n_model, n_errant) >= MIN_GROUP_CORRECTIONS
+            rows.append({"l1": g, "part": part, "d_model": point[0, i, j], "d_errant": point[1, i, j],
+                         "distortion": point[2, i, j], "lo": lo[i, j], "hi": hi[i, j],
+                         "n_corrections_model": n_model, "n_corrections_errant": n_errant,
+                         "has_margin": bool(enough and part != "total")})
+    return pd.DataFrame(rows)
 
 
 def main():
