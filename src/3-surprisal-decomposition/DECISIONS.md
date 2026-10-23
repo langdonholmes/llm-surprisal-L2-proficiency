@@ -1520,3 +1520,37 @@ on naturally spaced W&I/FCE text, so it corrects the essays detokenized.
   already fixed the spacing. TOEFL 11's spelling/orth group and mechanical
   bucket therefore leave out spacing errors. Their FCE margins come from text
   that also lacks them. The other parts are unaffected.
+
+## 2026-10-23 · D51. RQ5 results (D47 steps 2–5 under D49)
+
+`10_l1.py` on `toefl` (results/study3/toefl/l1_*.csv); results.qmd 3.10,
+4.9 (Tables 17–19, Figure 3), the RQ5 paragraph of the Discussion, and a
+limitation.
+- Acceptance. The splits hold exactly. The stage-5 total equals Study 1's
+  olmo2-1b/8 essay means for all 11,000 essays (largest difference 4e-15
+  bits), and the eleven d values reproduce Study 1's (largest difference
+  2e-15; Telugu .422). Stage 3 aligns 99.9% of own tokens, and 51% of
+  aligned tokens keep the same window, between ELLIPSE (45%) and the FCE
+  corrector (61%).
+- Flagged (|d| ≥ .10): French, German, Hindi, Korean, Spanish, Telugu.
+  - In the clean text and clearing the margin: Spanish (clean −.38, errors
+    +.11 the other way), Korean (clean +.30, errors n.s.), Telugu (clean +.32
+    of .42; errors +.10 do not clear ±.24). Hindi's clean part (+.15) points
+    the same way, with a CI that excludes 0, but does not clear ±.24.
+  - In the errors: German (errors −.27 of −.34; mechanical −.16, function
+    word −.06, both clear). French is split: errors −.14 do not clear (its
+    FCE distortion is −.09), clean −.06 clears.
+- Slopes. Pooled within-L1 slope −.31 bits per SD: errors −.28, clean −.03.
+  Residual proficiency can therefore barely reach the clean part. At 21% and
+  at 35%, no flagged L1's clean part or errors is within reach. Of the kinds
+  of correction, only German's content-word choice (−.02) is within reach,
+  and only at 35%. Latent gaps: German +.71 SD, Arabic −.66, Telugu −.03
+  (n.s.), so Telugu's displacement has no proficiency gap to explain it.
+- Not read (|d| < .10), shown in Table 18. Arabic's parts offset each other:
+  clean −.42, errors +.49 (spelling/orth +.41). Arabic writers make 3.8
+  spelling corrections per 100 words, against 1.5–2.2 for the other L1s, so
+  this reflects their errors, not an artifact. Turkish shows the same
+  offsetting at smaller size (+.18 / −.13).
+- The tokenization caveat (D50) applies to spelling/orth and the mechanical
+  bucket only, and the scale of the FCE margins gets one sentence in 4.9.
+  Study 1 is not reanalysed.

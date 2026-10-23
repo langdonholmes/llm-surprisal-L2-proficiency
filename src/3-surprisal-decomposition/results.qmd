@@ -74,6 +74,21 @@ INC <- function(c, m) filter(inc, corpus == c, model == m)
 CL <- function(c, m, s) filter(cl, corpus == c, measure == m, stat == s)
 CAL <- function(g) filter(cal, group == g)
 corr_part <- function(c, g) M4(c, g, "omission") + M4(c, g, "context") + M4(c, g, "error_tokens")
+# TOEFL 11 and L1 (Sections 3.10, 4.9)
+TCK <- js("toefl/l1_check.json")
+TD <- rd("toefl/l1_displacement.csv")
+TS <- rd("toefl/l1_slopes.csv")
+TG <- rd("toefl/l1_gap.csv")
+TBB <- rd("toefl/l1_displacement_band_balanced.csv")
+LC <- rd("validation/l1_check.csv")
+LDI <- rd("validation/l1_distortion.csv")
+TOK <- rd("validation/tokenization_erased.csv")
+L1 <- c(ARA = "Arabic", CHI = "Chinese", FRE = "French", GER = "German", HIN = "Hindi", ITA = "Italian",
+        JPN = "Japanese", KOR = "Korean", SPA = "Spanish", TEL = "Telugu", TUR = "Turkish")
+TDv <- function(g, p, col = "d") filter(TD, l1 == g, part == p)[[col]]
+TDci <- function(g, p) with(filter(TD, l1 == g, part == p), ci2(d, d_lo, d_hi))
+TSl <- function(g, p) filter(TS, l1 == g, part == p)
+READ <- filter(TD, part == "total", abs(d) >= 0.10)$l1  # D47's reading rule
 ```
 
 # 1. Introduction
@@ -87,6 +102,14 @@ Study 3 asks what that signal is made of. The proposal posed three questions.
 - **RQ2.** Are the components differentially associated with proficiency?
 - **RQ3.** Do the components carry information beyond simpler measures? The
   simpler measure here is the count of errors that a human annotator marked.
+
+Two questions were added later.
+
+- **RQ4.** Are the components differentially aligned with the analytic
+  ratings of ELLIPSE (Section 4.8)?
+- **RQ5.** Study 1 found that writers of some L1s have higher or lower mean
+  surprisal than writers of other L1s at the same TOEFL 11 proficiency band.
+  Does that displacement sit in the errors or in the clean text?
 
 A component is defined counterfactually. It is the part of an essay's
 surprisal that would disappear if a given kind of error were corrected. Two
@@ -149,6 +172,15 @@ corrector supplies them (Section 3.9). For the tables by level, the score is
 cut into four bands, ≤ 2.5, 3, 3.5 and ≥ 4
 (`r paste(format(unlist(CKm$ellipse$n_by_group), big.mark = ","), collapse = ", ")`
 essays), the closest the nine score values allow to quartiles (D41).
+
+**TOEFL 11** (Blanchard et al. 2013) holds
+`r format(TCK$n_units, big.mark = ",")` TOEFL iBT essays, 1,000 by writers of
+each of eleven L1s (Arabic, Chinese, French, German, Hindi, Italian, Japanese,
+Korean, Spanish, Telugu and Turkish), written to eight prompts. Each essay
+has a proficiency band (low, medium or high), which is the criterion (1–3).
+The corpus is distributed tokenized, with a space on each side of punctuation
+marks and clitics ("a good way . But , I do n't"). Study 1 scored this text,
+and so does Study 3. TOEFL 11 is used for RQ5 only.
 
 The three criteria rate different things (D42). W&I's CEFR level is one
 rater's holistic judgement with no published criteria. FCE's score follows
@@ -308,6 +340,59 @@ annotators' corrected texts are cut into edits the same way (*re-cut gold*,
 D40). Both then run through the same decomposition as the main analysis.
 ELLIPSE's tables by level use the score bands of Section 3.1, and its
 cross-validation is stratified by them.
+
+The same model corrects TOEFL 11. Since it was trained on naturally spaced
+text, it sees the essays detokenized (D50). Spaces before closing punctuation
+and clitics, after opening brackets and quotes, and inside double quotes are
+removed, and nothing else changes. The detokenized text differs from the Moses
+detokenizer's in 0.5% of the spaces removed, all where the writer's own
+typing is ambiguous. The model's edits are then moved back onto the tokenized
+text character by character, so the corrected essays keep the corpus's
+format and are scored as Study 1 scored the originals.
+
+## 3.10 L1 at matched proficiency (RQ5)
+
+Displacement is Study 1's fairness statistic. For L1 g in band s, against the
+writers of all other L1s in that band,
+
+d_gs = (mean_gs − mean_rest,s) / sp_s,
+
+where sp_s is the pooled within-band SD of mean surprisal. An L1's d is the
+mean of d_gs over the three bands, weighted by the L1's number of essays in
+each. Each part of the split of Section 3.5 gets its own d with the same
+denominator, so the parts' d values add up to the L1's d for mean surprisal.
+95% CIs come from 2,000 resamples of essays stratified by band. As in Study 1,
+an L1's displacement is flagged at |d| ≥ .10, and only the split of a flagged
+L1 is interpreted (D47). For those L1s, the errors (all corrections together)
+and the clean part carry displacement if their CIs exclude zero, and a kind
+of correction is named only if its CI does.
+
+The corrector's own bias could differ by L1, and a bias of that kind would
+move displacement between the errors and the clean part. It is measured on
+FCE, whose scripts share eight L1s with TOEFL 11. Each shared L1's d in the
+errors part is computed with the corrector's corrections and with the re-cut
+annotator corrections, using FCE's four score bands as the strata. Their
+difference (the *distortion*), with a paired 95% CI, bounds how far the
+corrector could have moved that part for that L1 (D48, D49). A TOEFL part
+*clears its margin* if its CI stays on one side of zero once it is widened by
+the distortion in the direction the bias could have moved it. Arabic, Hindi
+and Telugu have no FCE counterpart and take the largest absolute distortion
+over the eight shared L1s, in both directions. The distortions serve only as
+margins and are never subtracted. The total needs no margin, since it does
+not depend on the corrections.
+
+Three bands match proficiency only coarsely, and writers of an L1 with a
+lower latent proficiency would sit lower within each band. Following Study 1,
+three strata remove about 79% of the bias from a normally distributed
+confounder (Cochran 1968), so about 21% remains (35% as a sensitivity
+check). The residual bias of a part is allowance = r × gap_g × β, where gap_g
+is the L1's latent proficiency gap (a probit with a scale term, fitted to
+the band shares) and β is the part's slope on latent proficiency within L1s.
+The slope is Study 1's within-L1 slope. Each L1's band means are regressed
+on the latent band positions, weighted by cell size, and the slopes are
+pooled over L1s by size. A part's displacement is *within reach of residual
+proficiency* if it has the allowance's sign and is no larger than the
+allowance, and *beyond it* otherwise (D47, D49).
 
 # 4. Results
 
@@ -881,6 +966,165 @@ the same picture. The errors carry the most of conventions
 and the least of cohesion
 (`r pc(1 - filter(ans, cut == "bucket", col == "clean", score == "cohesion")$share)`%).
 
+## 4.9 L1 at matched proficiency: TOEFL 11 (RQ5)
+
+```{r}
+#| label: t-l1-fce
+LC |>
+  transmute(L1 = L1[toefl_l1], scripts = n_scripts, `F0.5 [95% CI]` = ci2(f05, f05_lo, f05_hi),
+            `edits per 100 tokens, model` = sprintf("%.1f", edits_per_100_model),
+            `edits per 100 tokens, annotator` = sprintf("%.1f", edits_per_100_errant),
+            `distortion of the errors' d [95% CI]` = ci2(distortion, distortion_lo, distortion_hi)) |>
+  arrange(L1) |>
+  kable(caption = "Table 17. The corrector by L1 on FCE. Agreement with the first annotator, edit rates, and the distortion of the L1's displacement in the errors (corrector minus re-cut annotator, paired)")
+```
+
+Before TOEFL 11, the corrector was checked by L1 on FCE (Table 17). Its
+agreement with the annotator barely differs between L1s (F0.5
+`r f2(min(LC$f05))`–`r f2(max(LC$f05))`), but its edit rate varies less than
+the annotator's
+(`r sprintf("%.1f", min(LC$edits_per_100_model))`–`r sprintf("%.1f", max(LC$edits_per_100_model))`
+against
+`r sprintf("%.1f", min(LC$edits_per_100_errant))`–`r sprintf("%.1f", max(LC$edits_per_100_errant))`
+per 100 tokens). The distortion follows the ratio of the two. Where the
+corrector edits more than the annotator, an L1's errors look costlier than
+the annotator's corrections make them, and where it edits less, cheaper.
+The largest distortion is Korean's
+(`r with(filter(LDI, l1 == "ko", part == "errors"), ci2(distortion, lo, hi))`),
+the one L1 for which the corrector edits more than the annotator. These
+distortions are the margins of the TOEFL 11 split (Section 3.10). The kinds
+of correction have far smaller distortions, within
+±`r f2(max(abs(filter(LDI, has_margin, str_detect(part, "\\|total$"))$distortion)))`.
+
+On TOEFL 11 the decomposition's total reproduces Study 1's essay means
+exactly (largest difference
+`r format(signif(TCK$total_vs_study1_max_abs, 1))` bits), and with them its
+eleven displacements. `r str_to_sentence(xfun::numbers_to_words(length(READ)))` L1s are flagged at |d| ≥ .10
+(Table 18). They are `r knitr::combine_words(L1[sort(READ)])`.
+
+```{r}
+#| label: t-l1-split
+mark <- function(r) paste0(sprintf("%.2f", r0(r$d, 2)), if_else(r$ci_excludes_0, "*", ""), if_else(r$clears_margin, "†", ""))
+cols <- c(clean = "clean", errors = "errors", setNames(paste0(BUCKETS, "|total"), BUCKETS))
+TD |>
+  filter(part %in% c("total", cols)) |>
+  mutate(v = if_else(part == "total", sprintf("%.2f [%.2f, %.2f]", r0(d, 2), r0(d_lo, 2), r0(d_hi, 2)),
+                     paste0(sprintf("%.2f", r0(d, 2)), if_else(ci_excludes_0, "*", ""), if_else(clears_margin, "†", ""))),
+         part = factor(part, c("total", cols), c("d [95% CI]", names(cols)))) |>
+  select(l1, part, v) |>
+  pivot_wider(names_from = part, values_from = v) |>
+  arrange(desc(l1 %in% READ), l1) |>
+  mutate(l1 = paste0(L1[l1], if_else(l1 %in% READ, "", " (not flagged)"))) |>
+  rename(L1 = l1) |>
+  kable(caption = "Table 18. Each L1's displacement in mean surprisal at the same band (Study 1's d) and its split over the clean part, the errors and the kinds of correction. The parts add up to d. * 95% CI excludes zero. † clears the corrector's FCE margin (Section 3.10). The split is read for flagged L1s only")
+```
+
+The displacement sits in different places for different L1s (Table 18).
+For Spanish, Korean and Telugu it is in the clean text.
+Spanish writers' clean text is less surprising than other writers' at the same
+band (`r TDci("SPA", "clean")`), while their errors run the other way
+(`r TDci("SPA", "errors")`). Korean and Telugu writers' clean text is more
+surprising (`r TDci("KOR", "clean")` and `r TDci("TEL", "clean")`), and both
+clear their margins. Telugu, Study 1's worst case, has
+`r f2(TDv("TEL", "clean"))` of its `r f2(TDv("TEL", "total"))` in the clean
+part, and its errors (`r TDci("TEL", "errors")`) do not clear the margin
+of ±`r f2(TDv("TEL", "errors", "margin_up"))` that an L1 without an FCE
+counterpart takes. Hindi's clean part (`r TDci("HIN", "clean")`) points the
+same way, with a CI that excludes zero but does not clear that margin. For German the
+displacement is in the errors (`r TDci("GER", "errors")` of
+`r f2(TDv("GER", "total"))`). German writers' mechanical corrections
+(`r TDci("GER", "mechanical|total")`) and function-word corrections
+(`r TDci("GER", "function word|total")`) add less surprisal than other
+writers' at the same band. French writers' displacement is split
+(errors `r TDci("FRE", "errors")`, clean `r TDci("FRE", "clean")`), and only
+the clean part clears its margin, because the corrector overstates French
+writers' advantage in the errors on FCE.
+
+```{r}
+#| label: fig-l1-slopes
+#| fig-cap: "Slope of mean surprisal on latent proficiency within each L1 (bits per SD), split over the clean part and the kinds of correction. Points are the total slope with its 95% CI"
+#| fig-width: 8
+#| fig-height: 4.6
+parts <- c(clean = "clean", setNames(paste0(BUCKETS, "|total"), BUCKETS))
+sl <- TS |>
+  filter(part %in% c("total", parts)) |>
+  select(l1, part, slope) |>
+  pivot_wider(names_from = part, values_from = slope) |>
+  mutate(other = total - rowSums(across(all_of(unname(parts)))))
+stopifnot(max(abs(sl$other)) < 0.005)  # unclassified and residual, too small to draw
+tot <- filter(TS, part == "total") |> mutate(L1 = if_else(l1 == "pooled", "all (pooled)", L1[l1]))
+d <- sl |>
+  select(-total, -other) |>
+  pivot_longer(-l1, names_to = "part", values_to = "slope") |>
+  mutate(part = factor(recode(part, !!!setNames(names(parts), parts)), names(parts)),
+         L1 = if_else(l1 == "pooled", "all (pooled)", L1[l1]))
+lv <- c(rev(sort(unname(L1))), "all (pooled)") |> rev()
+p <- ggplot(d, aes(slope, factor(L1, rev(lv)), fill = part)) +
+  geom_col(width = 0.7, colour = "white", linewidth = 0.3) +
+  geom_vline(xintercept = 0, colour = "grey40", linewidth = 0.3) +
+  geom_errorbarh(data = tot, aes(xmin = lo, xmax = hi, y = factor(L1, rev(lv))), inherit.aes = FALSE, height = 0.25) +
+  geom_point(data = tot, aes(slope, factor(L1, rev(lv))), inherit.aes = FALSE, size = 1.8) +
+  scale_fill_manual(values = c(clean = "grey70", mechanical = "#1b9e77", `function word` = "#d95f02",
+                               `content-word choice` = "#7570b3", `multi-word / order` = "#e7298a"),
+                    name = NULL) +
+  labs(x = "Slope on latent proficiency (bits per SD)", y = NULL) +
+  theme_study1()
+save_fig(p, "l1_slopes", 8, 4.6, dir = file.path(R3, "figures"))
+p
+```
+
+Within every L1, mean surprisal falls with proficiency, by
+`r f2(-TSl("pooled", "total")$slope)` bits per SD pooled
+(Figure 3). Almost all of the fall is in the errors
+(`r with(TSl("pooled", "errors"), ci2(slope, lo, hi))`), most of it
+mechanical (`r with(TSl("pooled", "mechanical|total"), ci2(slope, lo, hi))`).
+The clean part barely moves
+(`r with(TSl("pooled", "clean"), ci2(slope, lo, hi))`). Residual proficiency
+inside the bands can therefore shift an L1's errors but hardly its clean
+text. Even in the errors it falls short. The largest latent gaps are
+German's (`r with(filter(TG, l1 == "GER"), ci2(gap, gap_lo, gap_hi))` SD) and
+Arabic's (`r with(filter(TG, l1 == "ARA"), ci2(gap, gap_lo, gap_hi))`), and
+Telugu's is `r with(filter(TG, l1 == "TEL"), ci2(gap, gap_lo, gap_hi))`. At
+21%, residual proficiency would give German an allowance of
+`r f2(TDv("GER", "errors", "allowance"))` bits per token in the errors
+(`r f2(TDv("GER", "errors", "allowance_35"))` at 35%), against an observed
+`r f2(TDv("GER", "errors", "bits"))`. No flagged L1's clean part or errors
+is within reach of residual proficiency at either figure. Among the kinds of
+correction, only German's content-word choice
+(`r f2(TDv("GER", "content-word choice|total"))`) is, and only at 35%.
+
+```{r}
+#| label: t-l1-groups
+gcols <- setNames(paste0(c("spelling/orth", "punctuation", "verb form/SVA/tense", "noun number", "determiner",
+                           "preposition", "other lexical", "word order", "other"), "|total"),
+                  c("spelling/orth", "punctuation", "verb form/SVA/tense", "noun number", "determiner",
+                    "preposition", "other lexical", "word order", "other"))
+TD |>
+  filter(part %in% gcols, l1 %in% READ) |>
+  mutate(v = paste0(sprintf("%.2f", r0(d, 2)), if_else(ci_excludes_0, "*", ""), if_else(coalesce(clears_margin, FALSE), "†", "")),
+         part = factor(part, gcols, names(gcols))) |>
+  select(l1, part, v) |>
+  pivot_wider(names_from = part, values_from = v) |>
+  mutate(l1 = L1[l1]) |>
+  rename(L1 = l1) |>
+  kable(caption = "Table 19. The errors' displacement over the nine ERRANT groups, flagged L1s. * 95% CI excludes zero. † clears the FCE margin. Word order has too few FCE corrections for a margin for German and Korean (D49)")
+```
+
+Over the finer groups (Table 19), German's advantage in the errors is spread
+over several groups. Verb form, determiners and noun number clear their
+margins, and spelling and orthography does not.
+Korean's errors cancel between groups. Spelling and orthography add less
+surprisal than for other writers at the same band, and determiners more. Two points
+qualify these group values. TOEFL 11's tokenization erased the writers'
+spacing at punctuation, which the annotators correct as orthography. In W&I
+these corrections are
+`r pc(filter(TOK, corpus == "wi_errant", part == "spelling/orth")$share)`% of
+spelling and orthography corrections and none of any other group's, so in
+TOEFL 11 that group and the mechanical kind leave such slips out (D50). The
+FCE margins are also distortions on a differently spaced corpus, which
+should matter little, since every d is in units of its own corpus's pooled
+SD.
+
 # 5. Discussion
 
 **RQ1.** The surprisal of learner writing decomposes into a clean part and
@@ -917,6 +1161,17 @@ which would leave them in the clean part. The analytic scores do not single
 out vocabulary as the source. The clean part goes with lower cohesion,
 syntax, phraseology and grammar at a given overall score, and only slightly
 with higher vocabulary.
+
+**RQ5.** Study 1's displacement of L1 groups at the same band is mostly not
+in the errors. For Spanish, Korean and Telugu (Study 1's worst case) it sits
+in the clean text, and Hindi points the same way. For German it is in the
+errors, and for French in both. The clean part hardly changes with
+proficiency inside an L1, so residual proficiency within the coarse bands
+cannot account for it. What writers of an L1 write outside the corrected
+errors moves mean surprisal by up to about four tenths of a within-band SD,
+and correcting errors would not remove it. That text includes wording a
+minimal correction leaves alone and errors the corrector misses, as well as
+topic and choice of construction.
 
 **What the criteria rate.** Part of the errors' share may be built into the
 criteria. ELLIPSE's overall score names accuracy at every band, and its
@@ -964,11 +1219,18 @@ correction.
 - **Untyped spans.** Flagged spans have no correction and no type
   (`r pc(SH("wi", "flagged|total")$share)`% of the W&I signal and
   `r pc(SH("fce", "flagged|total")$share)`% of the FCE signal).
+- **Tokenized TOEFL 11.** TOEFL 11 is distributed tokenized, so the writers'
+  own spacing at punctuation is lost. Those slips cannot be corrected and
+  are missing from the spelling and orthography group.
 - **Calibration.** PERSUADE's English-learner flag is a school category, not
   native-speaker status, and the calibration groups differ in topic, genre
   and age.
 
 # References
+
+Blanchard, D., Tetreault, J., Higgins, D., Cahill, A., & Chodorow, M.
+(2013). TOEFL11: A corpus of non-native English. *ETS Research Report
+Series, 2013*(2), i–15.
 
 Bryant, C., Felice, M., & Briscoe, T. (2017). Automatic annotation and
 evaluation of error types for grammatical error correction. *Proceedings of
@@ -977,6 +1239,9 @@ ACL 2017*, 793–805.
 Bryant, C., Felice, M., Andersen, Ø. E., & Briscoe, T. (2019). The BEA-2019
 shared task on grammatical error correction. *Proceedings of BEA 2019*,
 52–75.
+
+Cochran, W. G. (1968). The effectiveness of adjustment by subclassification
+in removing bias in observational studies. *Biometrics, 24*(2), 295–313.
 
 Crossley, S. A., Tian, Y., Baffour, P., Franklin, A., Benner, M., &
 Boser, U. (2024). A large-scale corpus for assessing written argumentation:
