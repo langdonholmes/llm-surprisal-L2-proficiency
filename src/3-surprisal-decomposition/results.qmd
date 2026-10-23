@@ -749,8 +749,13 @@ bigrams lose nearly all of it on W&I
 `r pc(CL("fce", "share_mi3", "removed")$value)`%). Dependency MI loses
 `r pc(CL("wi", "dep_mi", "removed")$value)`% and
 `r pc(CL("fce", "dep_mi", "removed")$value)`%. Bigram ΔP keeps most of its
-association, and content-word frequency, a measure of lexical
-sophistication, keeps all of it. On the corrected essays, only content-word
+association. Correction strengthens the association of content-word
+frequency, a measure of lexical sophistication, by
+`r with(CL("fce", "content_freq", "removed"), pci(-value, -hi, -lo))`% on FCE and
+`r with(CL("wi", "content_freq", "removed"), pci(-value, -hi, -lo))`% on W&I.
+More than half of the FCE gain comes from the mechanical corrections
+(`r with(CL("fce", "content_freq", "share|mechanical"), pci(-value, -hi, -lo))`%).
+On the corrected essays, only content-word
 frequency adds to the error counts on both corpora. Bigram ΔP adds on W&I,
 and its FCE interval touches zero.
 
@@ -919,7 +924,10 @@ points of R² to the error counts, more than any classic measure (at most
 measures behave as on W&I and FCE. Correction removes
 `r pc(EL("removed", "bigram_mi")$value)`% of bigram MI's association and
 `r pc(EL("removed", "share_mi3")$value)`% of the high-MI share's, about half
-of dependency MI's and ΔP's, and none of content-word frequency's.
+of dependency MI's and ΔP's. Content-word frequency's association grows by
+`r with(EL("removed", "content_freq"), pci(-value, -hi, -lo))`%, almost all of it
+through the mechanical corrections
+(`r with(EL("share|mechanical", "content_freq"), pci(-value, -hi, -lo))`%).
 
 ## 4.8 The ELLIPSE analytic scores
 
