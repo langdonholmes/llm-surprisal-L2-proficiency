@@ -1554,3 +1554,85 @@ limitation.
 - The tokenization caveat (D50) applies to spelling/orth and the mechanical
   bucket only, and the scale of the FCE margins gets one sentence in 4.9.
   Study 1 is not reanalysed.
+
+## 2026-10-23 · D52. RQ5 follow-up: corrected-essay surprisal, prompt, and the reading rules (fixed before computing)
+
+The handoff after D51 asks whether the clean-text displacement of D51 survives
+two checks: the corrected essay scored as a whole, and the prompt. Nothing
+below has been computed yet. Existing outputs are not changed. New files go in
+results/study3/toefl/ (and results/study3/<id>/ for step 1b).
+
+**Definitions.** Per unit, S_orig is stage 5's total. S_corr is the mean
+surprisal of the corrected unit over all its scored tokens: the non-space
+tokens of the corrected text as stage 2 scored them (same model, window and
+token policy as S_orig), pooled over a unit's texts as the total is (an FCE
+script's two answers). O is the writer's own aligned tokens (stage 3), m the
+corrected unit's token count, and C the corrected tokens that are not the
+counterpart of an O token. Stage 3's alignment is one to one, so |C| = m − |O|.
+- sel = S_corr − clean, the difficulty of the corrected words;
+  cost = S_orig − S_corr, the cost of erring. S_orig = clean + sel + cost,
+  asserted per unit.
+- sel = (|C| / m) × (mean s over C − clean) exactly. Both factors are reported
+  per unit: the corrected-token share |C|/m and the excess of C's mean over
+  clean.
+- C is split by the edit whose corrected span (`apply_edits` spans) the token
+  overlaps: *inserted* (an edit with an empty original span) and *replacement*
+  (any other edit). Tokens that overlap no edit are *carried*: a flagged span
+  (gold only), or a writer's own token that does not align. sel splits exactly
+  over the three, Σ_C (s − clean) / m per kind. Carried is added here; the
+  handoff named only the first two.
+
+**Step 1a (TOEFL, by L1).** D47's d (pooled within-band SD of the total, band
+weights n_gs) for S_corr, sel and cost, beside total, clean and errors; also
+per band and per band balanced (D49). The CIs reuse D51's resamples: the same
+units in the same order, the same band-stratified generator (seed 42), so
+draw b of every statistic is D51's draw b. This is checked by reproducing
+D51's total and clean CIs. The FCE distortion check (D48/D49, fce_model vs
+fce_errant, paired, the same 2,000 script resamples) is extended to S_corr,
+sel and cost, and D49's margin rule applies: directional for the eight shared
+L1s, ± the largest |distortion| over them for ARA, HIN and TEL. Written to
+results/study3/toefl/ (l1_corr_*.csv), not over validation/l1_distortion.csv.
+
+**Step 1b (W&I, FCE, ELLIPSE, TOEFL).** Means of total, clean, S_corr, sel and
+cost by level, and each additive part's share of cov(S_orig, criterion)
+(clean, sel by kind, cost), with stage 5's 2,000 unit-bootstrap CIs, as in
+split4.csv and shares.csv. Learners only for the shares; LOCNESS appears in
+the W&I means.
+
+**Step 2 (prompt).** Prompt from essays.parquet. Written out: L1 × prompt ×
+band counts, and the prompt means of total, clean, errors and S_corr by band.
+Within each band, every part is centred on its prompt mean over all L1s in
+that band, and D47's d is recomputed for total, clean, errors, S_corr, sel,
+cost and the four buckets, with the pooled SD of the prompt-centred total so
+that the parts still add up. Study 1's total d is reported with and without
+the centring. The prompt means are re-estimated in every resample (weighted
+by the draw), so the CI carries their uncertainty. Same resamples as step 1a.
+Prompt-centred d carries no margin.
+
+**Reading rules.** They apply to the L1s flagged in D51 (|d_total| ≥ .10:
+FRE, GER, HIN, KOR, SPA, TEL). An L1's clean-text displacement is reported as
+*robust* only if all three hold:
+- (a) clean d clears its margin (D49);
+- (b) S_corr d has the same sign as clean d and clears its own margin (D49's
+  rule with S_corr's FCE distortion);
+- (c) prompt-centred clean d has the same sign, with its CI excluding 0.
+
+An offset (Arabic, Turkish; D51) is called *accounting* if sel carries most of
+the errors part: |sel d| ≥ |errors d| / 2, with the same sign as errors d.
+Both are judged on point estimates; the CIs are reported beside them.
+
+**Step 3 (only for L1s that pass a–c).** Which uncorrected words drive the
+clean displacement. A unit's clean is the mean of s_corr over O, and the
+group mean averages the units. Each O token gets the weight 1 / (|O| × n
+units in the cell), so the cell's clean mean is Σ_w p(w) s̄(w) exactly, with
+p(w) the weighted share of type w and s̄(w) its weighted mean. A type is the
+scored token lowercased. The handoff asked for whitespace words with subword
+surprisal summed to the word. The clean mean is defined over scored tokens,
+though, and summing would break the exact split. TOEFL 11 is pre-tokenized,
+so the two mostly coincide. The L1-vs-rest difference p_g s̄_g − p_r s̄_r is
+taken within band, divided by sp_s and combined with the d band weights, so
+it adds up over types to clean d. Each type's term splits by rate_cost's
+midpoint rule, into frequency Δp × mean(s̄) and cost mean(p) × Δs̄. A type
+absent on one side takes the other side's s̄, so its term is all frequency.
+Output: the top 50 types each way per L1, with 10 example sentences for each
+of the top 15 (local only; TOEFL 11 text is not redistributed).
