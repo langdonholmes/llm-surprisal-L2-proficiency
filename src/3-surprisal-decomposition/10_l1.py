@@ -38,16 +38,25 @@ weights, so every statistic of one iteration uses the same draw.
               at least 50 corrections of it under each source).
               -> results/study3/validation/l1_check.csv (per L1), l1_split4.csv and
                  l1_distortion.csv (per L1 and part)
+    --tokenization  which gold corrections TOEFL 11's tokenization would erase
+              (D50): an edit is erased if the original and corrected spans, with a
+              character of context, are the same once every split-off mark has one
+              space each side and runs of whitespace are one space. On the
+              re-cut gold of W&I (typed, like TOEFL 11) and FCE (transcribed).
+              -> results/study3/validation/tokenization_erased.csv (per corpus,
+                 bucket and group)
     (default) steps 2-5 on toefl: acceptance against Study 1, displacement split,
               per band, slopes, gaps and allowances.
               -> results/study3/toefl/l1_*.csv, l1_check.json
 
     python src/3-surprisal-decomposition/10_l1.py --check
+    python src/3-surprisal-decomposition/10_l1.py --tokenization
     python src/3-surprisal-decomposition/10_l1.py
 """
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -448,11 +457,36 @@ def part_distortion(model, errant, l1, l1s):
     return pd.DataFrame(rows)
 
 
+# the marks TOEFL 11's tokenizer splits off; it leaves hyphens and slashes in place
+TOEFL_SPLIT = re.compile(r"""\s*([.,?!:;()\[\]{}"'`%$])\s*""")
+
+
+def toefl_format(x: str) -> str:
+    return re.sub(r"\s+", " ", TOEFL_SPLIT.sub(r" \1 ", x)).strip()
+
+
+def run_tokenization():
+    texts = pd.read_parquet(DATA / "corrector" / "pairs.parquet", columns=["text_id", "text"]).set_index("text_id").text
+    rows = []
+    for corpus in ("wi_errant", "fce_errant"):
+        E = pd.read_parquet(data_dir(corpus) / "edits.parquet")
+        E["erased"] = [toefl_format(t[max(s - 1, 0):e + 1]) == toefl_format(t[max(s - 1, 0):s] + r + t[e:e + 1])
+                       for t, s, e, r in zip(texts[E.text_id].values, E.s, E.e, E.repl)]
+        rows.append({"corpus": corpus, "level": "all", "part": "all", "n": len(E), "erased": int(E.erased.sum())})
+        for level in ("bucket", "group"):
+            for part, x in E.groupby(level).erased:
+                rows.append({"corpus": corpus, "level": level, "part": part, "n": len(x), "erased": int(x.sum())})
+    out = pd.DataFrame(rows).assign(share=lambda d: d.erased / d.n)
+    out.to_csv(RESULTS / "validation" / "tokenization_erased.csv", index=False)
+    print(out[out.erased > 0].to_string(index=False))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="step 1: the corrector by L1 on FCE")
+    ap.add_argument("--tokenization", action="store_true", help="gold corrections TOEFL 11's tokenization erases")
     args = ap.parse_args()
-    run_check() if args.check else run_toefl()
+    run_check() if args.check else run_tokenization() if args.tokenization else run_toefl()
 
 
 if __name__ == "__main__":

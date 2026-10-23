@@ -1507,3 +1507,16 @@ on naturally spaced W&I/FCE text, so it corrects the essays detokenized.
   corpus's format ("way , but"). On synthetic corrections of 300 essays, every
   mapped text equals the model's correction apart from whitespace, with no
   added double spaces.
+- What the tokenization costs (`10_l1.py --tokenization`,
+  validation/tokenization_erased.csv). TOEFL 11's tokenizer erased the
+  learner's spacing at punctuation and clitics, so no corrector can see a
+  slip like "word ,word" there. On the re-cut gold, the corrections that
+  tokenization would erase are all spacing changes that ERRANT types R:ORTH,
+  inside spelling/orth. No other group loses any. That includes punctuation,
+  which concerns the mark, and the word-choice groups. In W&I, typed like
+  TOEFL 11, they are 34% of spelling/orth (3,328 of 9,698), 9.3% of the
+  mechanical bucket and 4.5% of all corrections. In FCE, transcribed from
+  handwriting, they are 0.2% of spelling/orth, since the transcription
+  already fixed the spacing. TOEFL 11's spelling/orth group and mechanical
+  bucket therefore leave out spacing errors. Their FCE margins come from text
+  that also lacks them. The other parts are unaffected.
