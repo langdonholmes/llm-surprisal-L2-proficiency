@@ -1636,3 +1636,73 @@ midpoint rule, into frequency Δp × mean(s̄) and cost mean(p) × Δs̄. A type
 absent on one side takes the other side's s̄, so its term is all frequency.
 Output: the top 50 types each way per L1, with 10 example sentences for each
 of the top 15 (local only; TOEFL 11 text is not redistributed).
+
+## 2026-10-23 · D53. RQ5 follow-up results (D52)
+
+`11_corrected.py` (all six ids), `10_l1.py --followup` and `--types`
+(results/study3/toefl/l1_corr_*.csv, l1_prompt_*.csv, l1_clean_types.csv;
+results/study3/<id>/corrected_means.csv, corrected_shares.csv). results.qmd is
+not changed yet.
+- Checks. S_orig = clean + sel + cost and the split of sel over kinds hold
+  exactly in every unit, and the own-token mean reproduces stage 5's clean.
+  Every C token is the counterpart of no own token (|C| = m − |O|). The
+  follow-up reuses D51's draws: its d and CIs for D51's parts equal D51's
+  (difference < 1e-12). Step 3's type terms add up to clean d exactly.
+- Step 1b, shares of cov(S_orig, criterion), % [95% CI]:
+
+  | corpus | clean | sel | of which inserted / replacement / carried | cost |
+  |---|---|---|---|---|
+  | W&I (gold) | −4 [−10, 2] | 9 [7, 11] | −4 / 6 / 7 | 96 [91, 101] |
+  | FCE (gold) | 9 [3, 14] | 14 [12, 17] | −3 / 10 / 8 | 77 [72, 83] |
+  | ELLIPSE | 34 [31, 37] | −2 [−3, −1] | −4 / 2 / 0 | 68 [66, 71] |
+  | TOEFL 11 | 8 [5, 11] | 3 [2, 4] | −6 / 9 / 0 | 89 [86, 92] |
+
+  The cost of erring carries most of the signal everywhere. The corrected
+  words are harder than the clean text under gold (mean excess over clean
+  +.27 bits on W&I, +.81 on FCE) and about as hard or easier under the
+  corrector (ELLIPSE −.20, TOEFL −.02). Carried tokens are the gold's
+  flagged spans; the corrector flags nothing. Inserted words are easier than
+  clean and are inserted more often at low levels, so their share is negative
+  in every corpus.
+- Step 1a. TOEFL d [95% CI], with the margin rule of D49 (FCE distortion of
+  S_corr from −.19, Korean, to +.12, Turkish; ±.19 for ARA, HIN, TEL):
+
+  | L1 | total | clean | errors | S_corr | sel | cost |
+  |---|---|---|---|---|---|---|
+  | FRE | −.20 | −.06 [−.11, −.01] † | −.14 | +.00 [−.04, .06] | +.07 | −.21 |
+  | GER | −.34 | −.07 [−.12, −.02] † | −.27 † | −.10 [−.15, −.05] † | −.03 | −.24 † |
+  | HIN | +.17 | +.15 [.09, .20] | +.03 | +.03 [−.02, .08] | −.11 † | +.14 |
+  | KOR | +.26 | +.30 [.25, .35] † | −.04 | +.28 [.23, .33] † | −.02 † | −.02 |
+  | SPA | −.27 | −.38 [−.43, −.32] † | +.11 † | −.28 [−.34, −.23] † | +.09 † | +.02 |
+  | TEL | +.42 | +.32 [.28, .38] † | +.10 | +.19 [.14, .24] | −.13 † | +.23 |
+  | ARA | +.06 | −.42 † | +.49 † | −.32 [−.37, −.27] † | +.10 † | +.39 † |
+  | TUR | +.05 | +.18 | −.13 | +.10 [.05, .16] | −.07 † | −.06 |
+
+  † clears its margin. Telugu's S_corr CI excludes 0 but not ±.19. sel is
+  small everywhere (|d| ≤ .14), so S_corr d stays close to clean d, except for
+  Telugu and Hindi, whose corrected words are easier than the rest's.
+- Step 2. Prompt centring moves Study 1's total d by at most .04 (Italian −.05
+  → −.09; Telugu .42 → .46) and the clean d by at most .04. Every flagged L1's
+  centred clean d keeps its sign with a CI excluding 0. TOEFL 11 spreads
+  prompts nearly evenly over L1s, so the prompt does not carry the
+  displacement.
+- Rules. Robust clean displacement (a–c): Korean, Spanish, German. Telugu
+  fails (b) on the margin only (S_corr d_lo .14 < .19). Hindi fails (a) and
+  (b), and French fails (b) (S_corr d ≈ 0). Offsets: Turkish is accounting
+  (sel −.07 against errors −.13). Arabic is not (sel +.10 against errors +.49):
+  its clean −.42 survives as S_corr −.32, clearing its margin, and prompt
+  centring.
+- Step 3, the clean d of the three robust L1s over word types (full list and
+  examples in l1_clean_types.csv, l1_clean_type_examples.csv, local only).
+  - Korean +.30: punctuation +.19, words +.11. The full stop alone is +.17,
+    mostly frequency (61 per 1,000 own tokens against 50 for the rest), so
+    shorter sentences. The words' share is all cost: the same words cost
+    Korean writers more. Topic words (tour, travel, korea) push up, and
+    articles (the, a, an) push down because they are rarer.
+  - Spanish −.38: punctuation −.02 net, as the full stop (−.19, 41 against 50
+    per 1,000, so longer sentences) and the comma (+.17) offset each other.
+    Words give −.35, mostly frequency. Spanish writers use less of the rest's
+    more surprising vocabulary (young, which, communities, successful) and
+    more you, that and a, which are cheap.
+  - German −.07: the comma −.08 (29 against 39 per 1,000) and we −.04, offset
+    by you, a, this and the full stop.

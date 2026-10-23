@@ -37,7 +37,8 @@ records the design decisions in date order.
 | 7 | `7_analytic.py` | ELLIPSE: the clean part and each ERRANT group against the six analytic scores (shares; partial ρ given overall; D44). |
 | 8 | `8_classic.py` | Post hoc. Classic measures on every partially corrected version, Shapley by kind of correction, ρ, share removed, ΔR². |
 | 9 | `9_calibration.py prep\|score\|table` | Mean surprisal of PERSUADE, Wikipedia, W&I, LOCNESS and ELLIPSE documents of 200–600 words. `fetch_wiki.py` drew the Wikipedia samples. |
-| 10 | `10_l1.py [--check]` | RQ5 (D47): Study 1's within-band L1 displacement and within-L1 slope on TOEFL 11, split exactly over the parts, with Cochran's residual-proficiency allowance per part. `--check`: the corrector by L1 on FCE (agreement, and the distortion of each L1's errors-part d, model minus re-cut gold). `--tokenization`: the gold corrections that TOEFL 11's tokenization would erase, by bucket and group (D50). |
+| 10 | `10_l1.py [--check\|--tokenization\|--followup\|--types]` | RQ5 (D47): Study 1's within-band L1 displacement and within-L1 slope on TOEFL 11, split exactly over the parts, with Cochran's residual-proficiency allowance per part. `--check`: the corrector by L1 on FCE (agreement, and the distortion of each L1's errors-part d, model minus re-cut gold). `--tokenization`: the gold corrections that TOEFL 11's tokenization would erase, by bucket and group (D50). `--followup` (D52): the d of S_corr, sel and cost with their FCE margins, and every part's d with the prompt centred within band; `--types`: the clean d of the L1s that pass D52's rules, split over word types. |
+| 11 | `11_corrected.py` | The corrected essay scored as a whole (D52): S_corr, and S_orig = clean + sel + cost per unit, sel split over inserted, replacement and carried tokens; means by level and covariance shares for W&I, FCE, ELLIPSE and TOEFL 11. |
 | — | `lib/` | `corpora.py` (paths, units), `corrections.py` (applying edits, gold categories), `errant.py` (ERRANT types, groups, buckets), `shapley.py`, `classic.py`, `lm.py` (the instrument), `stats.py`. |
 | c0–c5 | `corrector/` | The fine-tuned corrector that gives ELLIPSE its corrections and is checked against the annotators on W&I/FCE (D36, D38–D40). Own environment and README. |
 | A0–A6 | `appendix/` | The δ-vector analysis. `A0_extract.py` is its GPU pass (top-k predictions for every ELLIPSE and TOEFL 11 token) and `A0_select.py` its threshold and selection. |
@@ -86,6 +87,8 @@ python $S/1_edits.py --corpus toefl; python $S/2_score.py --corpus toefl   # 2 o
 python $S/3_align.py --corpus toefl; python $S/4_spill.py --corpus toefl   # 4 on a GPU
 python $S/5_decompose.py --corpus toefl
 python $S/10_l1.py
+python $S/11_corrected.py --corpus wi fce ellipse toefl fce_model fce_errant   # about 5 min
+python $S/10_l1.py --followup; python $S/10_l1.py --types   # D52
 ```
 
 Stages 2–4 take any corpus id. A W&I/FCE variant copies its base corpus's

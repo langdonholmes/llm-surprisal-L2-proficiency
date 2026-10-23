@@ -1,4 +1,4 @@
-"""Study 3, stage 10 (CPU) — RQ5: where TOEFL 11's L1 displacement sits (DECISIONS D47).
+"""Study 3, stage 10 (CPU) — RQ5: where TOEFL 11's L1 displacement sits (DECISIONS D47, D52).
 
 Study 1's fairness statistic, split over the parts of stage 5. For L1 g in
 band s, against the other L1s in s:
@@ -45,6 +45,14 @@ weights, so every statistic of one iteration uses the same draw.
               re-cut gold of W&I (typed, like TOEFL 11) and FCE (transcribed).
               -> results/study3/validation/tokenization_erased.csv (per corpus,
                  bucket and group)
+    --followup  D52 steps 1a and 2 (after 11_corrected.py): the d of S_corr, sel and cost
+              beside D51's parts on D51's draws, their FCE margins, per band and balanced; and
+              every part's d with each part centred on its (band, prompt) mean, re-estimated in
+              each draw; and D52's reading rules.
+              -> results/study3/toefl/l1_corr_*.csv, l1_prompt_*.csv
+    --types   D52 step 3 for the L1s that pass: clean d split exactly over word types (each
+              own token weighted 1 / (|O| × cell size)), frequency vs cost by the midpoint rule.
+              -> results/study3/toefl/l1_clean_types.csv, l1_clean_type_examples.csv (local only)
     (default) steps 2-5 on toefl: acceptance against Study 1, displacement split,
               per band, slopes, gaps and allowances.
               -> results/study3/toefl/l1_*.csv, l1_check.json
@@ -52,6 +60,8 @@ weights, so every statistic of one iteration uses the same draw.
     python src/3-surprisal-decomposition/10_l1.py --check
     python src/3-surprisal-decomposition/10_l1.py --tokenization
     python src/3-surprisal-decomposition/10_l1.py
+    python src/3-surprisal-decomposition/10_l1.py --followup
+    python src/3-surprisal-decomposition/10_l1.py --types
 """
 
 import argparse
@@ -210,11 +220,11 @@ def balanced_bands(X, band, l1, l1s, rng):
     return np.array(mean), np.array(lo), np.array(hi), n_min
 
 
-def margins():
+def margins(path=None):
     """The FCE distortion of each part, as a margin per TOEFL L1 (D49): (l1, part) -> (lo, hi),
     the most the corrector could have moved d down and up. Shared L1s: from the distortion's CI,
     zero always allowed; the other L1s: ± the largest |distortion| over the shared L1s."""
-    dist = pd.read_csv(RESULTS / "validation" / "l1_distortion.csv")
+    dist = pd.read_csv(path or RESULTS / "validation" / "l1_distortion.csv")
     dist = dist[dist.has_margin]
     out = {(SHARED_L1[r.l1], r.part): (max(r.hi, 0.0), max(-r.lo, 0.0)) for r in dist.itertuples()}
     for part, m in dist.groupby("part").distortion.apply(lambda v: v.abs().max()).items():
@@ -321,6 +331,246 @@ def run_toefl():
     disp = pd.read_csv(out / "l1_displacement.csv")
     print(disp[disp.part.isin(["total", "clean", "errors"])].pivot(index="l1", columns="part", values="d")
           .round(3).to_string())
+
+
+# --------------------------------------------------------------------------- #
+# follow-up (D52): the corrected essay as a whole, and the prompt
+# --------------------------------------------------------------------------- #
+CORR_PARTS = ["s_corr", "sel", "cost", "sel_inserted", "sel_replacement", "sel_carried"]
+PROMPT_PARTS = ["total", "clean", "errors", "s_corr", "sel", "cost"] + [f"{b}|total" for b in BUCKETS] + \
+               [f"{UNCLASSIFIED}|total", "residual|total"]
+ROBUST_L1 = ["FRE", "GER", "HIN", "KOR", "SPA", "TEL"]  # flagged in D51
+OFFSET_L1 = ["ARA", "TUR"]
+
+
+def with_corrected(units, corpus):
+    corr = pd.read_parquet(data_dir(corpus) / "corrected_units.parquet").reindex(units.index)
+    assert np.allclose(corr.total, units.total)
+    return units.join(corr[CORR_PARTS + ["c_share", "c_excess"]])
+
+
+def fce_corr_distortion():
+    """D49's FCE distortion (model d minus re-cut gold d, paired) for the corrected-essay parts,
+    with D48's resamples (same units, order and generator)."""
+    model = pd.read_parquet(data_dir("fce_model") / "units.parquet")
+    errant = pd.read_parquet(data_dir("fce_errant") / "units.parquet")
+    model, errant = model[model.y.notna()], errant[errant.y.notna()]
+    model, errant = with_corrected(model, "fce_model"), with_corrected(errant, "fce_errant")
+    l1 = fce_l1().reindex(model.index)
+    l1s = sorted(l1.unique())
+    cols = ["total"] + CORR_PARTS
+    k = len(cols)
+    cells = Cells(np.column_stack([model[cols], errant[cols]]), model.group, l1, bands("fce"), l1s)
+    shared = [l1s.index(g) for g in SHARED_L1]
+
+    def stats(w):
+        n, s, q = cells.sums(w)
+        d_model, d_errant = displacement(n, s[..., :k], q)[0], displacement(n, s[..., k:], q)[0]
+        return np.stack([d_model, d_errant, d_model - d_errant])[:, shared]
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        point = stats(cells.weights())
+        rng = np.random.default_rng(SEED)
+        boots = np.array([stats(cells.weights(rng)) for _ in range(N_BOOT)])
+    lo, hi = np.nanpercentile(boots[:, 2], [2.5, 97.5], axis=0)
+    rows = [{"l1": g, "part": part, "d_model": point[0, i, j], "d_errant": point[1, i, j],
+             "distortion": point[2, i, j], "lo": lo[i, j], "hi": hi[i, j], "has_margin": part != "total"}
+            for i, g in enumerate(SHARED_L1) for j, part in enumerate(cols)]
+    return pd.DataFrame(rows)
+
+
+def prompt_centred(X, band, prompt):
+    """A function of the resampling weights: X with every column centred on its (band, prompt)
+    weighted mean, so the prompt means are re-estimated in each draw."""
+    cell = pd.Categorical(pd.Series(band).astype(str) + "|" + pd.Series(prompt).astype(str).values).codes
+    onehot = sparse.csr_matrix((np.ones(len(cell)), (cell, np.arange(len(cell)))))
+
+    def centre(w):
+        mean = (onehot @ (w[:, None] * X)) / np.maximum(onehot @ w, 1e-12)[:, None]
+        return X - mean[cell]
+    return centre
+
+
+def d_rows(stat, cols, l1s, margin=None):
+    """Rows of d, CI and (if margins are given) whether d clears its margin, per L1 and part."""
+    rows = []
+    for gi, g in enumerate(l1s):
+        for pj, part in enumerate(cols):
+            d, lo, hi = stat[0][gi, pj], stat[1][gi, pj], stat[2][gi, pj]
+            row = {"l1": g, "part": part, "d": d, "d_lo": lo, "d_hi": hi, "ci_excludes_0": bool(lo > 0 or hi < 0)}
+            if margin is not None:
+                up, down = (0.0, 0.0) if part == "total" else margin.get((g, part), (np.nan, np.nan))
+                row.update({"margin_up": up, "margin_down": down,
+                            "clears_margin": None if np.isnan(up) else bool(lo - up > 0 or hi + down < 0)})
+            rows.append(row)
+    return rows
+
+
+def run_followup():
+    out = results_dir("toefl")
+    units, cols = part_columns(load_toefl())
+    units = with_corrected(units, "toefl")
+    l1s = sorted(units.l1.unique())
+
+    # FCE margins for the new parts (D49's rule), beside D49's own for the others
+    dist = fce_corr_distortion()
+    dist.to_csv(out / "l1_corr_fce_distortion.csv", index=False)
+    margin = {**margins(), **margins(out / "l1_corr_fce_distortion.csv")}
+
+    # step 1a and step 2 on the same draws as D51: same units, order, strata and generator
+    parts = cols + CORR_PARTS
+    cells = Cells(units[parts], units.group, units.l1, TOEFL_BANDS, l1s)
+    X = units[PROMPT_PARTS].to_numpy(float)
+    centre = prompt_centred(X, units.group, units.prompt)
+    cells_p = Cells(X, units.group, units.l1, TOEFL_BANDS, l1s)
+
+    def stats(w):
+        d, bits, d_band = displacement(*cells.sums(w))
+        cells_p.X = centre(w)
+        d_p = displacement(*cells_p.sums(w))[0]
+        return d, d_band, d_p
+
+    point = stats(cells.weights())
+    rng = np.random.default_rng(SEED)
+    boots = [stats(cells.weights(rng)) for _ in range(N_BOOT)]
+    d, d_band, d_p = (boot_ci(p, np.array([b[i] for b in boots])) for i, p in enumerate(point))
+
+    # D51's resamples are reused: its d and CIs come back exactly
+    d51 = pd.read_csv(out / "l1_displacement.csv").set_index(["l1", "part"])
+    ours = pd.DataFrame(d_rows(d, parts, l1s, margin)).set_index(["l1", "part"])
+    gap = (ours.loc[d51.index, ["d", "d_lo", "d_hi"]] - d51[["d", "d_lo", "d_hi"]]).abs().to_numpy().max()
+    assert gap < 1e-12, gap
+    ours.reset_index().to_csv(out / "l1_corr_displacement.csv", index=False)
+
+    rows = [{"l1": g, "band": b, "part": part, "d": d_band[0][si, gi, pj], "lo": d_band[1][si, gi, pj],
+             "hi": d_band[2][si, gi, pj], "n": int(((units.l1 == g) & (units.group == b)).sum())}
+            for si, b in enumerate(TOEFL_BANDS) for gi, g in enumerate(l1s)
+            for pj, part in enumerate(parts) if part in CORR_PARTS]
+    pd.DataFrame(rows).to_csv(out / "l1_corr_displacement_band.csv", index=False)
+    mean, lo, hi, n_min = balanced_bands(units[["total"] + CORR_PARTS], units.group, units.l1, l1s,
+                                         np.random.default_rng(SEED))
+    rows = [{"l1": g, "band": b, "part": part, "d": mean[si, gi, pj], "lo": lo[si, gi, pj], "hi": hi[si, gi, pj],
+             "n_per_l1": n_min[si]}
+            for si, b in enumerate(TOEFL_BANDS) for gi, g in enumerate(l1s)
+            for pj, part in enumerate(["total"] + CORR_PARTS)]
+    pd.DataFrame(rows).to_csv(out / "l1_corr_displacement_band_balanced.csv", index=False)
+    # the two factors of sel, by L1 and band (descriptive)
+    (units.groupby(["l1", "group"])[["c_share", "c_excess", "clean", "s_corr", "sel", "cost"]].mean()
+     .reset_index().rename(columns={"group": "band"}).to_csv(out / "l1_corr_factors.csv", index=False))
+
+    # step 2: the prompt
+    pd.crosstab([units.l1, units.group], units.prompt).reset_index().rename(columns={"group": "band"}) \
+        .to_csv(out / "l1_prompt_counts.csv", index=False)
+    (units.groupby(["group", "prompt"])[["total", "clean", "errors", "s_corr"]].agg(["mean", "size"])
+     .pipe(lambda t: t.drop(columns=[c for c in t.columns if c[1] == "size" and c[0] != "total"]))
+     .set_axis(["total", "n", "clean", "errors", "s_corr"], axis=1).reset_index().rename(columns={"group": "band"})
+     .to_csv(out / "l1_prompt_means.csv", index=False))
+    prompt = pd.DataFrame(d_rows(d_p, PROMPT_PARTS, l1s))
+    prompt = prompt.merge(ours.reset_index()[["l1", "part", "d", "d_lo", "d_hi"]], on=["l1", "part"],
+                          suffixes=("", "_uncentred"))
+    prompt.to_csv(out / "l1_prompt_displacement.csv", index=False)
+
+    rules(ours, prompt.set_index(["l1", "part"])).to_csv(out / "l1_corr_rules.csv", index=False)
+    show = ours.reset_index()
+    print(show[show.part.isin(["total", "clean", "errors", "s_corr", "sel", "cost"])]
+          .pivot(index="l1", columns="part", values="d").round(3).to_string())
+    print(prompt.pivot(index="l1", columns="part", values="d")[["total", "clean", "errors", "s_corr"]].round(3))
+    print(pd.read_csv(out / "l1_corr_rules.csv").to_string(index=False))
+
+
+N_TOP, N_EXAMPLE_TYPES, N_EXAMPLES = 50, 15, 10
+
+
+def sentence_at(text, i):
+    """The sentence (or line) around character i."""
+    start = max(text.rfind(c, 0, i) for c in ".?!\n") + 1
+    ends = [j for j in (text.find(c, i) for c in ".?!\n") if j >= 0]
+    return " ".join(text[start:min(ends) + 1 if ends else len(text)].split())
+
+
+def run_types():
+    """D52 step 3: the clean difference split over word types, for the L1s that pass the rules."""
+    out = results_dir("toefl")
+    robust = pd.read_csv(out / "l1_corr_rules.csv").query("robust == True").l1.tolist()
+    units = load_toefl()
+    tok = pd.read_parquet(data_dir("toefl") / "aligned.parquet",
+                          columns=["text_id", "idx", "text", "own", "aligned", "s_corr", "unit", "group"])
+    tok = tok[tok.own & tok.aligned].assign(type=lambda t: t.text.str.lower())
+    tok["l1"] = tok.unit.map(units.l1)
+    tok["w"] = 1.0 / tok.groupby("unit").unit.transform("size")  # a unit's tokens weigh 1 in all
+    l1s = sorted(units.l1.unique())
+    cells = Cells(units[["total", "clean"]], units.group, units.l1, TOEFL_BANDS, l1s)
+    n, s, q = cells.sums(cells.weights())
+    d_clean = displacement(n, s, q)[0][:, 1]
+    n_rest, s_rest, q_rest = n.sum(1, keepdims=True) - n, s.sum(1, keepdims=True) - s, q.sum(1, keepdims=True) - q
+    ss = (q - s[..., 0] ** 2 / n) + (q_rest - s_rest[..., 0] ** 2 / n_rest)
+    sp = np.sqrt(ss / (n + n_rest - 2))  # (S, G): D47's pooled within-band SD of the total
+    essays = pd.read_parquet(data_dir("toefl") / "essays.parquet", columns=["text_id", "text"]).set_index("text_id").text
+    rng = np.random.default_rng(SEED)
+    rows, examples = [], []
+    for g in robust:
+        gi = l1s.index(g)
+        terms = []
+        for si, b in enumerate(TOEFL_BANDS):
+            band = tok[tok.group == b]
+            focal = band.l1 == g
+            by = {}
+            for side, rows_of, n_units in [("g", band[focal], n[si, gi]), ("r", band[~focal], n_rest[si, gi])]:
+                p = rows_of.w.groupby(rows_of.type).sum() / n_units
+                mean_s = (rows_of.w * rows_of.s_corr).groupby(rows_of.type).sum() / (p * n_units)
+                by[side] = (p, mean_s)
+            types = by["g"][0].index.union(by["r"][0].index)
+            p_g, p_r = (by[k][0].reindex(types).fillna(0.0) for k in "gr")
+            s_g, s_r = (by[k][1].reindex(types) for k in "gr")
+            s_g, s_r = s_g.fillna(s_r), s_r.fillna(s_g)  # a type absent on one side: all frequency
+            weight = n[si, gi] / n[:, gi].sum() / sp[si, gi]
+            terms.append(pd.DataFrame({"frequency": (p_g - p_r) * (s_g + s_r) / 2 * weight,
+                                       "cost": (p_g + p_r) / 2 * (s_g - s_r) * weight,
+                                       "p_g": p_g * n[si, gi] / n[:, gi].sum(), "p_r": p_r * n[si, gi] / n[:, gi].sum()}))
+        t = pd.concat(terms).groupby(level=0).sum()
+        t["d"] = t.frequency + t.cost
+        assert abs(t.d.sum() - d_clean[gi]) < 1e-9, (g, t.d.sum(), d_clean[gi])
+        focal_tok = tok[tok.l1 == g]
+        counts = focal_tok.type.value_counts()
+        for direction, top in [("up", t.d.nlargest(N_TOP)), ("down", t.d.nsmallest(N_TOP))]:
+            for rank, (w, d) in enumerate(top.items(), 1):
+                rows.append({"l1": g, "clean_d": d_clean[gi], "direction": direction, "rank": rank, "type": w,
+                             "d": d, "frequency": t.frequency[w], "cost": t.cost[w],
+                             "per_1000_g": 1000 * t.p_g[w], "per_1000_rest": 1000 * t.p_r[w],
+                             "n_tokens_g": int(counts.get(w, 0))})
+                if rank <= N_EXAMPLE_TYPES:
+                    hits = focal_tok[focal_tok.type == w]
+                    for h in hits.iloc[rng.permutation(len(hits))[:N_EXAMPLES]].itertuples():
+                        examples.append({"l1": g, "direction": direction, "rank": rank, "type": w,
+                                         "text_id": h.text_id, "band": h.group, "s_corr": h.s_corr,
+                                         "sentence": sentence_at(essays[h.text_id], h.idx)})
+    table = pd.DataFrame(rows)
+    table.to_csv(out / "l1_clean_types.csv", index=False)
+    pd.DataFrame(examples).to_csv(out / "l1_clean_type_examples.csv", index=False)  # TOEFL 11 text: local only
+    for (g, direction), x in table[table["rank"] <= 20].groupby(["l1", "direction"], sort=False):
+        print(g, direction, f"clean d {x.clean_d.iloc[0]:.3f}")
+        print(x[["type", "d", "frequency", "cost", "per_1000_g", "per_1000_rest"]].round(4).to_string(index=False))
+
+
+def rules(disp, prompt):
+    """D52's reading rules: robust clean displacement (a-c) for the flagged L1s, and accounting
+    offsets for Arabic and Turkish."""
+    rows = []
+    for g in ROBUST_L1 + OFFSET_L1:
+        clean, s_corr, centred = disp.loc[(g, "clean")], disp.loc[(g, "s_corr")], prompt.loc[(g, "clean")]
+        errors, sel = disp.loc[(g, "errors")], disp.loc[(g, "sel")]
+        sign = np.sign(clean.d)
+        a = bool(clean.clears_margin)
+        b = bool(np.sign(s_corr.d) == sign and s_corr.clears_margin)
+        c = bool(np.sign(centred.d) == sign and centred.ci_excludes_0)
+        rows.append({"l1": g, "role": "flagged" if g in ROBUST_L1 else "offset",
+                     "clean_d": clean.d, "a_clean_clears": a, "s_corr_d": s_corr.d, "b_s_corr_same_sign_clears": b,
+                     "clean_d_prompt_centred": centred.d, "c_centred_same_sign_ci": c,
+                     "robust": a and b and c if g in ROBUST_L1 else None,
+                     "errors_d": errors.d, "sel_d": sel.d,
+                     "accounting": bool(abs(sel.d) >= abs(errors.d) / 2 and np.sign(sel.d) == np.sign(errors.d))
+                     if g in OFFSET_L1 else None})
+    return pd.DataFrame(rows)
 
 
 # --------------------------------------------------------------------------- #
@@ -485,8 +735,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="step 1: the corrector by L1 on FCE")
     ap.add_argument("--tokenization", action="store_true", help="gold corrections TOEFL 11's tokenization erases")
+    ap.add_argument("--followup", action="store_true", help="D52 steps 1a and 2: S_corr, sel, cost; prompt")
+    ap.add_argument("--types", action="store_true", help="D52 step 3: the clean difference over word types")
     args = ap.parse_args()
-    run_check() if args.check else run_tokenization() if args.tokenization else run_toefl()
+    if args.followup:
+        run_followup()
+    elif args.types:
+        run_types()
+    else:
+        run_check() if args.check else run_tokenization() if args.tokenization else run_toefl()
 
 
 if __name__ == "__main__":
