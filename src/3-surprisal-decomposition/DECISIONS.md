@@ -1882,6 +1882,17 @@ the two arms' rates agree at ρ = .76 (mechanics), .87 (grammar), .80
   +.57, +.60). `mean_loss`'s loading differs in Low-High in both arms (.09 and .08),
   and in Mid-High in the corrector arm only.
 
+**American spelling.** ELLIPSE's writers are American, and both arms learned from
+British-annotated data. Over a hand-picked list of 20 American spellings (`color`,
+`favorite`, `behavior` and so on, 1,424 tokens in ELLIPSE, not exhaustive), ELECTRA
+flags 78% (mostly SPELL), against 10% of the other tokens in the same sentences.
+The corrector changes at least 23 of them to the British form (about 2%). So
+ELECTRA treats American spelling as error, and the corrector mostly does not. On
+this list the flags are 0.8% of ELECTRA's mechanics flags and 0.4% of all its flags,
+so the ELECTRA run was not repeated, but its mechanics node carries this bias and
+the list is a lower bound. LanguageTool is unaffected in practice: with `en-US`, ρ
+moves by .01 or less on the total and on mechanics (W&I .56, .65; FCE .74, .62).
+
 **The selected λ sits at the search floor.** Not specific to this arm. EBIC selects
 the smallest λ on the path, so `lambda.min.ratio = 0.1` sets the penalty in both
 the approved network (45 of 105 edges) and the corrector arm (66 of 171). With the

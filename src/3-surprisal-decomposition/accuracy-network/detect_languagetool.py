@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.corpora import DATA, data_dir  # noqa: E402
 
 SERVER = "http://localhost:8081/v2/check"
-LANGUAGE = "en-GB"  # both corpora are corrected to British conventions
+LANGUAGE = "en-GB"  # assumed for W&I and FCE, not checked; en-US moves ρ by .01 or less on the total and mechanics (D56)
 
 
 def categories_flagged(text: str) -> Counter:
