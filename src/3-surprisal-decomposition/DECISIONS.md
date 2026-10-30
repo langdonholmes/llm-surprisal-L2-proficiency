@@ -1706,3 +1706,54 @@ not changed yet.
     more you, that and a, which are cheap.
   - German −.07: the comma −.08 (29 against 39 per 1,000) and we −.04, offset
     by you, a, this and the full stop.
+
+## 2026-10-30 · D54. A post hoc network with correction rates (fixed before computing)
+
+Study 2's approved network has no measure of accuracy, and the LMG analysis and
+Study 3 both point to accuracy. This is a separate post hoc, exploratory network
+on ELLIPSE that adds correction rates to the approved battery. The approved
+Study 2 notebooks and figures do not change. Nothing below has been computed
+yet, apart from the essay-level validity of the correction rates on W&I and FCE.
+
+**Model.** The 15 approved nodes plus the accuracy nodes, on all 6,482 essays.
+Everything else is `_network-body.qmd` as approved: prompt residualization,
+Spearman correlations with pairwise missingness, EBICglasso (γ = .5), walktrap,
+bootEGA, bootnet and the proficiency comparison. UVA stays report-only. The MTLD
+hold-out is not run, because its rationale is specific to the 15-node network.
+No predictability node is held out.
+
+**Accuracy nodes.** Four correction rates, each the corrector's edits in the
+listed ERRANT groups (`lib/errant.py`) divided by the essay's tokens (`units.n`).
+Together they account for every edit.
+- Mechanics: spelling/orth, punctuation.
+- Grammar: verb form/SVA/tense, noun number.
+- Determiner/preposition: determiner, preposition. This is its own node, and its
+  corrections are not classified as grammatical or phraseological.
+- Lexical and phrasing: other lexical, word order, other.
+
+They are rates rather than counts because the battery has no length node. They
+are called correction rates because they count what the corrector would change.
+
+**Validity.** For each node, on W&I and FCE, the cross-fitted corrector's rate
+(`wi_model`, `fce_model`) against gold cut the same way (`wi_errant`,
+`fce_errant`): Spearman ρ and the ratio of mean rates.
+
+**Readouts, against the approved 15-node network.** Community numbering is
+arbitrary, so communities are compared by membership.
+- Community membership, with bootEGA structural consistency and item stability.
+- Where each accuracy node lands, and whether `mean_loss` stays with the
+  dependency-MI indices.
+- Edges of `mean_loss` and `var_loss`, with nonparametric bootstrap CIs.
+- Network loadings, CS coefficients, and the top wTO pairs.
+- The proficiency-group comparison (network.compare, invariance).
+
+**Detector arm.** A second arm repeats this with an off-the-shelf error detector,
+through the same notebook. The detector is validated against gold on W&I and FCE
+in the same way, and is chosen on that validity and not on its ELLIPSE network
+results. If it cannot type errors, both arms also get a one-node run on the total
+rate, so that they can be compared.
+
+**Placement.** `src/3-surprisal-decomposition/accuracy-network/`, with results in
+`results/study3/ellipse/accuracy_network/<arm>/` and node tables in
+`data/study3/ellipse/accuracy_network/`. Where this goes in the write-up is open,
+so `results.qmd` is not changed.
