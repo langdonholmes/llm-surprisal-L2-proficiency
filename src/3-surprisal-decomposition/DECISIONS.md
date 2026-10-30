@@ -1859,7 +1859,28 @@ no such gap (.84 and .83). ELECTRA flags 61% of W&I's gold rate overall and 36% 
 lexical and phrasing, so that node is the weakest.
 
 **Network.** The notebook is `accuracy-network-electra.qmd`, with the readouts and
-comparison of D54. Results are recorded below once it has run.
+comparison of D54 (`results/study3/ellipse/accuracy_network/electra/`). On ELLIPSE
+the two arms' rates agree at ρ = .76 (mechanics), .87 (grammar), .80
+(determiner/preposition), .76 (lexical and phrasing) and .87 (total).
+- Membership is the same as the corrector arm's (D55). Three communities in every
+  bootstrap. Lexical and cohesion nodes with mechanics; the three syntactic nodes;
+  the MI indices, both predictability nodes, grammar, determiner/preposition, and
+  lexical and phrasing. Structural consistency .62, 1.00 and .99. Item stability is
+  at least .99 except for mechanics (.62 and .38 between the first and third).
+- `mean_loss` edges [95% CI]: lexical and phrasing .32 [.30, .33], mechanics .23
+  [.21, .24], determiner/preposition .18 [.17, .20], grammar .17 [.16, .19],
+  `var_loss` .54 [.53, .56], dobj MI −.12 [−.14, −.11], advmod MI −.07 [−.08, −.05],
+  amod MI −.06 [−.08, −.05].
+- Loadings on the third community: `mean_loss` .95, lexical and phrasing .45,
+  `var_loss` .37, grammar .37, determiner/preposition .33, mechanics .18, and the MI
+  indices −.08 to −.13. CS is .75 for strength and for expected influence. No
+  pair with an accuracy node reaches wTO .25 except `mean_loss`–lexical and
+  phrasing (.29).
+- Proficiency groups. Edges that differ after BH: Low vs High 25, Low vs Mid 7, Mid
+  vs High 9. Total strength rises with level (Low vs Mid +.64, p = .032; Mid vs High
+  +.96, p = .002; Low vs High +1.61, p < .001), more than in the corrector arm (+.04,
+  +.57, +.60). `mean_loss`'s loading differs in Low-High in both arms (.09 and .08),
+  and in Mid-High in the corrector arm only.
 
 **The selected λ sits at the search floor.** Not specific to this arm. EBIC selects
 the smallest λ on the path, so `lambda.min.ratio = 0.1` sets the penalty in both
