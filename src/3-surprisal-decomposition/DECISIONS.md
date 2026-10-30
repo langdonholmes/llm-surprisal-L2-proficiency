@@ -1827,3 +1827,43 @@ not changed.
   in the approved network. `var_loss` differs in the same two contrasts, Mechanics
   in Low vs Mid and Low vs High, Grammar in Low vs High, and the other two accuracy
   nodes in none.
+
+## 2026-10-30 · D56. Accuracy network, detector arm: ELECTRA, with LanguageTool for validation
+
+The detector arm of D54 uses ELECTRA with 25 ERRANT categories (Yuan et al.,
+2021), as released by Goto (`gotutiyan/token-ged-electra-large-25cls`, revision
+pinned in `detect_electra.py`). It is the one candidate that can fill all four
+nodes, because its labels go through `lib/errant.py` like the corrector's edits.
+LanguageTool 6.6 is a validation comparison only, because its rule categories
+cannot fill the grammar, determiner/preposition or lexical nodes.
+
+**Rule, fixed before computing.** ELECTRA goes forward if, on W&I, its essay-level
+Spearman ρ with gold (`wi_errant`) is at least .70 for the total rate and at least
+.50 for each node. The rule uses no ELLIPSE results. If ELECTRA fails, the fallback
+is LanguageTool with fewer nodes, plus D54's one-node run on the total in both arms.
+
+**Definitions.** A node is the tokens flagged in its groups, divided by the same
+token count as the corrector's (`units.n`). Flags are tokens and corrections are
+edits, so the arms compare in rank and not in level. Each spaCy sentence is one
+input. The model reads 128 subwords at most, so a longer sentence is split into
+consecutive pieces rather than cut off (ELLIPSE 606 of 121,772 sentences).
+LanguageTool runs on a local server with `en-GB`.
+
+**Result of the rule** (`validity_electra.csv`, `validity_languagetool.csv`).
+ELECTRA passes. On W&I, ρ is .62 for mechanics, .76 for grammar, .75 for
+determiner/preposition, .60 for lexical and phrasing, and .84 for the total.
+LanguageTool's total is .58 on W&I and .74 on FCE. ELECTRA's agreement on FCE
+(total .90) is higher on the train split than on test (.92 and .89; mechanics .88
+and .82), which fits the paper's training on FCE, so FCE overstates it. W&I shows
+no such gap (.84 and .83). ELECTRA flags 61% of W&I's gold rate overall and 36% of
+lexical and phrasing, so that node is the weakest.
+
+**Network.** The notebook is `accuracy-network-electra.qmd`, with the readouts and
+comparison of D54. Results are recorded below once it has run.
+
+**The selected λ sits at the search floor.** Not specific to this arm. EBIC selects
+the smallest λ on the path, so `lambda.min.ratio = 0.1` sets the penalty in both
+the approved network (45 of 105 edges) and the corrector arm (66 of 171). With the
+ratio at .01, the selection sits at or one step above the new floor and the graphs
+are much denser (88 of 105; 147 of 171). No analysis changes here, and Langdon
+decides whether the approved network needs anything.

@@ -1,0 +1,38 @@
+---
+title: "Accuracy Network: Detector Arm"
+subtitle: "The Study 2 network with ELECTRA flag rates added"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Why this run exists
+
+The corrector arm (`accuracy-network-corrector.qmd`, DECISIONS D54, D55) measures
+accuracy with the Study 3 corrector. This post hoc, exploratory run repeats it
+with an off-the-shelf detector, ELECTRA (Yuan et al., 2021), whose flagged tokens
+per token fill the same four nodes (D56). Flags are tokens and corrections are
+edits, so the two arms compare in rank and not in level. Community numbering is
+arbitrary, so compare membership with `network-analysis.qmd` rather than labels.
+
+```{r}
+#| label: drop-parameter
+#| code-fold: false
+
+# No predictability node is held out.
+drop_var <- NULL
+
+# The four flag rates (nodes.py), with their plot labels.
+extra_nodes <- c(flag_mechanics = "Mech", flag_grammar = "Gram",
+                 flag_det_prep = "DetPrep", flag_lexical = "LexPhr")
+extra_nodes_file <- "data/study3/ellipse/accuracy_network/nodes_electra.csv"
+run_dir <- "results/study3/ellipse/accuracy_network/electra"
+```
+
+{{< include ../../2-nomological-network/_network-body.qmd >}}
