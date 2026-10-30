@@ -1,0 +1,37 @@
+---
+title: "Accuracy Network: Corrector Arm"
+subtitle: "The Study 2 network with correction rates added"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+# Why this run exists
+
+The approved Study 2 network has no measure of accuracy. This post hoc,
+exploratory run adds four correction rates from the Study 3 corrector to the 15
+approved nodes and re-estimates everything (DECISIONS D54). The approved
+notebooks and figures do not change. Community numbering is arbitrary, so compare
+membership with `network-analysis.qmd` rather than labels.
+
+```{r}
+#| label: drop-parameter
+#| code-fold: false
+
+# No predictability node is held out.
+drop_var <- NULL
+
+# The four correction rates (nodes.py), with their plot labels.
+extra_nodes <- c(correction_mechanics = "Mech", correction_grammar = "Gram",
+                 correction_det_prep = "DetPrep", correction_lexical = "LexPhr")
+extra_nodes_file <- "data/study3/ellipse/accuracy_network/nodes_corrector.csv"
+run_dir <- "results/study3/ellipse/accuracy_network/corrector"
+```
+
+{{< include ../../2-nomological-network/_network-body.qmd >}}

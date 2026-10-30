@@ -11,6 +11,15 @@ Each parent sets `drop_var` and then includes this file. Nothing below names
 mean_loss or var_loss directly; the code works from `pred_vars` (retained) and
 `focal` (the first retained node). See the `resolve-drop` chunk.
 
+A parent may also set `extra_nodes`, `extra_nodes_file` and `run_dir` to add
+nodes to the battery (the `resolve-drop` chunk says how). Study 3's post hoc
+network does this (DECISIONS D54):
+
+  ../3-surprisal-decomposition/accuracy-network/accuracy-network-corrector.qmd
+                                              extra_nodes <- 4 rates  (19 nodes)
+
+The notebooks above leave them unset and run exactly as they did before.
+
 The both-held-out run retains NO predictability node, so `pred_vars` is empty
 and `focal` is NA. Every section that reads a focal node guards on
 `has_focal` and reports the dependency-MI community instead, which is the
@@ -47,6 +56,16 @@ library(lavaan)
 # from `pred_vars` (what is retained) and `focal` (the first retained node)
 # instead of naming mean_loss or var_loss, so the notebooks differ only here.
 stopifnot(exists("drop_var"))
+
+# A parent can add an "Accuracy" construct to the battery (D54). `extra_nodes`
+# maps each new column to its plot label, `extra_nodes_file` is a CSV of those
+# columns keyed by text_id_kaggle, and `run_dir` takes this run's figures and
+# readouts, so that nothing is written over the approved figures in fig/.
+if (!exists("extra_nodes")) extra_nodes <- NULL
+if (!exists("extra_nodes_file")) extra_nodes_file <- NULL
+if (!exists("run_dir")) run_dir <- NULL
+stopifnot(is.null(extra_nodes) ||
+          (!is.null(names(extra_nodes)) && !is.null(extra_nodes_file) && !is.null(run_dir)))
 pred_all <- c("mean_loss", "var_loss")
 stopifnot(is.null(drop_var) ||
           (length(drop_var) %in% 1:2 && !anyDuplicated(drop_var) &&
@@ -61,7 +80,10 @@ has_focal <- length(pred_vars) > 0
 focal <- if (has_focal) pred_vars[1] else NA_character_
 
 # Sensitivity runs write to their own directory under a run-specific prefix.
-if (is.null(drop_var)) {
+if (!is.null(extra_nodes)) {
+  fig_dir <- file.path(run_dir, "figures")
+  fig_prefix <- ""
+} else if (is.null(drop_var)) {
   fig_dir <- "fig"
   fig_prefix <- ""
 } else {
@@ -127,6 +149,16 @@ cat("Figures ->", fig_path("*.pdf"), "| bootEGA cores:", n_cores, "\n")
 # (OLMo-2 1B base, window 8). All networks below use Spearman correlations.
 df_raw <- read.csv("data/ellipse/ellipse_metrics.csv")
 
+# Added nodes join by essay, and every essay must have them.
+if (!is.null(extra_nodes)) {
+  extra_table <- read.csv(extra_nodes_file)
+  stopifnot(all(names(extra_nodes) %in% names(extra_table)),
+            !anyDuplicated(extra_table$text_id_kaggle),
+            all(df_raw$text_id_kaggle %in% extra_table$text_id_kaggle))
+  df_raw[names(extra_nodes)] <-
+    extra_table[match(df_raw$text_id_kaggle, extra_table$text_id_kaggle), names(extra_nodes)]
+}
+
 cat("Raw data:", nrow(df_raw), "rows x", ncol(df_raw), "columns\n")
 ```
 
@@ -180,7 +212,9 @@ feature_vars <- c(
   # Cohesion (3)
   "content_word_overlap", "connective_density", "sentence_similarity",
   # Predictability (2, less whatever `drop_var` holds out)
-  pred_vars
+  pred_vars,
+  # Whatever the parent adds (nothing in the Study 2 notebooks)
+  names(extra_nodes)
 )
 
 df_features <- df_raw[, feature_vars]
@@ -279,7 +313,8 @@ construct_members <- list(
   Syntactic      = syntactic_battery,
   Phraseological = c("amod_mi", "dobj_mi", "advmod_mi"),
   Cohesion       = c("content_word_overlap", "connective_density", "sentence_similarity"),
-  Predictability = pred_vars
+  Predictability = pred_vars,
+  Accuracy       = names(extra_nodes)
 )
 # The both-held-out run has no predictability nodes, and an empty construct
 # would still take a shape and a legend row.
@@ -305,7 +340,8 @@ short_labels <- c(
   connective_density = "ConnDen",
   sentence_similarity = "SentSim",
   mean_loss = "Surp",
-  var_loss = "SurpVar"
+  var_loss = "SurpVar",
+  extra_nodes
 )
 
 net_labels <- short_labels[node_order]
@@ -335,17 +371,20 @@ shape_polygons <- list(
   star = local({
     ang <- seq(pi / 2, pi / 2 + 2 * pi, length.out = 11)[1:10]
     list(x = rep(c(1, 0.6), 5) * cos(ang), y = rep(c(1, 0.6), 5) * sin(ang))
-  })
+  }),
+  triangle_down = list(x = c(-1, 1, 0), y = c(1, 1, -1))
 )
 
 # Ordered most- to least-distinguishable at small sizes
-shape_pool <- c("circle", "square", "triangle", "rhombus", "star")
+shape_pool <- c("circle", "square", "triangle", "rhombus", "star", "triangle_down")
 
 # Shapes with less usable interior than a circle are drawn larger so that the
-shape_scale <- c(circle = 1, square = 1, triangle = 1.3, rhombus = 1.15, star = 1.4)
+shape_scale <- c(circle = 1, square = 1, triangle = 1.3, rhombus = 1.15, star = 1.4,
+                 triangle_down = 1.5)
 
 # Plotting-character equivalents, for the shape half of the legend
-shape_pch <- c(circle = 21, square = 22, triangle = 24, rhombus = 23, star = 8)
+shape_pch <- c(circle = 21, square = 22, triangle = 24, rhombus = 23, star = 8,
+               triangle_down = 25)
 
 # One shape per theoretical construct, in the order the constructs are declared.
 stopifnot(length(construct_members) <= length(shape_pool))
@@ -469,7 +508,8 @@ lighten <- function(hex, toward_white = 0.40) {
   v <- round(v + toward_white * (255 - v))
   rgb(v[["red"]], v[["green"]], v[["blue"]], maxColorValue = 255)
 }
-color_pool <- vapply(c("#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2"),
+color_pool <- vapply(c("#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2",
+                       "#D55E00", "#F0E442"),
                      lighten, character(1), USE.NAMES = FALSE)
 
 # EGA returns NA for a node it places in no community, which happens when the
@@ -997,6 +1037,7 @@ if (length(merge_pattern)) {
 
 ```{r}
 #| label: boot-drop-bridge
+#| eval: !expr is.null(extra_nodes)
 
 # The merge above is carried by a single node. MTLD is the only variable in the
 # battery with a substantial loading on two communities, positive on the lexical
@@ -1414,7 +1455,7 @@ print(inv$results)   # per-node loading differences + permutation p-values
 # for a reader to attribute to predictability as a whole. It belongs to one of
 # the two predictability nodes, so the callout below says which, and is written
 # only for the full-battery run where both are present to compare.
-if (length(pred_vars) > 1) {
+if (length(pred_vars) > 1 && is.null(extra_nodes)) {
   diffs <- function(v) vapply(inv$results, function(d) d[v, "Difference"], numeric(1))
   # A true minus sign, so the computed numbers match the typography of the rest
   # of the notebook rather than showing an ASCII hyphen.
@@ -1512,7 +1553,7 @@ if (has_focal) {
   # The strength rank is redundancy-sensitive whenever both predictability nodes
   # are in (see the caveat under Node importance), so the cell points there.
   mod2_cell <- sprintf("`%s` strength rank = %d of %d%s", focal, loss_rank, n_nodes,
-                       if (length(pred_vars) > 1) ", see the caveat in section 2" else "")
+                       if (length(pred_vars) > 1 && is.null(extra_nodes)) ", see the caveat in section 2" else "")
 }
 
 # The MI community, reported in every run so the four are comparable.
@@ -1581,7 +1622,7 @@ to rank. The dependency-MI indices %s, and their mean absolute loading on it is
 
 # Only the full battery has a redundancy to caveat. The cross-notebook ranks are
 # quoted rather than computed, since neither sensitivity run is in scope here.
-if (length(pred_vars) > 1) {
+if (length(pred_vars) > 1 && is.null(extra_nodes)) {
   cat(
 "**That rank is inflated by redundancy.** `mean_loss` and `var_loss` overlap at
 wTO = .52, so each raises the other's strength. Holding `var_loss` out moves
@@ -1647,4 +1688,80 @@ nc_summary <- do.call(rbind, lapply(names(nc_list), function(nm) {
              check.names = FALSE)
 }))
 knitr::kable(nc_summary)
+```
+
+```{r}
+#| label: write-readouts
+#| eval: !expr "!is.null(run_dir)"
+#| include: false
+
+# The numbers this run reports, as tables, for comparison across runs (D54).
+dir.create(run_dir, showWarnings = FALSE, recursive = TRUE)
+write_readout <- function(table, stem, ...) {
+  write.csv(table, file.path(run_dir, paste0(stem, ".csv")), row.names = FALSE, ...)
+}
+
+membership <- data.frame(
+  node = names(ega_result$wc), label = unname(short_labels[names(ega_result$wc)]),
+  construct = unname(node_construct[names(ega_result$wc)]),
+  community = unname(ega_result$wc),
+  item_stability = unname(dim_stab$item.stability$item.stability$empirical.dimensions[names(ega_result$wc)])
+)
+write_readout(membership, "membership")
+
+structural <- dim_stab$dimension.stability$structural.consistency
+community_members <- vapply(names(structural), function(k) {
+  paste(unname(short_labels[names(ega_result$wc)[which(ega_result$wc == as.numeric(k))]]), collapse = ", ")
+}, character(1))
+write_readout(data.frame(community = names(structural), structural_consistency = as.numeric(structural),
+                         members = community_members), "structural_consistency")
+write_readout(setNames(as.data.frame(boot_ega$frequency), c("n_communities", "frequency")), "bootega_frequency")
+# How often each node lands in each community across the bootstraps, for the nodes that move.
+write.csv(as.data.frame(dim_stab$item.stability$item.stability$all.dimensions),
+          file.path(run_dir, "item_stability_all.csv"))
+
+adjacency <- as.data.frame(network$graph)
+write.csv(adjacency, file.path(run_dir, "adjacency.csv"))
+
+# Every edge with its bootstrap quantile interval, the interval plotted in Section 7.
+edge_cis <- summary(boot_nonparam, statistics = "edge") %>%
+  as.data.frame() %>%
+  transmute(node1 = as.character(node1), node2 = as.character(node2), sample,
+            boot_mean = mean, q2.5 = q2.5, q97.5 = q97.5, prop0)
+write_readout(edge_cis, "edges")
+
+write.csv(as.data.frame(round(nl, 6)), file.path(run_dir, "loadings.csv"))
+write_readout(data.frame(statistic = names(cs_coefs), cs = as.numeric(cs_coefs)), "cs_coefficients")
+write_readout(wto_pairs, "wto_pairs")
+
+# Proficiency groups. Whole-network statistics, then each edge's Low vs High
+# test, and the loading invariance test for every pair of groups.
+write_readout(do.call(rbind, lapply(names(nc_list), function(pair_name) {
+  statistics <- nc_list[[pair_name]]$network
+  data.frame(comparison = pair_name, quantity = rownames(statistics), statistics,
+             row.names = NULL, check.names = FALSE)
+})), "group_network_compare")
+
+write_readout(do.call(rbind, lapply(names(nc_list), function(pair_name) {
+  edges <- nc_list[[pair_name]]$edges
+  upper <- which(upper.tri(edges$p.adjusted), arr.ind = TRUE)
+  data.frame(comparison = pair_name,
+             node1 = rownames(edges$p.adjusted)[upper[, "row"]],
+             node2 = colnames(edges$p.adjusted)[upper[, "col"]],
+             statistic = edges$statistic[upper], p_value = edges$p.value[upper],
+             p_adjusted = edges$p.adjusted[upper])
+})), "group_edge_tests")
+
+write_readout(do.call(rbind, lapply(names(nets_prof), function(group) {
+  graph <- nets_prof[[group]]$graph
+  upper <- which(upper.tri(graph), arr.ind = TRUE)
+  data.frame(group = group, node1 = rownames(graph)[upper[, "row"]],
+             node2 = colnames(graph)[upper[, "col"]], weight = graph[upper])
+})), "group_edges")
+
+inv_tables <- if (is.data.frame(inv$results)) list(all = inv$results) else inv$results
+write_readout(do.call(rbind, lapply(names(inv_tables), function(pair_name) {
+  data.frame(comparison = pair_name, node = rownames(inv_tables[[pair_name]]),
+             inv_tables[[pair_name]], row.names = NULL, check.names = FALSE)
+})), "group_invariance")
 ```

@@ -1757,3 +1757,73 @@ rate, so that they can be compared.
 `results/study3/ellipse/accuracy_network/<arm>/` and node tables in
 `data/study3/ellipse/accuracy_network/`. Where this goes in the write-up is open,
 so `results.qmd` is not changed.
+
+## 2026-10-30 · D55. Accuracy network results, corrector arm (D54)
+
+`accuracy-network/` (results/study3/ellipse/accuracy_network/). `results.qmd` is
+not changed.
+- Checks. `_network-body.qmd` takes `extra_nodes`, and with it unset the approved
+  network reproduces: every edge equals the rendered `network-analysis.html` at
+  three decimals, with the same four communities, structural consistency and CS.
+  No file in `fig/` changed. All 6,482 essays join, and the four nodes sum to
+  every edit.
+- Validity against gold cut the same way (ρ; ratio of mean rates):
+
+  | node | W&I | FCE |
+  |---|---|---|
+  | Mechanics | .87; .92 | .84; .99 |
+  | Grammar | .83; .93 | .84; .90 |
+  | Determiner/preposition | .82; .85 | .86; .91 |
+  | Lexical and phrasing | .78; .69 | .75; .68 |
+  | Total | .92; .83 | .89; .84 |
+
+- Communities. Three, in 100% of bootstraps (approved: four, in 61%, otherwise
+  three).
+
+  | community | structural consistency | members |
+  |---|---|---|
+  | 1 | .48 | MTLD, LexDen, TokFreq, WordLen, CWO, ConnDen, SentSim, Mechanics |
+  | 2 | 1.00 | MLC, CN/C, CP/C |
+  | 3 | 1.00 | AmodMI, DobjMI, AdvMI, Surp, SurpVar, Grammar, Determiner/preposition, Lexical and phrasing |
+
+  `mean_loss` stays with the MI indices. The approved cohesion community merges
+  into the lexical one. Every node has item stability 1.00 except Mechanics,
+  which lands in community 1 in 48% of bootstraps and community 3 in 52%. Its
+  loading is .02 on its assigned community and .20 on community 3.
+- `mean_loss` edges [95% bootstrap CI]:
+
+  | partner | with correction rates | approved |
+  |---|---|---|
+  | Lexical and phrasing | .28 [.26, .30] | |
+  | Mechanics | .16 [.14, .18] | |
+  | Determiner/preposition | .15 [.14, .17] | |
+  | Grammar | .15 [.13, .17] | |
+  | SurpVar | .56 [.55, .57] | .68 [.67, .69] |
+  | DobjMI | −.14 [−.16, −.13] | −.18 [−.19, −.16] |
+  | AmodMI | −.08 [−.10, −.07] | −.10 [−.11, −.08] |
+  | AdvMI | −.07 [−.09, −.05] | −.12 [−.13, −.10] |
+  | ConnDen | .03 [.02, .04] | .09 [.08, .10] |
+  | MTLD | .00 [.00, .00] | −.05 [−.06, −.03] |
+
+  `var_loss` has edges of .09 [.07, .11] with Mechanics, .04 [.02, .06] with
+  Grammar, .02 [.00, .04] with Lexical and phrasing, and none with
+  Determiner/preposition. Its edges to the approved nodes barely move.
+- Loadings on community 3: `mean_loss` .92, Lexical and phrasing .44, `var_loss`
+  .39, Grammar .38, Determiner/preposition .36, Mechanics .20, DobjMI −.13,
+  AdvMI −.09, AmodMI −.07 (approved, on its MI community: `mean_loss` −.87,
+  `var_loss` −.55, DobjMI .17, AmodMI .10, AdvMI .09). EGAnet's sign orientation
+  differs between the runs, so these compare by magnitude and by sign within a run.
+- Stability and overlap. CS is .75 for strength and expected influence, as
+  approved. Four pairs reach the .25 wTO reference line, none with an accuracy
+  node. The highest with one are `mean_loss`–Lexical and phrasing .22,
+  Grammar–Determiner/preposition .20 and Determiner/preposition–Lexical and
+  phrasing .16.
+- Proficiency groups. Edges differing after BH correction: Low vs High 24, Low vs
+  Mid 14, Mid vs High 9 (approved 17, 9, 5). The largest involving an accuracy
+  node is TokFreq–Mechanics, High − Low −.31. Total strength differs for Mid vs
+  High (+.57, p = .044) and Low vs High (+.60, p = .043), which it does not in the
+  approved network (−.19, p = .30; −.04, p = .88). `mean_loss` loadings differ
+  for Low vs High (.08) and Mid vs High (.11) after BH correction, and were flat
+  in the approved network. `var_loss` differs in the same two contrasts, Mechanics
+  in Low vs Mid and Low vs High, Grammar in Low vs High, and the other two accuracy
+  nodes in none.
