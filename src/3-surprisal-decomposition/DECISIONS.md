@@ -1891,7 +1891,7 @@ ELECTRA treats American spelling as error, and the corrector mostly does not. On
 this list the flags are 0.8% of ELECTRA's mechanics flags and 0.4% of all its flags,
 so the ELECTRA run was not repeated, but its mechanics node carries this bias and
 the list is a lower bound. LanguageTool is unaffected in practice: with `en-US`, ρ
-moves by .01 or less on the total and on mechanics (W&I .56, .65; FCE .74, .62).
+moves by less than .02 on the total and on mechanics (W&I .56, .65; FCE .74, .62).
 
 **The selected λ sits at the search floor.** Not specific to this arm. EBIC selects
 the smallest λ on the path, so `lambda.min.ratio = 0.1` sets the penalty in both
