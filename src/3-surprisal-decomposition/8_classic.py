@@ -181,7 +181,7 @@ def run(corpus):
         print(corpus, f"{len(versions)} versions, {len(texts)} texts, {time.time() - t0:.0f}s", flush=True)
         tokens, bigrams, deps = parse(texts)
         print(corpus, f"parsed {time.time() - t0:.0f}s", flush=True)
-        ref = Reference(set(tokens.lower) | set(tokens.lemma), list(zip(bigrams.w1, bigrams.w2)),
+        ref = Reference(set(tokens.lower), list(zip(bigrams.w1, bigrams.w2)),
                         list(zip(deps.h, deps.d, deps.rel)))
         item_sums(tokens, bigrams, deps, ref).to_parquet(out_dir / "version_sums.parquet")
     versions = pd.read_parquet(out_dir / "versions.parquet")

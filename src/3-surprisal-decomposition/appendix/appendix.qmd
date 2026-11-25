@@ -350,7 +350,7 @@ Under the frozen rules:
   profile M_obs does as well (M − M_obs = .001 [−.008, .010]). Whatever the
   high-surprisal tokens add to mean surprisal is available from *which words*
   were surprising.
-- **It adds a little to the Study 2 battery.** S2+M − S2 = .014, with the
+- **It adds a little to the Study 2 battery.** S2+M − S2 = .013, with the
   lower bound above zero.
 - **Distributional summaries add almost nothing** (B1: surprisal variance and
   rate above τ).

@@ -315,7 +315,7 @@ The follow-up in Section 4.5 applies the same counterfactual to the
 phraseological and lexical measures of applied linguistics, computed against
 the Dolma reference corpora of Study 2: bigram MI and ΔP, the share of
 bigrams with MI ≥ 3, Study 2's dependency MI (amod, dobj, advmod), the mean
-log frequency of content words, and Study 2's lemma frequency. Each essay is
+log frequency of content words, and Study 2's token frequency. Each essay is
 rebuilt with every subset of its kinds of correction applied, re-parsed, and
 re-measured. Exact Shapley values over the kinds of correction then split
 each measure's original-minus-corrected difference.
@@ -724,10 +724,10 @@ shared by the phraseological and lexical measures of applied linguistics.
 #| label: t-classic
 mlab <- c(surprisal = "mean surprisal", bigram_mi = "bigram MI", bigram_dp = "bigram ΔP", share_mi3 = "share of bigrams with MI ≥ 3",
           dep_mi = "dependency MI (amod, dobj, advmod)", content_freq = "content-word log frequency",
-          lemma_freq = "Study 2 lemma log frequency")
+          token_freq = "Study 2 token log frequency")
 cl |>
   filter(measure %in% names(mlab), stat %in% c("rho_orig", "rho_corr", "removed", "dR2_corr"),
-         measure != "lemma_freq" | corpus == "fce") |>
+         measure != "token_freq" | corpus == "fce") |>
   mutate(v = case_when(stat == "removed" ~ pci(value, lo, hi),
                        stat == "dR2_corr" ~ ci2(100 * value, 100 * lo, 100 * hi),
                        TRUE ~ ci2(value, lo, hi))) |>
@@ -737,7 +737,7 @@ cl |>
   arrange(desc(corpus), measure) |>
   transmute(corpus = CORP[corpus], measure, `ρ, original` = rho_orig, `ρ, corrected` = rho_corr,
             `removed by correction, %` = removed, `ΔR² over B, corrected essay (points)` = dR2_corr) |>
-  kable(caption = "Table 11. Each measure against the criterion on the original and the corrected essays. Removed = 1 − ρ corrected / ρ original (for mean surprisal, 1 − the clean part's share). Study 2's lemma frequency has no association with level on W&I and is shown for FCE only")
+  kable(caption = "Table 11. Each measure against the criterion on the original and the corrected essays. Removed = 1 − ρ corrected / ρ original (for mean surprisal, 1 − the clean part's share). Study 2's token frequency has no association with level on W&I and is shown for FCE only")
 ```
 
 Correction removes most of the proficiency association of the
@@ -763,7 +763,7 @@ and its FCE interval touches zero.
 #| label: t-classic-buckets
 cols <- c("corr", BUCKETS, "phraseological", "phraseological + function word")
 cl |>
-  filter(measure %in% names(mlab), str_starts(stat, "share\\|"), measure != "lemma_freq" | corpus == "fce") |>
+  filter(measure %in% names(mlab), str_starts(stat, "share\\|"), measure != "token_freq" | corpus == "fce") |>
   mutate(part = str_remove(stat, "share\\|")) |>
   filter(part %in% cols) |>
   mutate(v = sprintf("%.0f", 100 * value)) |>
@@ -794,15 +794,15 @@ misspellings and punctuation errors break bigrams. Dependency MI is the most
 phraseological measure, led by content-word choice
 (`r pc(CL("wi", "dep_mi", "share|content-word choice")$value)`% and
 `r pc(CL("fce", "dep_mi", "share|content-word choice")$value)`%). On FCE,
-Study 2's lemma frequency is a misspelling artifact. Its association with the
+Study 2's token frequency is a misspelling artifact. Its association with the
 score is positive on the original scripts
-(ρ = `r f2(CL("fce", "lemma_freq", "rho_orig")$value)`), mechanical corrections
-carry `r pc(CL("fce", "lemma_freq", "share|mechanical")$value)`% of it, and it
+(ρ = `r f2(CL("fce", "token_freq", "rho_orig")$value)`), mechanical corrections
+carry `r pc(CL("fce", "token_freq", "share|mechanical")$value)`% of it, and it
 turns negative after correction
-(ρ = `r f2(CL("fce", "lemma_freq", "rho_corr")$value)`). Misspelled words are
-unseen lemmas, which the measure counts at the frequency floor. On W&I the
+(ρ = `r f2(CL("fce", "token_freq", "rho_corr")$value)`). Misspelled words are
+unseen word forms, which the measure counts at the frequency floor. On W&I the
 measure has no association with level
-(ρ = `r f2(CL("wi", "lemma_freq", "rho_orig")$value)`).
+(ρ = `r f2(CL("wi", "token_freq", "rho_orig")$value)`).
 
 ## 4.6 The corrector against the annotators
 
@@ -1200,7 +1200,7 @@ from many errors to few, not from learner to native. Second, the
 phraseological measures of applied linguistics share this dependence on
 correctable errors. Bigram MI and the high-MI share lose most of their
 association once errors are corrected, and a large part of what they lose is
-spelling and punctuation. Study 2's lemma-frequency measure is, on FCE, an
+spelling and punctuation. Study 2's token-frequency measure is, on FCE, an
 index of misspelling. Studies that use these measures as indices of lexical
 or phraseological knowledge should check how much of their signal survives
 correction.

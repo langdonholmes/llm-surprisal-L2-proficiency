@@ -8,7 +8,7 @@ b = unedited):
                             summed, tags collapsed); "dep_mi" is the mean of the three
   content-word frequency    mean log10 relative frequency of attested content-word
                             forms, corpus a
-  Study 2 lemma frequency   Study 2's log_mean_token_freq (lemma, a + b, unseen -> 1)
+  Study 2 token frequency   Study 2's log_mean_token_freq (word form, a + b, unseen -> 1)
 
 Each measure is a mean over items, so it is computed from item sums, which
 lets an FCE script pool its two answers.
@@ -26,7 +26,7 @@ FREQ = DATA_DIR / "dolma" / "frequency_tables"
 CONTENT = {"NOUN", "VERB", "ADJ", "ADV"}
 RELS = ("amod", "dobj", "advmod")
 MEASURES = ["bigram_mi", "bigram_dp", "share_mi3", "amod_mi", "dobj_mi", "advmod_mi", "dep_mi",
-            "content_freq", "lemma_freq"]
+            "content_freq", "token_freq"]
 
 
 def doc_items(docs):
@@ -36,13 +36,13 @@ def doc_items(docs):
         text_id = str(doc.user_data["meta"]["text_id"])
         prev = None
         for t in doc:
-            tokens.append((text_id, t.lower_, t.lemma_.lower(), t.pos_, t.is_alpha))
+            tokens.append((text_id, t.lower_, t.pos_, t.is_alpha))
             if t.is_alpha and prev is not None and prev.is_alpha and prev.i == t.i - 1:
                 bigrams.append((text_id, prev.lower_, t.lower_))
             prev = t
             if t.dep_ in RELS:
                 deps.append((text_id, t.dep_, t.head.lemma_.lower(), t.lemma_.lower()))
-    return (pd.DataFrame(tokens, columns=["text_id", "lower", "lemma", "pos", "is_alpha"]),
+    return (pd.DataFrame(tokens, columns=["text_id", "lower", "pos", "is_alpha"]),
             pd.DataFrame(bigrams, columns=["text_id", "w1", "w2"]),
             pd.DataFrame(deps, columns=["text_id", "rel", "h", "d"]))
 
@@ -98,10 +98,9 @@ def item_sums(tokens, bigrams, deps, ref: Reference) -> pd.DataFrame:
     alpha = tokens[tokens.is_alpha]
     # word frequencies
     count_a = alpha.lower.map(ref.unigrams["a"]).fillna(0).to_numpy(float)
-    count_lemma = (alpha.lemma.map(ref.unigrams["a"]).fillna(0)
-                   + alpha.lemma.map(ref.unigrams["b"]).fillna(0)).to_numpy(float)
-    by_text = pd.Series(np.log10(np.clip(count_lemma, 1, None) / n_ab)).groupby(alpha.text_id.to_numpy())
-    sums["lemma_freq_s"], sums["lemma_freq_n"] = by_text.sum(), by_text.size()
+    count_ab = count_a + alpha.lower.map(ref.unigrams["b"]).fillna(0).to_numpy(float)
+    by_text = pd.Series(np.log10(np.clip(count_ab, 1, None) / n_ab)).groupby(alpha.text_id.to_numpy())
+    sums["token_freq_s"], sums["token_freq_n"] = by_text.sum(), by_text.size()
     content = alpha.pos.isin(CONTENT).to_numpy() & (count_a > 0)
     by_text = pd.Series(np.log10(count_a[content] / n_a)).groupby(alpha.text_id.to_numpy()[content])
     sums["content_freq_s"], sums["content_freq_n"] = by_text.sum(), by_text.size()
