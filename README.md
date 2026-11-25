@@ -17,14 +17,14 @@ Linguistic features are computed from spaCy parses and a Dolma reference corpus:
 |---------|-------|--------|
 | MTLD | Lexical | lexicalrichness |
 | Lexical density | Lexical | spaCy POS |
-| Log token frequency | Lexical | Dolma reference |
+| Log token frequency (word form) | Lexical | Dolma reference |
 | Mean word length | Lexical | spaCy |
 | Mean length of clause (MLC) | Syntactic | spaCy |
 | Complex nominals per clause (CN/C) | Syntactic | spaCy |
 | Coordinate phrases per clause (CP/C) | Syntactic | spaCy |
-| amod MI | Phraseological | Dolma reference |
-| dobj MI | Phraseological | Dolma reference |
-| advmod MI | Phraseological | Dolma reference |
+| amod MI (adjectival modifier) | Phraseological | Dolma reference |
+| dobj MI (direct object) | Phraseological | Dolma reference |
+| advmod MI (adverbial modifier, any head) | Phraseological | Dolma reference |
 | Content word overlap | Cohesion | spaCy |
 | Connective density | Cohesion | spaCy + word list |
 | Mean surprisal (`mean_loss`) | Predictability | Study 1 benchmark (OLMo-2 1B) |

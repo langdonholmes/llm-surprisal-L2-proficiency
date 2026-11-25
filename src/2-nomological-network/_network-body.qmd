@@ -335,7 +335,7 @@ short_labels <- c(
   coord_phrases_per_clause = "CP/C",
   amod_mi = "AmodMI",
   dobj_mi = "DobjMI",
-  advmod_mi = "AdvMI",
+  advmod_mi = "AdvmodMI",
   content_word_overlap = "CWO",
   connective_density = "ConnDen",
   sentence_similarity = "SentSim",
@@ -1479,8 +1479,9 @@ of those six differences survive BH correction. `mean_loss` (%s) is flat, with
 %d of three significant.
 
 Holding `var_loss` out does not hand the gradation to `mean_loss`. In
-`sensitivity/network-no-varloss.qmd` its three differences are −0.03, −0.08 and
-−0.05, so the sign reverses to Low < High and nothing survives BH correction.
+`sensitivity/network-no-varloss.qmd` its three differences are −0.035, −0.089 and
+−0.055, so the sign reverses to Low < High, and only the Low−High difference
+survives BH correction (p = .044).
 
 The two predictability nodes are redundant in level (wTO = .52, Spearman .81)
 but they are not interchangeable across proficiency. Whatever weakens the
@@ -1626,9 +1627,9 @@ if (length(pred_vars) > 1 && is.null(extra_nodes)) {
   cat(
 "**That rank is inflated by redundancy.** `mean_loss` and `var_loss` overlap at
 wTO = .52, so each raises the other's strength. Holding `var_loss` out moves
-`mean_loss` from rank 1 of 15 to rank 2 of 14, into a near-tie with lexical
-density and token frequency, and holding `mean_loss` out leaves `var_loss` at
-rank 11 of 14 (`sensitivity/network-no-varloss.qmd`,
+`mean_loss` from rank 1 of 15 to rank 3 of 14, just behind lexical density and
+token frequency, and holding `mean_loss` out leaves `var_loss` at
+rank 10 of 14 (`sensitivity/network-no-varloss.qmd`,
 `sensitivity/network-no-meanloss.qmd`). The community membership and the
 dominant loading survive both tests; the top strength rank does not. Network
 loadings are the confound-adjusted importance metric here, and they are what the

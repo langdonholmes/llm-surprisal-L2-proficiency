@@ -24,11 +24,11 @@ def lexical_density(doc) -> float:
 
 
 def log_mean_token_freq(doc, token_freq: dict, total_tokens: int) -> float:
-    """Mean log10 relative frequency per alpha token."""
+    """Mean log10 relative frequency per alpha token (lowercased word form)."""
     log_freqs = []
     for token in doc:
         if token.is_alpha:
-            freq = token_freq.get(token.lemma_.lower(), 1)
+            freq = token_freq.get(token.lower_, 1)
             log_freqs.append(math.log10(freq / total_tokens))
     return np.mean(log_freqs) if log_freqs else np.nan
 

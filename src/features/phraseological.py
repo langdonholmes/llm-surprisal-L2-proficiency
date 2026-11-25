@@ -10,6 +10,10 @@ class MiCalculator:
 
     MI measures how predictable a dependent word is given its head word.
     MI = log2(P(head,dep) / (P(head) * P(dep)))
+
+    Relations are spaCy dependency labels, with no filter on the head's POS:
+    amod (adjectival modifier), dobj (direct object), advmod (adverbial
+    modifier, whose head may be a verb, adjective, adverb or noun).
     """
 
     DEFAULT_RELATIONS = ("amod", "dobj", "advmod")
