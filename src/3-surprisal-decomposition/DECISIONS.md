@@ -1899,3 +1899,42 @@ the approved network (45 of 105 edges) and the corrector arm (66 of 171). With t
 ratio at .01, the selection sits at or one step above the new floor and the graphs
 are much denser (88 of 105; 147 of 171). No analysis changes here, and Langdon
 decides whether the approved network needs anything.
+
+## 2026-11-25 · D57. Sensitivity and interpretability of the δ decomposition (appendix, dev + W&I)
+
+Requested by Langdon to support one sentence in the write-up ruling out other
+decompositions. No pass rule was set in advance. Langdon judges the size of any
+improvement (a complex method would need a large one, on the order of ΔR² ≈ .10).
+
+**Sensitivity (`appendix/A7_sensitivity.py`, ELLIPSE dev only).** Each variant
+changes one setting of the A3 reference (NMF, k = 50, Frobenius, no penalty, τ at
+the 90th percentile, e_pred over the top 50): δ minus its written word's mean δ
+(obs_id, which removes e_obs exactly), PCA, k-means, k = 20 and 100, KL loss, L1
+penalty (α = 1e-5, the largest pilot value before components emptied), τ at the
+80th and 95th percentiles (same reference tokens as A0), and e_pred over the top
+1 or 10 predictions. When k or τ changes, M_obs is refitted on the same tokens at
+the same k. Profiles go through A5's dev-CV unchanged. Checks: the τ-90 token
+set equals A0's dev selection row for row, recomputed δ matches A1 to 1e-7, and
+the ladder reproduces A5's dev numbers exactly (M .037, M_obs .053, PCA .042).
+ICA was dropped. At the same k it is a linear transform of the PCA profile.
+
+Result: no variant beats the written-word profile on the same tokens by more than
+.002, and every interval for that difference includes zero or lies below it.
+Added to the written-word profile, the largest increment is .020 (τ80). The
+L1 fit never met sklearn's CD tolerance, but its error and sparsity were
+identical at 1,000 and 5,000 iterations.
+
+**Interpretability (`appendix/A8_interpretability.py`, W&I).** W&I was run
+through A0_extract (surprisal identical to `data/study3/wi/aligned.parquet` for
+all 705,442 tokens). Every A3/A7 decomposition is applied unchanged to W&I's
+high-surprisal tokens. Per variant: error share, error-type purity and single-word
+share of each component's 200 top tokens, and the AMI between an error token's
+top component and its ERRANT group, against the AMI of written-word identity.
+Result: in every matched pair the written-word NMF has the higher AMI (reference
+.071 vs .109). The best δ variants (L1 .107, KL .099) reach about what the
+written-word NMF reaches, about .01 above word identity alone (.096). The
+error-heavy components are non-words, punctuation spacing and light verbs for
+the copula, in both decompositions. Centering removes single-word components (0
+of 50) and gives a few components defined by the expected word (comma, capital
+at sentence start, *to*, prepositions) that are error-heavy and type-pure, but
+its AMI (.084) is still below word identity.

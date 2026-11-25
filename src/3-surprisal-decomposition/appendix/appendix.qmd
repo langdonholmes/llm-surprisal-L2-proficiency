@@ -358,6 +358,99 @@ Under the frozen rules:
 Prediction does not choose between δ and the observed word alone, and the δ
 profile is mostly a vocabulary profile.
 
+## Sensitivity of the decomposition
+
+Each variant changes one setting of the decomposition above (NMF, k = 50,
+Frobenius loss, no penalty, τ at the 90th percentile, e_pred averaged over the
+top 50 predictions), and its essay profile goes through the same
+prompt-grouped cross-validation on dev (`A7_sensitivity.py`; no test essay is
+read). When a variant changes the tokens or the number of components, the
+written-word decomposition is refitted on the same tokens at the same k.
+Centering subtracts each written word's mean δ, which removes e_obs exactly
+and leaves e_pred minus its mean for that word. The L1 penalty (α = 10⁻⁵) is the
+largest value on a pilot grid that left every component in use. The penalized
+fit never met sklearn's stopping tolerance, but its reconstruction error and
+sparsity were identical after 1,000 and 5,000 iterations. A component counts as a
+single word when at least half of its 200 highest-loading tokens share one
+lemma, as in §5.
+
+```{r}
+#| label: sensitivity
+sens <- read_csv(file.path(R3, "sensitivity_devcv.csv"))
+ci <- \(est, lo, hi) sprintf("%.3f [%.3f, %.3f]", est, lo, hi)
+sens |>
+  filter(!str_ends(variant, "obs")) |>
+  left_join(select(sens, compared_with = variant, obs_delta_r2 = delta_r2_vs_B0), by = "compared_with") |>
+  transmute(Variant = label,
+            `ΔR², δ variant` = delta_r2_vs_B0,
+            `ΔR², written word` = obs_delta_r2,
+            `δ − written word` = ci(vs_obs, vs_obs_lo, vs_obs_hi),
+            `Added to written word` = ci(added_to_obs, added_to_obs_lo, added_to_obs_hi),
+            `Single-word components` = if_else(is.na(single_word), "–",
+                                               sprintf("%d / %d", single_word, n_components))) |>
+  kable(digits = 3, caption = "Sensitivity of the δ profile (ELLIPSE dev, 10-fold prompt-grouped CV, 2,000 bootstrap resamples). ΔR² is over mean surprisal + log length. The two contrast columns compare the δ variant with the written-word decomposition on the same tokens and k, alone and added to it")
+```
+
+No variant's profile improves on the written-word profile fitted to the same
+tokens by more than `r sprintf("%.3f", max(sens$vs_obs, na.rm = TRUE))`, and
+every interval for that difference includes zero or lies below it. Added to the
+written-word profile, the largest increment is
+`r sprintf("%+.3f", max(sens$added_to_obs, na.rm = TRUE))`.
+Centering does what it was meant to do. Only
+`r sens$single_word[sens$variant == "center"]` of its 50 components is a single
+word, against `r sens$single_word[sens$variant == "ref"]` in the reference
+decomposition, but its profile predicts no better.
+
+## Do the components describe errors?
+
+Prediction aside, a component is meaningful for this study if it picks out one
+kind of error. W&I+LOCNESS has gold corrections, so every decomposition above
+(fitted on ELLIPSE dev, not refitted) was applied to the W&I tokens above its
+own τ (`A8_interpretability.py`). An error token is one the gold correction
+changes or inserts a word before. Its error group is the ERRANT-based group of
+that edit. For each variant the table gives the adjusted mutual information
+(AMI) between an error token's highest-loading component and its error group,
+next to the same AMI for the written-word decomposition fitted to the same
+tokens at the same k and for the written word itself. It also gives, over the
+200 highest-loading tokens of each component, the median share of errors and
+the median share of those errors in a single group. PCA's two poles of each
+axis count as separate components. Centering uses each word's mean over the
+W&I tokens, since many W&I words do not occur in ELLIPSE dev.
+
+```{r}
+#| label: interpretability
+interp <- read_csv(file.path(R3, "interpretability_summary.csv"))
+matched <- c(k20 = "k20_obs", k100 = "k100_obs", tau80 = "tau80_obs", tau95 = "tau95_obs")
+interp_table <- interp |>
+  filter(!str_ends(variant, "obs")) |>
+  mutate(compared_with = coalesce(matched[variant], "ref_obs")) |>
+  left_join(select(interp, compared_with = variant, ami_obs = ami_component_group), by = "compared_with") |>
+  left_join(select(sens, variant, label), by = "variant")
+interp_table |>
+  transmute(Variant = label,
+            `AMI, δ variant` = ami_component_group,
+            `AMI, written-word NMF` = ami_obs,
+            `AMI, written word` = ami_word_group,
+            `Error share (base)` = sprintf("%.2f (%.2f)", median_error_share, base_error_share),
+            `Type purity` = median_type_purity,
+            `Single-word components` = sprintf("%d / %d", n_single_word_wi, n_components)) |>
+  kable(digits = 3, caption = "Agreement of each decomposition's components with gold error groups on W&I+LOCNESS. Error share and type purity are medians over components of their 200 highest-loading tokens")
+```
+
+In every row the written-word decomposition fitted to the same tokens agrees
+with the gold error groups at least as well as δ does. The reference δ
+components reach an AMI of
+`r sprintf("%.3f", interp$ami_component_group[interp$variant == "ref"])`,
+against `r sprintf("%.3f", interp$ami_component_group[interp$variant == "ref_obs"])`
+for the written-word components. The components with the most errors are
+the same in both decompositions. They are non-words, punctuation spacing, and
+light verbs where the model expected the copula, all recoverable from the
+written word. Centering removes the single-word components entirely, and a few
+of its components are defined by the word the model expected (a comma, a
+capital at the start of a sentence, *to*, a preposition) and are mostly errors
+of one group. Taken together, its components still carry less information
+about error groups than the written word does.
+
 # 7. Replication on TOEFL 11
 
 ```{r}
